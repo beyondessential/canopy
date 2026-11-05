@@ -5689,6 +5689,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vulnerabilities/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a triage decision.
+         * @description Becomes the item's current decision, covering its whole source. The one it
+         *     replaces stays in the history.
+         */
+        post: operations["vulnerabilities_decide"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vulnerabilities/get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * One vulnerability in full.
+         * @description The advisory, what it exposes, and the item's history of decisions,
+         *     reopenings and the model's suggestion.
+         */
+        post: operations["vulnerabilities_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vulnerabilities/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List vulnerabilities.
+         * @description One entry per advisory within a source, sorted by severity and then by how
+         *     much each exposes. Items nothing counts for any more are left out unless
+         *     asked for.
+         */
+        post: operations["vulnerabilities_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vulnerabilities/machine_packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * When a machine last reported its packages, and how many it reported.
+         * @description `null` for a machine that has never reported. A report whose ecosystem is
+         *     `null` could not be placed, so nothing on that machine is being checked.
+         */
+        post: operations["vulnerabilities_machine_packages"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -10245,6 +10330,18 @@ export interface components {
              */
             undeclared: components["schemas"]["UndeclaredView"][];
         };
+        /** @description The last report a machine made. */
+        MachinePackageReport: {
+            distribution: string;
+            ecosystem?: string | null;
+            /** Format: uuid */
+            machine_id: string;
+            /** Format: int32 */
+            package_count: number;
+            release: string;
+            /** Format: date-time */
+            reported_at: string;
+        };
         /** @description Request body identifying a machine to look up silences for. */
         MachineScopeArgs: {
             /**
@@ -10585,6 +10682,11 @@ export interface components {
              */
             expires_at: string;
             /**
+             * @description What the token may do beyond reading, chosen at minting and never
+             *     changed: `triage` records vulnerability triage decisions.
+             */
+            grants: string[];
+            /**
              * Format: uuid
              * @description Unique identifier of the token.
              */
@@ -10683,6 +10785,12 @@ export interface components {
         };
         /** @description Request body for minting a new MCP access token. */
         MintArgs: {
+            /**
+             * @description What the token may do beyond reading: `triage` to record vulnerability
+             *     triage decisions. A token minted with none only reads, and cannot gain a
+             *     grant afterwards.
+             */
+            grants?: string[];
             /**
              * @description Operator-chosen label, e.g. which agent will hold this token. Cannot
              *     be empty or only whitespace.
@@ -10826,6 +10934,32 @@ export interface components {
          * @enum {string}
          */
         Origin: "added" | "from_host_key";
+        OsvAffected: {
+            database_specific?: Record<string, never>;
+            ecosystem_specific?: Record<string, never>;
+            package?: null | components["schemas"]["OsvPackage"];
+            ranges?: components["schemas"]["OsvRange"][];
+            versions?: string[];
+        };
+        /** @description One event of a range. OSV holds exactly one of the four per event. */
+        OsvEvent: {
+            fixed?: string | null;
+            introduced?: string | null;
+            last_affected?: string | null;
+            limit?: string | null;
+        };
+        OsvPackage: {
+            ecosystem: string;
+            name: string;
+        };
+        OsvRange: {
+            events?: components["schemas"]["OsvEvent"][];
+            type: string;
+        };
+        OsvReference: {
+            type: string;
+            url: string;
+        };
         /** @description A single page of a paginated list response. */
         Page_BestoolSnippetInfo: {
             /** @description The items in this page. */
@@ -11595,7 +11729,7 @@ export interface components {
          * @description The kinds of record an action can act on.
          * @enum {string}
          */
-        RecordKind: "machine" | "group" | "application" | "device" | "maintenance_window" | "upgrade_plan" | "restore_replica" | "reporting_schema" | "check" | "cluster" | "credential" | "variable" | "lease" | "version" | "artifact" | "name" | "certificate" | "relying_party";
+        RecordKind: "machine" | "group" | "application" | "device" | "maintenance_window" | "upgrade_plan" | "restore_replica" | "reporting_schema" | "check" | "cluster" | "credential" | "variable" | "lease" | "version" | "artifact" | "name" | "certificate" | "relying_party" | "advisory";
         /** @description A freshly issued recovery-verification challenge. */
         RecoveryChallengeResponse: {
             /**
@@ -14559,6 +14693,231 @@ export interface components {
          * @enum {string}
          */
         VersionTracking: "tracked" | "reported" | "absent";
+        /** @description A cached OSV advisory. */
+        VulnerabilityAdvisory: {
+            affected: components["schemas"]["OsvAffected"][];
+            aliases: string[];
+            details: string;
+            id: string;
+            /** Format: date-time */
+            modified_at: string;
+            /** Format: date-time */
+            published_at?: string | null;
+            references: components["schemas"]["OsvReference"][];
+            severity: components["schemas"]["VulnerabilitySeverity"];
+            summary: string;
+        };
+        /** @description A decision to record. */
+        VulnerabilityDecideArgs: {
+            /** @description The advisory's OSV identifier. */
+            id: string;
+            /** @description A link to the issue tracking a fix, for will fix. */
+            issue_url?: string | null;
+            outcome: components["schemas"]["VulnerabilityOutcome"];
+            /** @description Why. Required for not affected and accepted risk. */
+            reason?: string | null;
+            /**
+             * @description When to look at an accepted risk again, `YYYY-MM-DD`. Required for
+             *     accepted risk, and in the future.
+             */
+            review_by?: string | null;
+            source: components["schemas"]["VulnerabilitySource"];
+        };
+        /** @description A triage decision. The newest one for an item is its current decision. */
+        VulnerabilityDecision: {
+            actor: components["schemas"]["Actor"];
+            /** Format: date-time */
+            created_at: string;
+            ground?: null | components["schemas"]["VulnerabilityGround"];
+            /** Format: uuid */
+            id: string;
+            issue_url?: string | null;
+            outcome: components["schemas"]["VulnerabilityOutcome"];
+            reason?: string | null;
+            /** @description For an accepted risk, the date it is looked at again, `YYYY-MM-DD`. */
+            review_by?: string | null;
+            source: components["schemas"]["VulnerabilitySource"];
+            via: components["schemas"]["VulnerabilityVia"];
+            vulnerability_id: string;
+        };
+        /** @description An item in full. */
+        VulnerabilityDetail: {
+            advisory: components["schemas"]["VulnerabilityAdvisory"];
+            /** @description The versions that fix it, for each affected package it matches. */
+            fixed_in: {
+                [key: string]: string[];
+            };
+            /** @description Decisions, reopenings and the suggestion, newest first. */
+            history: components["schemas"]["VulnerabilityHistoryEntry"][];
+            item: components["schemas"]["VulnerabilityItem"];
+            /** @description For a Linux item, the exposed machines. */
+            machines: components["schemas"]["VulnerabilityExposedMachine"][];
+            /** @description Whether a person has ever decided the item. */
+            person_has_decided: boolean;
+            /** @description For a Tamanu item, the exposed versions. */
+            versions: components["schemas"]["VulnerabilityExposedVersion"][];
+        };
+        /** @description A machine exposed to an advisory. */
+        VulnerabilityExposedMachine: {
+            /** Format: uuid */
+            group_id?: string | null;
+            group_name?: string | null;
+            /** Format: uuid */
+            machine_id: string;
+            machine_name: string;
+            package: string;
+            package_version: string;
+        };
+        /** @description A Tamanu version exposed to an advisory. */
+        VulnerabilityExposedVersion: {
+            /**
+             * Format: int64
+             * @description How many live production applications run this version.
+             */
+            applications: number;
+            /** @description Whether any of them depends on it directly. */
+            direct: boolean;
+            /** @description Whether this is the newest published version. */
+            newest_published: boolean;
+            /** @description The affected package, as this version carries it. */
+            package: string;
+            package_version: string;
+            /** @description How each workspace reaches it. */
+            paths: {
+                [key: string]: string[];
+            };
+            /** @description `major.minor.patch`. */
+            version: string;
+            /** Format: uuid */
+            version_id: string;
+            /** @description The Tamanu workspaces that reach the package. */
+            workspaces: string[];
+        };
+        /**
+         * @description The grounds on which the model may find an item not affected on its own.
+         *     Canopy holds these fixed.
+         * @enum {string}
+         */
+        VulnerabilityGround: "frontend_only" | "build_time_only" | "unaffected_platform";
+        /** @description One entry of an item's history. */
+        VulnerabilityHistoryEntry: {
+            /** Format: date-time */
+            at: string;
+            decision: components["schemas"]["VulnerabilityDecision"];
+            /** @enum {string} */
+            kind: "decision";
+        } | {
+            /** Format: date-time */
+            at: string;
+            /** @enum {string} */
+            kind: "reopening";
+            reopened: components["schemas"]["VulnerabilityReopened"];
+        } | {
+            /** Format: date-time */
+            at: string;
+            /** @enum {string} */
+            kind: "suggestion";
+            suggestion: components["schemas"]["VulnerabilitySuggestion"];
+        };
+        /** @description An item as the list and the query interface present it. */
+        VulnerabilityItem: {
+            aliases: string[];
+            /** @description Whether anything counts for it. */
+            counts: boolean;
+            decision?: null | components["schemas"]["VulnerabilityDecision"];
+            /**
+             * Format: int64
+             * @description How many applications (Tamanu) or machines (Linux) it exposes.
+             */
+            exposed: number;
+            /** Format: date-time */
+            first_seen_at: string;
+            id: string;
+            /** @description The affected packages that match something the fleet counts. */
+            packages: string[];
+            reopened?: null | components["schemas"]["VulnerabilityReopened"];
+            severity: components["schemas"]["VulnerabilitySeverity"];
+            source: components["schemas"]["VulnerabilitySource"];
+            status: components["schemas"]["VulnerabilityStatus"];
+            suggestion?: null | components["schemas"]["VulnerabilitySuggestion"];
+            summary: string;
+        };
+        /** @description Which item. */
+        VulnerabilityItemArgs: {
+            /** @description The advisory's OSV identifier. */
+            id: string;
+            source: components["schemas"]["VulnerabilitySource"];
+        };
+        /** @description Which items to list. */
+        VulnerabilityListArgs: {
+            /** @description Include items nothing counts for any more. */
+            include_uncounted?: boolean;
+            min_severity?: null | components["schemas"]["VulnerabilitySeverity"];
+            source?: null | components["schemas"]["VulnerabilitySource"];
+            status?: null | components["schemas"]["VulnerabilityStatus"];
+        };
+        /** @description The items matching a filter, in order. */
+        VulnerabilityListing: {
+            items: components["schemas"]["VulnerabilityItem"][];
+            /** @description Whether more matched than are listed. */
+            truncated: boolean;
+        };
+        /** @description Which machine. */
+        VulnerabilityMachineArgs: {
+            /** Format: uuid */
+            machine_id: string;
+        };
+        /**
+         * @description What a decision says about an item.
+         * @enum {string}
+         */
+        VulnerabilityOutcome: "not_affected" | "accepted_risk" | "will_fix";
+        /** @description A decided item that opened again, with the decision it opened from. */
+        VulnerabilityReopened: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            decision_id: string;
+            /** Format: uuid */
+            id: string;
+            reason: Record<string, never>;
+            source: components["schemas"]["VulnerabilitySource"];
+            vulnerability_id: string;
+            /** @description Why, in words. */
+            why: string;
+        };
+        /**
+         * @description The qualitative rating an advisory carries, lowest first.
+         * @enum {string}
+         */
+        VulnerabilitySeverity: "unrated" | "low" | "medium" | "high" | "critical";
+        /**
+         * @description Where an item's exposure comes from.
+         * @enum {string}
+         */
+        VulnerabilitySource: "tamanu" | "linux";
+        /**
+         * @description An item's triage status.
+         * @enum {string}
+         */
+        VulnerabilityStatus: "open" | "not_affected" | "accepted_risk" | "will_fix";
+        /**
+         * @description The model's latest suggestion for an item. Not a decision: the item stays
+         *     open.
+         */
+        VulnerabilitySuggestion: {
+            /** Format: date-time */
+            created_at: string;
+            ground?: null | components["schemas"]["VulnerabilityGround"];
+            model: string;
+            outcome: components["schemas"]["VulnerabilityOutcome"];
+            reason: string;
+        };
+        /**
+         * @description How a decision was made.
+         * @enum {string}
+         */
+        VulnerabilityVia: "ui" | "model" | "mcp";
         /** @description Request body for withdrawing a plan. */
         WithdrawArgs: {
             /**
@@ -22583,6 +22942,162 @@ export interface operations {
                 };
             };
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    vulnerabilities_decide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VulnerabilityDecideArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VulnerabilityDecision"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    vulnerabilities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VulnerabilityItemArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VulnerabilityDetail"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    vulnerabilities_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VulnerabilityListArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VulnerabilityListing"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    vulnerabilities_machine_packages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VulnerabilityMachineArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": null | components["schemas"]["MachinePackageReport"];
+                };
+            };
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

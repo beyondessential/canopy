@@ -10,7 +10,7 @@ use uuid::Uuid;
 #[tokio::test(flavor = "multi_thread")]
 async fn mint_find_touch_revoke_lifecycle() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let (token, plaintext) = McpToken::mint(&mut conn, "claude", "admin@example.com")
+		let (token, plaintext) = McpToken::mint(&mut conn, "claude", "admin@example.com", &[])
 			.await
 			.expect("mint");
 		assert!(plaintext.starts_with(TOKEN_PREFIX));
@@ -63,7 +63,7 @@ async fn mint_find_touch_revoke_lifecycle() {
 #[tokio::test(flavor = "multi_thread")]
 async fn expired_tokens_do_not_authenticate() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let (token, plaintext) = McpToken::mint(&mut conn, "old", "admin@example.com")
+		let (token, plaintext) = McpToken::mint(&mut conn, "old", "admin@example.com", &[])
 			.await
 			.expect("mint");
 		conn.batch_execute(&format!(
@@ -87,16 +87,16 @@ async fn expired_tokens_do_not_authenticate() {
 #[tokio::test(flavor = "multi_thread")]
 async fn expiring_soon_catches_the_alert_window() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let (fresh, _) = McpToken::mint(&mut conn, "fresh", "a@example.com")
+		let (fresh, _) = McpToken::mint(&mut conn, "fresh", "a@example.com", &[])
 			.await
 			.expect("mint");
-		let (closing, _) = McpToken::mint(&mut conn, "closing", "a@example.com")
+		let (closing, _) = McpToken::mint(&mut conn, "closing", "a@example.com", &[])
 			.await
 			.expect("mint");
-		let (lapsed, _) = McpToken::mint(&mut conn, "lapsed", "a@example.com")
+		let (lapsed, _) = McpToken::mint(&mut conn, "lapsed", "a@example.com", &[])
 			.await
 			.expect("mint");
-		let (revoked, _) = McpToken::mint(&mut conn, "revoked", "a@example.com")
+		let (revoked, _) = McpToken::mint(&mut conn, "revoked", "a@example.com", &[])
 			.await
 			.expect("mint");
 
@@ -149,7 +149,7 @@ async fn expiry_sweep_files_one_self_alert_and_recovers() {
 		);
 
 		// A token inside the 15-day lead raises the single self-alert.
-		let (token, _) = McpToken::mint(&mut conn, "claude", "admin@example.com")
+		let (token, _) = McpToken::mint(&mut conn, "claude", "admin@example.com", &[])
 			.await
 			.expect("mint");
 		conn.batch_execute(&format!(

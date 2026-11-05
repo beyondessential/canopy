@@ -45,6 +45,9 @@ pub struct McpTokenView {
 	/// When the token was last used to authenticate, or `null` if it has
 	/// never been used. May lag the true last use by up to a minute.
 	pub last_used_at: Option<Timestamp>,
+	/// What the token may do beyond reading, chosen at minting and never
+	/// changed: `triage` records vulnerability triage decisions.
+	pub grants: Vec<String>,
 }
 
 impl From<McpToken> for McpTokenView {
@@ -57,6 +60,7 @@ impl From<McpToken> for McpTokenView {
 			expires_at: t.expires_at,
 			revoked_at: t.revoked_at,
 			last_used_at: t.last_used_at,
+			grants: t.grants,
 		}
 	}
 }
@@ -93,6 +97,11 @@ pub struct MintArgs {
 	/// Operator-chosen label, e.g. which agent will hold this token. Cannot
 	/// be empty or only whitespace.
 	pub name: String,
+	/// What the token may do beyond reading: `triage` to record vulnerability
+	/// triage decisions. A token minted with none only reads, and cannot gain a
+	/// grant afterwards.
+	#[serde(default)]
+	pub grants: Vec<String>,
 }
 
 /// The result of minting a new MCP access token: its metadata plus the
@@ -139,8 +148,20 @@ pub async fn mint(
 			"token name cannot be empty".into(),
 		));
 	}
+	if let Some(unknown) = args
+		.grants
+		.iter()
+		.find(|grant| !database::mcp_tokens::GRANTS.contains(&grant.as_str()))
+	{
+		return Err(commons_errors::AppError::BadRequest(format!(
+			"unknown grant {unknown:?}"
+		)));
+	}
+	let mut grants = args.grants;
+	grants.sort();
+	grants.dedup();
 	let mut conn = state.db.get().await?;
-	let (token, secret) = McpToken::mint(&mut conn, name, &admin.login).await?;
+	let (token, secret) = McpToken::mint(&mut conn, name, &admin.login, &grants).await?;
 	Ok(Json(MintedToken {
 		token: token.into(),
 		secret,

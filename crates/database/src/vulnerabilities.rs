@@ -29,6 +29,7 @@ use crate::{
 /// Where an item's exposure comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = VulnerabilitySource)]
 pub enum Source {
 	/// The dependencies of Tamanu versions.
 	Tamanu,
@@ -65,6 +66,7 @@ impl Source {
 /// What a decision says about an item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = VulnerabilityOutcome)]
 pub enum Outcome {
 	/// The fleet cannot be hit by the flaw.
 	NotAffected,
@@ -96,6 +98,7 @@ impl Outcome {
 /// An item's triage status.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = VulnerabilityStatus)]
 pub enum Status {
 	Open,
 	NotAffected,
@@ -134,6 +137,7 @@ impl From<Outcome> for Status {
 /// How a decision was made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = VulnerabilityVia)]
 pub enum Via {
 	/// An operator, in the operator interface.
 	Ui,
@@ -166,6 +170,7 @@ impl Via {
 /// Canopy holds these fixed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = VulnerabilityGround)]
 pub enum Ground {
 	/// The package is reached only from Tamanu's web frontend, and the flaw
 	/// needs server-side execution.
@@ -216,6 +221,7 @@ fn strings(array: Vec<Option<String>>) -> Vec<String> {
 
 /// A cached OSV advisory.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = VulnerabilityAdvisory)]
 pub struct Advisory {
 	pub id: String,
 	pub aliases: Vec<String>,
@@ -581,6 +587,7 @@ pub async fn prune_matches(conn: &mut AsyncPgConnection, keep: &[Counted]) -> Re
 
 /// A Tamanu version exposed to an advisory.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = VulnerabilityExposedVersion)]
 pub struct ExposedVersion {
 	pub version_id: Uuid,
 	/// `major.minor.patch`.
@@ -602,6 +609,7 @@ pub struct ExposedVersion {
 
 /// A machine exposed to an advisory.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = VulnerabilityExposedMachine)]
 pub struct ExposedMachine {
 	pub machine_id: Uuid,
 	pub machine_name: String,
@@ -784,6 +792,7 @@ pub async fn refresh_counts(conn: &mut AsyncPgConnection, exposure: &Exposure) -
 
 /// A triage decision. The newest one for an item is its current decision.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = VulnerabilityDecision)]
 pub struct Decision {
 	pub id: Uuid,
 	pub vulnerability_id: String,
@@ -1010,6 +1019,7 @@ struct IdRow {
 
 /// A decided item that opened again, with the decision it opened from.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = VulnerabilityReopened)]
 pub struct Reopened {
 	pub id: Uuid,
 	pub vulnerability_id: String,
@@ -1176,6 +1186,7 @@ impl Reopened {
 /// The model's latest suggestion for an item. Not a decision: the item stays
 /// open.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = VulnerabilitySuggestion)]
 pub struct Suggestion {
 	pub outcome: Outcome,
 	pub ground: Option<Ground>,
@@ -1272,6 +1283,7 @@ impl Suggestion {
 
 /// An item as the list and the query interface present it.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = VulnerabilityItem)]
 pub struct ItemSummary {
 	pub id: String,
 	pub source: Source,
@@ -1306,6 +1318,7 @@ pub struct ListFilter {
 
 /// The items matching a filter, in order.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = VulnerabilityListing)]
 pub struct Listing {
 	pub items: Vec<ItemSummary>,
 	/// Whether more matched than are listed.
@@ -1499,6 +1512,7 @@ impl ItemSummary {
 /// One entry of an item's history.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[schema(as = VulnerabilityHistoryEntry)]
 pub enum HistoryEntry {
 	Decision {
 		at: Timestamp,
@@ -1526,6 +1540,7 @@ impl HistoryEntry {
 
 /// An item in full.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = VulnerabilityDetail)]
 pub struct ItemDetail {
 	pub item: ItemSummary,
 	pub advisory: Advisory,

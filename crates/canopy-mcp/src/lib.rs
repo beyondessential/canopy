@@ -1,4 +1,4 @@
-//! Read-only MCP (Model Context Protocol) query interface over the fleet.
+//! MCP (Model Context Protocol) query interface over the fleet.
 //!
 //! Spec: `.workhorse/specs/private-server/mcp.md` (id `MCP`).
 //!
@@ -6,7 +6,8 @@
 //! tagged-device guard and an "any tailnet user" gate (private-server's
 //! `mcp::require_tailnet_user`), and at `/mcp` on the internet-facing
 //! surface behind the bearer-token gate (public-server's `mcp` module).
-//! Every tool only reads; nothing here mutates the fleet.
+//! Every tool reads, except the one that records a vulnerability triage
+//! decision; it is held to the caller's standing (see [`Caller`]).
 //!
 //! Tools call the existing `database` read functions directly and shape lean,
 //! agent-legible JSON. The one piece of logic that must NOT be reimplemented is
@@ -24,6 +25,7 @@
 mod applications;
 mod audit;
 mod backups;
+mod caller;
 mod fleet;
 mod groups;
 mod incidents;
@@ -32,6 +34,9 @@ mod restore;
 mod upgrade_plans;
 mod util;
 mod versions;
+mod vulnerabilities;
+
+pub use caller::Caller;
 
 use database::diesel_async::AsyncPgConnection;
 use rmcp::{
@@ -44,22 +49,25 @@ use rmcp::{
 	},
 };
 
-/// The tools that are audited, as against silent. None are: every tool reads,
-/// and a read is audited only where its spec names the action (see the AUD
-/// spec). A tool that changes something would be listed here and record through
-/// the audit log; the test below holds every other tool to being a read.
-pub const AUDITED_TOOLS: &[&str] = &[];
+/// The tools that are audited, as against silent. Every tool but one reads, and
+/// a read is audited only where its spec names the action (see the AUD spec).
+/// A tool that changes something is listed here and records through the audit
+/// log; the test below holds every other tool to being a read.
+pub const AUDITED_TOOLS: &[&str] = &["record_vulnerability_decision"];
 
 #[derive(Clone)]
 pub struct CanopyMcp {
 	db: database::Db,
+	/// The primary, for the one tool that writes. Reads may come from a replica.
+	db_write: database::Db,
 	tool_router: ToolRouter<CanopyMcp>,
 }
 
 impl CanopyMcp {
-	pub fn new(db: database::Db) -> Self {
+	pub fn new(db: database::Db, db_write: database::Db) -> Self {
 		Self {
 			db,
+			db_write,
 			tool_router: Self::applications_router()
 				+ Self::audit_router()
 				+ Self::machines_router()
@@ -69,7 +77,8 @@ impl CanopyMcp {
 				+ Self::backups_router()
 				+ Self::restore_router()
 				+ Self::incidents_router()
-				+ Self::upgrade_plans_router(),
+				+ Self::upgrade_plans_router()
+				+ Self::vulnerabilities_router(),
 		}
 	}
 
@@ -83,8 +92,9 @@ impl ServerHandler for CanopyMcp {
 	fn get_info(&self) -> ServerInfo {
 		let mut info = ServerInfo::default();
 		info.instructions = Some(
-			"Read-only access to the Canopy fleet: machines, applications, groups, health/status, \
-			 Tamanu versions, planned upgrades, backups, and incidents/issues. All data is live. \
+			"Access to the Canopy fleet: machines, applications, groups, health/status, \
+			 Tamanu versions, planned upgrades, backups, incidents/issues, and vulnerabilities. \
+			 All data is live; every tool reads except record_vulnerability_decision. \
 			 Use find_* to locate entities and get_* for detail; fleet_summary and \
 			 find_backup_problems for triage.\n\n\
 			 Machines and applications are different things and both are queryable. A machine is \
@@ -113,7 +123,14 @@ impl ServerHandler for CanopyMcp {
 			 `published` incidents (also given as `published_count`), not raw rows: an incident is \
 			 published only if it outlived the group's grace window (~3 min default) or escalated. \
 			 A count dominated by unpublished short-lived incidents usually means a twitchy \
-			 threshold rather than a real outage."
+			 threshold rather than a real outage.\n\n\
+			 Vulnerabilities: an item is an OSV advisory within a source, `tamanu` (the \
+			 dependencies of Tamanu versions) or `linux` (packages installed on machines). Only \
+			 production counts as exposure. find_vulnerabilities lists them, get_vulnerability \
+			 gives one in full, and record_vulnerability_decision, which only an administrator or \
+			 a token with the triage grant may call, records how it is to be treated. A \
+			 decision covers its whole source, so it is a statement about Tamanu or about the \
+			 fleet's Linux packages, not about one application or machine."
 				.into(),
 		);
 		info.capabilities = ServerCapabilities::builder().enable_tools().build();
@@ -128,7 +145,10 @@ impl ServerHandler for CanopyMcp {
 /// Build the tower service nested into an axum router (`/api/mcp` on the
 /// operator surface, `/mcp` on the internet-facing one). Auth is the mount's
 /// business, not this service's.
-pub fn service(db: database::Db) -> StreamableHttpService<CanopyMcp, LocalSessionManager> {
+pub fn service(
+	db: database::Db,
+	db_write: database::Db,
+) -> StreamableHttpService<CanopyMcp, LocalSessionManager> {
 	let mut config = StreamableHttpServerConfig::default();
 	// Stateless: each request is self-contained, with no server-side session.
 	// The default stateful mode keeps sessions in process memory and 404s
@@ -163,7 +183,7 @@ pub fn service(db: database::Db) -> StreamableHttpService<CanopyMcp, LocalSessio
 	}
 
 	StreamableHttpService::new(
-		move || Ok(CanopyMcp::new(db.clone())),
+		move || Ok(CanopyMcp::new(db.clone(), db_write.clone())),
 		LocalSessionManager::default().into(),
 		config,
 	)
@@ -175,9 +195,12 @@ mod tests {
 
 	#[tokio::test]
 	async fn every_tool_is_audited_or_a_silent_read() {
-		let tools = CanopyMcp::new(database::init_to("postgres://localhost/unused"))
-			.tool_router
-			.list_all();
+		let tools = CanopyMcp::new(
+			database::init_to("postgres://localhost/unused"),
+			database::init_to("postgres://localhost/unused"),
+		)
+		.tool_router
+		.list_all();
 		assert!(!tools.is_empty());
 		for tool in tools {
 			let silent_read = tool

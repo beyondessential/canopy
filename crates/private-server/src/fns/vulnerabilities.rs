@@ -37,7 +37,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 
 /// Which items to list.
 #[derive(Debug, Default, Deserialize, ToSchema)]
-pub struct ListArgs {
+pub struct VulnerabilityListArgs {
 	/// Only items of this source.
 	pub source: Option<Source>,
 	/// Only items with this status. Omitted, every status.
@@ -60,7 +60,7 @@ pub struct ListArgs {
 	operation_id = "vulnerabilities_list",
 	tag = "vulnerabilities",
 	security(("tailscale-user" = [])),
-	request_body = ListArgs,
+	request_body = VulnerabilityListArgs,
 	responses(
 		(status = 200, body = Listing),
 		(status = 401, body = ProblemDetailsSchema),
@@ -69,7 +69,7 @@ pub struct ListArgs {
 pub async fn list(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-	Json(args): Json<ListArgs>,
+	Json(args): Json<VulnerabilityListArgs>,
 ) -> Result<Json<Listing>> {
 	let mut conn = state.db.get().await?;
 	let listing = ItemSummary::list(
@@ -89,7 +89,7 @@ pub async fn list(
 
 /// Which item.
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct ItemArgs {
+pub struct VulnerabilityItemArgs {
 	/// The advisory's OSV identifier.
 	pub id: String,
 	pub source: Source,
@@ -105,7 +105,7 @@ pub struct ItemArgs {
 	operation_id = "vulnerabilities_get",
 	tag = "vulnerabilities",
 	security(("tailscale-user" = [])),
-	request_body = ItemArgs,
+	request_body = VulnerabilityItemArgs,
 	responses(
 		(status = 200, body = ItemDetail),
 		(status = 401, body = ProblemDetailsSchema),
@@ -115,7 +115,7 @@ pub struct ItemArgs {
 pub async fn get(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-	Json(args): Json<ItemArgs>,
+	Json(args): Json<VulnerabilityItemArgs>,
 ) -> Result<Json<ItemDetail>> {
 	let mut conn = state.db.get().await?;
 	Ok(Json(
@@ -125,7 +125,7 @@ pub async fn get(
 
 /// A decision to record.
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct DecideArgs {
+pub struct VulnerabilityDecideArgs {
 	/// The advisory's OSV identifier.
 	pub id: String,
 	pub source: Source,
@@ -149,7 +149,7 @@ pub struct DecideArgs {
 	operation_id = "vulnerabilities_decide",
 	tag = "vulnerabilities",
 	security(("tailscale-admin" = [])),
-	request_body = DecideArgs,
+	request_body = VulnerabilityDecideArgs,
 	responses(
 		(status = 200, body = Decision),
 		(status = 400, body = ProblemDetailsSchema),
@@ -161,7 +161,7 @@ pub struct DecideArgs {
 pub async fn decide(
 	audit: Audit,
 	TailscaleAdmin(admin): TailscaleAdmin,
-	Json(args): Json<DecideArgs>,
+	Json(args): Json<VulnerabilityDecideArgs>,
 ) -> Result<Json<Decision>> {
 	let review_by: Option<Date> = args
 		.review_by
@@ -210,7 +210,7 @@ pub async fn decide(
 
 /// Which machine.
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct MachineArgs {
+pub struct VulnerabilityMachineArgs {
 	pub machine_id: Uuid,
 }
 
@@ -224,7 +224,7 @@ pub struct MachineArgs {
 	operation_id = "vulnerabilities_machine_packages",
 	tag = "vulnerabilities",
 	security(("tailscale-user" = [])),
-	request_body = MachineArgs,
+	request_body = VulnerabilityMachineArgs,
 	responses(
 		(status = 200, body = Option<MachinePackageReport>),
 		(status = 401, body = ProblemDetailsSchema),
@@ -233,7 +233,7 @@ pub struct MachineArgs {
 pub async fn machine_packages(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-	Json(args): Json<MachineArgs>,
+	Json(args): Json<VulnerabilityMachineArgs>,
 ) -> Result<Json<Option<MachinePackageReport>>> {
 	let mut conn = state.db.get().await?;
 	Ok(Json(

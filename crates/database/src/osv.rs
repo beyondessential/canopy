@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 	utoipa::ToSchema,
 )]
 #[serde(rename_all = "snake_case")]
+#[schema(as = VulnerabilitySeverity)]
 pub enum Severity {
 	/// No rating from CVSS or from the advisory's database. Ranks below low.
 	#[default]
@@ -116,12 +117,14 @@ pub struct SeverityEntry {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = OsvReference)]
 pub struct Reference {
 	pub r#type: String,
 	pub url: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = OsvAffected)]
 pub struct Affected {
 	#[serde(default)]
 	pub package: Option<Package>,
@@ -138,12 +141,14 @@ pub struct Affected {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = OsvPackage)]
 pub struct Package {
 	pub ecosystem: String,
 	pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = OsvRange)]
 pub struct Range {
 	pub r#type: String,
 	#[serde(default)]
@@ -152,6 +157,7 @@ pub struct Range {
 
 /// One event of a range. OSV holds exactly one of the four per event.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = OsvEvent)]
 pub struct Event {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub introduced: Option<String>,

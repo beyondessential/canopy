@@ -166,6 +166,7 @@ pub enum Reported {
 #[derive(
 	Clone, Debug, PartialEq, Eq, Serialize, Deserialize, QueryableByName, utoipa::ToSchema,
 )]
+#[schema(as = MachinePackageReport)]
 pub struct MachinePackageReport {
 	#[diesel(sql_type = sql_types::Uuid)]
 	pub machine_id: Uuid,

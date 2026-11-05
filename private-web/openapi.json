@@ -7663,6 +7663,43 @@
         ],
         "type": "object"
       },
+      "MachinePackageReport": {
+        "description": "The last report a machine made.",
+        "properties": {
+          "distribution": {
+            "type": "string"
+          },
+          "ecosystem": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "machine_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "package_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "release": {
+            "type": "string"
+          },
+          "reported_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine_id",
+          "distribution",
+          "release",
+          "package_count",
+          "reported_at"
+        ],
+        "type": "object"
+      },
       "MachineScopeArgs": {
         "description": "Request body identifying a machine to look up silences for.",
         "properties": {
@@ -8241,6 +8278,13 @@
             "format": "date-time",
             "type": "string"
           },
+          "grants": {
+            "description": "What the token may do beyond reading, chosen at minting and never\nchanged: `triage` records vulnerability triage decisions.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "id": {
             "description": "Unique identifier of the token.",
             "format": "uuid",
@@ -8272,7 +8316,8 @@
           "name",
           "created_by",
           "created_at",
-          "expires_at"
+          "expires_at",
+          "grants"
         ],
         "type": "object"
       },
@@ -8381,6 +8426,13 @@
       "MintArgs": {
         "description": "Request body for minting a new MCP access token.",
         "properties": {
+          "grants": {
+            "description": "What the token may do beyond reading: `triage` to record vulnerability\ntriage decisions. A token minted with none only reads, and cannot gain a\ngrant afterwards.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "name": {
             "description": "Operator-chosen label, e.g. which agent will hold this token. Cannot\nbe empty or only whitespace.",
             "type": "string"
@@ -8647,6 +8699,116 @@
           "from_host_key"
         ],
         "type": "string"
+      },
+      "OsvAffected": {
+        "properties": {
+          "database_specific": {
+            "type": "object"
+          },
+          "ecosystem_specific": {
+            "type": "object"
+          },
+          "package": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OsvPackage"
+              }
+            ]
+          },
+          "ranges": {
+            "items": {
+              "$ref": "#/components/schemas/OsvRange"
+            },
+            "type": "array"
+          },
+          "versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "OsvEvent": {
+        "description": "One event of a range. OSV holds exactly one of the four per event.",
+        "properties": {
+          "fixed": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "introduced": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_affected": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "OsvPackage": {
+        "properties": {
+          "ecosystem": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "name"
+        ],
+        "type": "object"
+      },
+      "OsvRange": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/OsvEvent"
+            },
+            "type": "array"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "OsvReference": {
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "url"
+        ],
+        "type": "object"
       },
       "Page_BestoolSnippetInfo": {
         "description": "A single page of a paginated list response.",
@@ -10059,7 +10221,8 @@
           "artifact",
           "name",
           "certificate",
-          "relying_party"
+          "relying_party",
+          "advisory"
         ],
         "type": "string"
       },
@@ -14881,6 +15044,724 @@
           "tracked",
           "reported",
           "absent"
+        ],
+        "type": "string"
+      },
+      "VulnerabilityAdvisory": {
+        "description": "A cached OSV advisory.",
+        "properties": {
+          "affected": {
+            "items": {
+              "$ref": "#/components/schemas/OsvAffected"
+            },
+            "type": "array"
+          },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "details": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "modified_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/OsvReference"
+            },
+            "type": "array"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/VulnerabilitySeverity"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "aliases",
+          "summary",
+          "details",
+          "severity",
+          "affected",
+          "references",
+          "modified_at"
+        ],
+        "type": "object"
+      },
+      "VulnerabilityDecideArgs": {
+        "description": "A decision to record.",
+        "properties": {
+          "id": {
+            "description": "The advisory's OSV identifier.",
+            "type": "string"
+          },
+          "issue_url": {
+            "description": "A link to the issue tracking a fix, for will fix.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/VulnerabilityOutcome"
+          },
+          "reason": {
+            "description": "Why. Required for not affected and accepted risk.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "review_by": {
+            "description": "When to look at an accepted risk again, `YYYY-MM-DD`. Required for\naccepted risk, and in the future.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/VulnerabilitySource"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "VulnerabilityDecision": {
+        "description": "A triage decision. The newest one for an item is its current decision.",
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "ground": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VulnerabilityGround",
+                "description": "The ground the model decided on."
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "issue_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/VulnerabilityOutcome"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "review_by": {
+            "description": "For an accepted risk, the date it is looked at again, `YYYY-MM-DD`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/VulnerabilitySource"
+          },
+          "via": {
+            "$ref": "#/components/schemas/VulnerabilityVia"
+          },
+          "vulnerability_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "vulnerability_id",
+          "source",
+          "outcome",
+          "actor",
+          "via",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "VulnerabilityDetail": {
+        "description": "An item in full.",
+        "properties": {
+          "advisory": {
+            "$ref": "#/components/schemas/VulnerabilityAdvisory"
+          },
+          "fixed_in": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "The versions that fix it, for each affected package it matches.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "history": {
+            "description": "Decisions, reopenings and the suggestion, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/VulnerabilityHistoryEntry"
+            },
+            "type": "array"
+          },
+          "item": {
+            "$ref": "#/components/schemas/VulnerabilityItem"
+          },
+          "machines": {
+            "description": "For a Linux item, the exposed machines.",
+            "items": {
+              "$ref": "#/components/schemas/VulnerabilityExposedMachine"
+            },
+            "type": "array"
+          },
+          "person_has_decided": {
+            "description": "Whether a person has ever decided the item.",
+            "type": "boolean"
+          },
+          "versions": {
+            "description": "For a Tamanu item, the exposed versions.",
+            "items": {
+              "$ref": "#/components/schemas/VulnerabilityExposedVersion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "item",
+          "advisory",
+          "fixed_in",
+          "versions",
+          "machines",
+          "history",
+          "person_has_decided"
+        ],
+        "type": "object"
+      },
+      "VulnerabilityExposedMachine": {
+        "description": "A machine exposed to an advisory.",
+        "properties": {
+          "group_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "group_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "machine_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "machine_name": {
+            "type": "string"
+          },
+          "package": {
+            "type": "string"
+          },
+          "package_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine_id",
+          "machine_name",
+          "package",
+          "package_version"
+        ],
+        "type": "object"
+      },
+      "VulnerabilityExposedVersion": {
+        "description": "A Tamanu version exposed to an advisory.",
+        "properties": {
+          "applications": {
+            "description": "How many live production applications run this version.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "direct": {
+            "description": "Whether any of them depends on it directly.",
+            "type": "boolean"
+          },
+          "newest_published": {
+            "description": "Whether this is the newest published version.",
+            "type": "boolean"
+          },
+          "package": {
+            "description": "The affected package, as this version carries it.",
+            "type": "string"
+          },
+          "package_version": {
+            "type": "string"
+          },
+          "paths": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "How each workspace reaches it.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "version": {
+            "description": "`major.minor.patch`.",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "workspaces": {
+            "description": "The Tamanu workspaces that reach the package.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "version_id",
+          "version",
+          "package",
+          "package_version",
+          "workspaces",
+          "direct",
+          "paths",
+          "applications",
+          "newest_published"
+        ],
+        "type": "object"
+      },
+      "VulnerabilityGround": {
+        "description": "The grounds on which the model may find an item not affected on its own.\nCanopy holds these fixed.",
+        "enum": [
+          "frontend_only",
+          "build_time_only",
+          "unaffected_platform"
+        ],
+        "type": "string"
+      },
+      "VulnerabilityHistoryEntry": {
+        "description": "One entry of an item's history.",
+        "oneOf": [
+          {
+            "properties": {
+              "at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "decision": {
+                "$ref": "#/components/schemas/VulnerabilityDecision"
+              },
+              "kind": {
+                "enum": [
+                  "decision"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "at",
+              "decision",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "reopening"
+                ],
+                "type": "string"
+              },
+              "reopened": {
+                "$ref": "#/components/schemas/VulnerabilityReopened"
+              }
+            },
+            "required": [
+              "at",
+              "reopened",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "suggestion"
+                ],
+                "type": "string"
+              },
+              "suggestion": {
+                "$ref": "#/components/schemas/VulnerabilitySuggestion"
+              }
+            },
+            "required": [
+              "at",
+              "suggestion",
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "VulnerabilityItem": {
+        "description": "An item as the list and the query interface present it.",
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "counts": {
+            "description": "Whether anything counts for it.",
+            "type": "boolean"
+          },
+          "decision": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VulnerabilityDecision",
+                "description": "The current decision, if the item has been decided and not reopened."
+              }
+            ]
+          },
+          "exposed": {
+            "description": "How many applications (Tamanu) or machines (Linux) it exposes.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "first_seen_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "packages": {
+            "description": "The affected packages that match something the fleet counts.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reopened": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VulnerabilityReopened",
+                "description": "Why the item opened again, when it has."
+              }
+            ]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/VulnerabilitySeverity"
+          },
+          "source": {
+            "$ref": "#/components/schemas/VulnerabilitySource"
+          },
+          "status": {
+            "$ref": "#/components/schemas/VulnerabilityStatus"
+          },
+          "suggestion": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VulnerabilitySuggestion"
+              }
+            ]
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "aliases",
+          "summary",
+          "severity",
+          "packages",
+          "exposed",
+          "counts",
+          "status",
+          "first_seen_at"
+        ],
+        "type": "object"
+      },
+      "VulnerabilityItemArgs": {
+        "description": "Which item.",
+        "properties": {
+          "id": {
+            "description": "The advisory's OSV identifier.",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/VulnerabilitySource"
+          }
+        },
+        "required": [
+          "id",
+          "source"
+        ],
+        "type": "object"
+      },
+      "VulnerabilityListArgs": {
+        "description": "Which items to list.",
+        "properties": {
+          "include_uncounted": {
+            "description": "Include items nothing counts for any more.",
+            "type": "boolean"
+          },
+          "min_severity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VulnerabilitySeverity",
+                "description": "Only items at or above this severity."
+              }
+            ]
+          },
+          "source": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VulnerabilitySource",
+                "description": "Only items of this source."
+              }
+            ]
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VulnerabilityStatus",
+                "description": "Only items with this status. Omitted, every status."
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "VulnerabilityListing": {
+        "description": "The items matching a filter, in order.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VulnerabilityItem"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "Whether more matched than are listed.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "VulnerabilityMachineArgs": {
+        "description": "Which machine.",
+        "properties": {
+          "machine_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine_id"
+        ],
+        "type": "object"
+      },
+      "VulnerabilityOutcome": {
+        "description": "What a decision says about an item.",
+        "enum": [
+          "not_affected",
+          "accepted_risk",
+          "will_fix"
+        ],
+        "type": "string"
+      },
+      "VulnerabilityReopened": {
+        "description": "A decided item that opened again, with the decision it opened from.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "decision_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reason": {
+            "type": "object"
+          },
+          "source": {
+            "$ref": "#/components/schemas/VulnerabilitySource"
+          },
+          "vulnerability_id": {
+            "type": "string"
+          },
+          "why": {
+            "description": "Why, in words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "vulnerability_id",
+          "source",
+          "decision_id",
+          "why",
+          "reason",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "VulnerabilitySeverity": {
+        "description": "The qualitative rating an advisory carries, lowest first.",
+        "enum": [
+          "unrated",
+          "low",
+          "medium",
+          "high",
+          "critical"
+        ],
+        "type": "string"
+      },
+      "VulnerabilitySource": {
+        "description": "Where an item's exposure comes from.",
+        "enum": [
+          "tamanu",
+          "linux"
+        ],
+        "type": "string"
+      },
+      "VulnerabilityStatus": {
+        "description": "An item's triage status.",
+        "enum": [
+          "open",
+          "not_affected",
+          "accepted_risk",
+          "will_fix"
+        ],
+        "type": "string"
+      },
+      "VulnerabilitySuggestion": {
+        "description": "The model's latest suggestion for an item. Not a decision: the item stays\nopen.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "ground": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VulnerabilityGround"
+              }
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/VulnerabilityOutcome"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "reason",
+          "model",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "VulnerabilityVia": {
+        "description": "How a decision was made.",
+        "enum": [
+          "ui",
+          "model",
+          "mcp"
         ],
         "type": "string"
       },
@@ -27324,6 +28205,251 @@
         ],
         "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/vulnerabilities/decide": {
+      "post": {
+        "description": "Becomes the item's current decision, covering its whole source. The one it\nreplaces stays in the history.",
+        "operationId": "vulnerabilities_decide",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VulnerabilityDecideArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VulnerabilityDecision"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Record a triage decision.",
+        "tags": [
+          "vulnerabilities"
+        ],
+        "x-canopy-audit": [
+          "vulnerability_decided"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/vulnerabilities/get": {
+      "post": {
+        "description": "The advisory, what it exposes, and the item's history of decisions,\nreopenings and the model's suggestion.",
+        "operationId": "vulnerabilities_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VulnerabilityItemArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VulnerabilityDetail"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "One vulnerability in full.",
+        "tags": [
+          "vulnerabilities"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/vulnerabilities/list": {
+      "post": {
+        "description": "One entry per advisory within a source, sorted by severity and then by how\nmuch each exposes. Items nothing counts for any more are left out unless\nasked for.",
+        "operationId": "vulnerabilities_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VulnerabilityListArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VulnerabilityListing"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "List vulnerabilities.",
+        "tags": [
+          "vulnerabilities"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/vulnerabilities/machine_packages": {
+      "post": {
+        "description": "`null` for a machine that has never reported. A report whose ecosystem is\n`null` could not be placed, so nothing on that machine is being checked.",
+        "operationId": "vulnerabilities_machine_packages",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VulnerabilityMachineArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MachinePackageReport"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "When a machine last reported its packages, and how many it reported.",
+        "tags": [
+          "vulnerabilities"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
       }
     }
   },

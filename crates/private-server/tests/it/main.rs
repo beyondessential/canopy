@@ -57,3 +57,4 @@ mod update_server;
 mod upgrade_plans;
 mod version_known_issues;
 mod versions;
+mod vulnerabilities;

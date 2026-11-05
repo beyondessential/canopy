@@ -119,23 +119,20 @@ impl Scanner {
 		report.package_versions_queried = counted.len();
 		let answers = self.osv.query(&counted).await?;
 
-		let mut revisions: HashMap<&str, &str> = HashMap::new();
+		let mut revisions: HashMap<&str, Timestamp> = HashMap::new();
 		for VulnRef { id, modified } in answers.iter().flatten() {
-			let held = revisions.entry(id).or_insert(modified);
-			if modified > held {
-				*held = modified;
-			}
+			let modified = modified
+				.parse::<Timestamp>()
+				.unwrap_or(Timestamp::UNIX_EPOCH);
+			let latest = revisions.entry(id).or_insert(modified);
+			*latest = (*latest).max(modified);
 		}
 		let ids: Vec<String> = revisions.keys().map(|id| (*id).to_owned()).collect();
 		let held = Advisory::modified_ats(conn, &ids).await?;
 		let mut fetched = Vec::new();
 		let mut unavailable: HashSet<&str> = HashSet::new();
 		for (id, modified) in &revisions {
-			let newer = match (held.get(*id), modified.parse::<Timestamp>()) {
-				(Some(held), Ok(modified)) => modified > *held,
-				(Some(_), Err(_)) => false,
-				(None, _) => true,
-			};
+			let newer = held.get(*id).is_none_or(|held| modified > held);
 			if !newer {
 				continue;
 			}

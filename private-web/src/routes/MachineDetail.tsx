@@ -25,6 +25,7 @@ import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import IncidentsLink from "../components/IncidentsLink";
 import MachineBackupSection from "../components/MachineBackupSection";
 import MachineNamesSection from "../components/MachineNamesSection";
+import MachinePackagesLine from "../components/MachinePackagesLine";
 import MachineIdentitySection from "../components/MachineIdentitySection";
 import MachineSetupInstructions from "../components/MachineSetupInstructions";
 import MaintenanceHeaderButton from "../components/MaintenanceHeaderButton";
@@ -260,6 +261,7 @@ export default function MachineDetail() {
 						value={humanSeconds(data.machine.alert_when_down_for)}
 					/>
 				</Stack>
+				<MachinePackagesLine machineId={data.machine.id} refreshKey={refreshTick} />
 				<ChecksTable
 					checks={data.checks}
 					operators={data.operators}

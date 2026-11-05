@@ -1,4 +1,4 @@
-//! The internet-facing mount of the read-only MCP query interface, gated by
+//! The internet-facing mount of the MCP query interface, gated by
 //! bearer tokens ([`database::mcp_tokens::McpToken`]).
 //!
 //! Spec: `.workhorse/specs/private-server/mcp.md` (id `MCP`).
@@ -41,7 +41,7 @@ pub fn routes(state: AppState) -> Router<()> {
 	Router::new().nest(
 		"/mcp",
 		Router::new()
-			.fallback_service(canopy_mcp::service(state.db_read.clone()))
+			.fallback_service(canopy_mcp::service(state.db_read.clone(), state.db.clone()))
 			.layer(middleware::from_fn_with_state(state, require_bearer_token)),
 	)
 }
@@ -53,7 +53,7 @@ pub fn routes(state: AppState) -> Router<()> {
 async fn require_bearer_token(
 	State(state): State<AppState>,
 	ClientIp(ip): ClientIp,
-	req: Request,
+	mut req: Request,
 	next: Next,
 ) -> Result<Response, AppError> {
 	// Before anything that costs: an IP that has already spent its budget is
@@ -100,6 +100,11 @@ async fn require_bearer_token(
 		let mut conn = state.db.get().await?;
 		McpToken::touch_last_used(&mut conn, token.id).await?;
 	}
+	req.extensions_mut().insert(canopy_mcp::Caller::Token {
+		id: token.id,
+		name: token.name,
+		grants: token.grants,
+	});
 
 	Ok(next.run(req).await)
 }

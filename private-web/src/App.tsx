@@ -69,6 +69,8 @@ import Sql from "./routes/Sql";
 import VersionDetail from "./routes/VersionDetail";
 import Upgrades from "./routes/Upgrades";
 import Versions from "./routes/Versions";
+import VulnerabilityDetail from "./routes/VulnerabilityDetail";
+import Vulnerabilities from "./routes/Vulnerabilities";
 
 /// Send an address from before the fleet was namespaced to where it lives now.
 ///
@@ -229,6 +231,11 @@ export default function App() {
 						element={<CheckRedirect settings={false} />}
 					/>
 					<Route path="/upgrades" element={<Upgrades />} />
+					<Route path="/vulnerabilities" element={<Vulnerabilities />} />
+					<Route
+						path="/vulnerabilities/:source/:id"
+						element={<VulnerabilityDetail />}
+					/>
 					<Route path="/maintenance" element={<Maintenance />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
