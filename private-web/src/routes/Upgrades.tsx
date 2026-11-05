@@ -332,7 +332,7 @@ function EnvironmentName({
 	return (
 		<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 			<RouterLink to={`/fleet/groups/${groupId}`}>{groupName}</RouterLink>
-			{rank !== "production" && <ServerRankChip rank={rank} />}
+			<ServerRankChip rank={rank} />
 		</Stack>
 	);
 }
