@@ -2998,7 +2998,7 @@
     },
     "/machine-packages": {
       "post": {
-        "description": "The machine's whole package list, replacing the one before. A report\nidentical to the last one changes nothing. A machine reports when its list\nchanges, not on every status push.\n\nCanopy places the report in the vulnerability database's ecosystem for the\ndistribution and release. A distribution or release it cannot place is kept\nand matches nothing.\n\nErrors: 412 when the calling device is not bound to a live machine.",
+        "description": "The machine's whole package list, replacing the one before. A report\nidentical to the last one changes nothing. A machine reports when its list\nchanges, not on every status push.\n\nCanopy places the report in the vulnerability database's ecosystem for the\ndistribution and release. A distribution or release it cannot place is kept\nand matches nothing.\n\nErrors: 400 for a report no real system would send (an empty or malformed\nname, version, distribution or release, or an implausible number of\npackages); 412 when the calling device is not bound to a live machine.",
         "operationId": "report_machine_packages",
         "requestBody": {
           "content": {

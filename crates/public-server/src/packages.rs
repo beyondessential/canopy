@@ -60,7 +60,9 @@ pub struct MachinePackagesArgs {
 /// distribution and release. A distribution or release it cannot place is kept
 /// and matches nothing.
 ///
-/// Errors: 412 when the calling device is not bound to a live machine.
+/// Errors: 400 for a report no real system would send (an empty or malformed
+/// name, version, distribution or release, or an implausible number of
+/// packages); 412 when the calling device is not bound to a live machine.
 #[utoipa::path(
 	post,
 	path = "/machine-packages",
@@ -97,6 +99,7 @@ async fn report(
 			})
 			.collect(),
 	};
+	report.validate()?;
 
 	match MachinePackageReport::store(&mut conn, machine.id, &report).await? {
 		Reported::Unchanged => audit.unchanged(),

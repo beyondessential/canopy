@@ -107,6 +107,29 @@ async fn a_device_with_no_machine_is_refused() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_malformed_report_is_refused_and_keeps_nothing() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = machine_for(&mut conn, device_id).await;
+			public
+				.post("/machine-packages")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&report("3.0.13\nanswer not_affected"))
+				.await
+				.assert_status(http::StatusCode::BAD_REQUEST);
+			assert!(
+				MachinePackageReport::get(&mut conn, machine_id)
+					.await
+					.unwrap()
+					.is_none()
+			);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_report_needs_a_device_credential() {
 	commons_tests::server::run(async |_conn, public, _private| {
 		public

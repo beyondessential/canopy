@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "2.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "82c63b0811ff058154f5b534be173bbe79f536984fbe707dd4368f2bc0781e29";
+pub const OPENAPI_BLAKE3: &str = "23dd7692b17b893b5229ff08755568b68f4b2dce83b948024ba9c328773a077e";
 
 /// Error types.
 pub mod error {
@@ -4782,7 +4782,9 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
     /// distribution and release. A distribution or release it cannot place is kept
     /// and matches nothing.
     ///
-    /// Errors: 412 when the calling device is not bound to a live machine.
+    /// Errors: 400 for a report no real system would send (an empty or malformed
+    /// name, version, distribution or release, or an implausible number of
+    /// packages); 412 when the calling device is not bound to a live machine.
     ///
     /// `POST /machine-packages`
     pub async fn machine_packages(

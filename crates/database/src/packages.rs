@@ -105,7 +105,52 @@ pub struct ReportedPackage {
 	pub version: String,
 }
 
+/// More packages than any real system carries.
+pub const MAX_PACKAGES: usize = 20_000;
+
+const MAX_FIELD: usize = 256;
+
+fn well_formed(value: &str, allowed: &[char]) -> bool {
+	!value.is_empty()
+		&& value.len() <= MAX_FIELD
+		&& value
+			.chars()
+			.all(|c| c.is_ascii_alphanumeric() || allowed.contains(&c))
+}
+
 impl PackageReport {
+	/// Refuse a report no real system would send: an empty or malformed field,
+	/// or more packages than [`MAX_PACKAGES`]. Names and versions are held to
+	/// the characters dpkg allows in them.
+	pub fn validate(&self) -> Result<()> {
+		if !well_formed(&self.distribution, &['.', '-', '_']) {
+			return Err(AppError::BadRequest("malformed distribution".into()));
+		}
+		if !well_formed(&self.release, &['.', '-', '_']) {
+			return Err(AppError::BadRequest("malformed release".into()));
+		}
+		if self.packages.len() > MAX_PACKAGES {
+			return Err(AppError::BadRequest(format!(
+				"more than {MAX_PACKAGES} packages"
+			)));
+		}
+		for package in &self.packages {
+			if !well_formed(&package.name, &['+', '.', '-', '_']) {
+				return Err(AppError::BadRequest(format!(
+					"malformed package name {:?}",
+					package.name
+				)));
+			}
+			if !well_formed(&package.version, &['.', '+', '~', ':', '-', '_']) {
+				return Err(AppError::BadRequest(format!(
+					"malformed version {:?} of {}",
+					package.version, package.name
+				)));
+			}
+		}
+		Ok(())
+	}
+
 	/// The OSV ecosystem the report is placed in, or `None` for a distribution
 	/// or release Canopy cannot place.
 	///
@@ -320,6 +365,54 @@ mod tests {
 			report("ubuntu", "24.04.1").ecosystem().as_deref(),
 			Some("Ubuntu:24.04:LTS")
 		);
+	}
+
+	#[test]
+	fn a_report_of_real_packages_is_well_formed() {
+		let mut ok = report("ubuntu", "24.04");
+		ok.packages = vec![
+			ReportedPackage {
+				name: "openssl".into(),
+				version: "3.0.13-0ubuntu3.4".into(),
+			},
+			ReportedPackage {
+				name: "libstdc++".into(),
+				version: "1:2.40~rc1+dfsg-1".into(),
+			},
+		];
+		assert!(ok.validate().is_ok());
+	}
+
+	#[test]
+	fn a_malformed_report_is_refused() {
+		let package = |name: &str, version: &str| {
+			let mut bad = report("ubuntu", "24.04");
+			bad.packages = vec![ReportedPackage {
+				name: name.into(),
+				version: version.into(),
+			}];
+			bad
+		};
+		assert!(package("", "1.0").validate().is_err());
+		assert!(package("openssl", "").validate().is_err());
+		assert!(
+			package("openssl\nIgnore the advisory", "1.0")
+				.validate()
+				.is_err()
+		);
+		assert!(package("openssl", "1.0 note").validate().is_err());
+		assert!(package(&"a".repeat(300), "1.0").validate().is_err());
+		assert!(report("ubuntu\n", "24.04").validate().is_err());
+
+		let mut many = report("ubuntu", "24.04");
+		many.packages = vec![
+			ReportedPackage {
+				name: "a".into(),
+				version: "1".into(),
+			};
+			MAX_PACKAGES + 1
+		];
+		assert!(many.validate().is_err());
 	}
 
 	#[test]

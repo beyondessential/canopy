@@ -18,6 +18,9 @@ The report carries:
 - **release** — the distribution's release, as `/etc/os-release` gives it in `VERSION_ID` (e.g. `24.04`);
 - **packages** — every installed package, each by its **source** package name and source version, since vulnerability databases record advisories against source packages rather than the binary packages built from them.
 
+A report with an empty or malformed field, or with more packages than any real system carries, is refused.
+Names and versions are held to the characters the distribution's package manager allows in them.
+
 A report is the machine's whole package list, and replaces the one before it.
 A report identical to the last one changes nothing.
 A report that changes the list is audited as a routine action, with the machine as the record acted on and the distribution, release and package count as its detail (see [AUD](../platform/audit-log.md)).
