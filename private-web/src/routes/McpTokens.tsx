@@ -177,7 +177,7 @@ export default function McpTokens() {
 									<TableCell>{token.created_by}</TableCell>
 									<TableCell>
 										{token.grants.length === 0
-											? "—"
+											? "none"
 											: token.grants.map((grant) => (
 													<Chip
 														key={grant}

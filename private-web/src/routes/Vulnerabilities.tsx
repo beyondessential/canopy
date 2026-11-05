@@ -204,7 +204,7 @@ function ItemRow({ item }: { item: VulnerabilityItem }) {
 				</Typography>
 			</TableCell>
 			<TableCell>
-				{item.packages.length > 0 ? item.packages.join(", ") : "—"}
+				{item.packages.join(", ")}
 				<Box sx={{ mt: 0.25 }}>
 					<SourceChip source={item.source} />
 				</Box>
