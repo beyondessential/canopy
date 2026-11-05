@@ -18,7 +18,12 @@ import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { useApi } from "../api";
 import { errorPreview } from "../lib/errorText";
 import { formatDuration } from "../lib/migrationTests";
-import { type ApiResponse, type ServerInfo, applicationName } from "../types";
+import {
+	type ApiResponse,
+	type ServerInfo,
+	applicationName,
+	serverSortKey,
+} from "../types";
 
 type GroupVerdict = ApiResponse<"migration_tests", "for_group">[number];
 import MigrationRunDialog from "./MigrationRunDialog";
@@ -124,7 +129,8 @@ export default function MigrationTestsSection({
 					{[...verdicts.data]
 						.sort(
 							(a, b) =>
-								VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] ||
+								serverSortKey(byId.get(a.server_id) ?? {}) -
+									serverSortKey(byId.get(b.server_id) ?? {}) ||
 								nameOf(a.server_id).localeCompare(nameOf(b.server_id)),
 						)
 						.map((row) => (
@@ -142,13 +148,6 @@ export default function MigrationTestsSection({
 		</Paper>
 	);
 }
-
-/// Problems first: a passing server is the row an operator scrolls past.
-const VERDICT_ORDER: Record<string, number> = {
-	failed: 0,
-	nottested: 1,
-	passed: 2,
-};
 
 function SectionHeading() {
 	return (
