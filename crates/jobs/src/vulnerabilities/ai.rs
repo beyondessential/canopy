@@ -90,17 +90,9 @@ impl Answer {
 		if reason.is_empty() {
 			return None;
 		}
-		let ground = raw
-			.ground
-			.as_deref()
-			.map(str::trim)
-			.filter(|g| !g.is_empty() && *g != "none")
-			.map(|g| Ground::parse(g));
-		let ground = match ground {
-			None => None,
-			Some(Some(ground)) => Some(ground),
-			Some(None) => return None,
-		};
+		// A ground that is not one of the fixed ones names none of them, so the
+		// answer is kept as a suggestion.
+		let ground = raw.ground.as_deref().map(str::trim).and_then(Ground::parse);
 		Some(Self {
 			outcome,
 			ground,
@@ -476,11 +468,18 @@ mod tests {
 	}
 
 	#[test]
+	fn an_unlisted_ground_names_no_ground() {
+		let reply = r#"{"outcome": "not_affected", "ground": "my_own_ground", "reason": "x"}"#;
+		let answer = Answer::parse(reply).unwrap();
+		assert_eq!(answer.ground, None);
+		assert_eq!(plan(&answer, false), Plan::Suggest);
+	}
+
+	#[test]
 	fn an_invalid_reply_is_no_answer() {
 		for reply in [
 			"I think it is fine.",
 			r#"{"outcome": "fine", "ground": "none", "reason": "x"}"#,
-			r#"{"outcome": "not_affected", "ground": "my_own_ground", "reason": "x"}"#,
 			r#"{"outcome": "not_affected", "ground": "frontend_only", "reason": "  "}"#,
 			r#"{"outcome": "not_affected"}"#,
 		] {
