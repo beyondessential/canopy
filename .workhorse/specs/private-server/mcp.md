@@ -48,7 +48,7 @@ From fifteen days before a token's expiry until that token expires or is revoked
 
 ## Reads and writes
 
-Most of the surface is reads, as that's the safe set. Writes are deliberately added where it makes sense
+Most of the surface is reads, as that's the safe set. Writes are deliberately added where it makes sense, with safeguards as required.
 
 A write is refused to a caller not allowed it, without effect: on the operator path, a caller who is not an administrator; on the token path, a token without the triage grant.
 Each write is audited as the action it takes, recorded the same way as when it is taken in the operator interface (see [AUD](../platform/audit-log.md)).
