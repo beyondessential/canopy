@@ -15566,7 +15566,7 @@
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/VulnerabilityReopened",
+                "$ref": "#/components/schemas/VulnerabilityReopenedBecause",
                 "description": "Why the item opened again, when it has."
               }
             ]
@@ -15761,6 +15761,24 @@
           "why",
           "reason",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "VulnerabilityReopenedBecause": {
+        "description": "Why a decided item is open again: a reopening Canopy recorded, or an\naccepted risk past its review date that the scan has yet to record.",
+        "properties": {
+          "reason": {
+            "description": "Why, as a tagged reason: `review_due`, `severity_rose` or `range_widened`.",
+            "type": "object"
+          },
+          "why": {
+            "description": "Why, in words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "why",
+          "reason"
         ],
         "type": "object"
       },

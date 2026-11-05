@@ -1391,11 +1391,32 @@ pub struct ItemSummary {
 	/// The current decision, if the item has been decided and not reopened.
 	pub decision: Option<Decision>,
 	/// Why the item opened again, when it has.
-	pub reopened: Option<Reopened>,
+	pub reopened: Option<ReopenedBecause>,
 	/// The model's latest suggestion, if it has made one.
 	pub suggestion: Option<Suggestion>,
 	/// When a scan first found it.
 	pub first_seen_at: Timestamp,
+}
+
+/// Why a decided item is open again: a reopening Canopy recorded, or an
+/// accepted risk past its review date that the scan has yet to record.
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = VulnerabilityReopenedBecause)]
+pub struct ReopenedBecause {
+	/// Why, in words.
+	pub why: String,
+	/// Why, as a tagged reason: `review_due`, `severity_rose` or `range_widened`.
+	#[schema(value_type = Object)]
+	pub reason: Reopening,
+}
+
+impl From<Reopening> for ReopenedBecause {
+	fn from(reason: Reopening) -> Self {
+		Self {
+			why: reason.describe(),
+			reason,
+		}
+	}
 }
 
 /// Which items to list.
@@ -1436,12 +1457,12 @@ impl ItemSummary {
 		decision: Option<&Decision>,
 		reopened: Option<&Reopened>,
 		today: Date,
-	) -> (Status, Option<Reopened>) {
+	) -> (Status, Option<ReopenedBecause>) {
 		let Some(decision) = decision else {
 			return (Status::Open, None);
 		};
 		if let Some(reopened) = reopened.filter(|r| r.decision_id == decision.id) {
-			return (Status::Open, Some(reopened.clone()));
+			return (Status::Open, Some(reopened.reason.clone().into()));
 		}
 		let review_due = decision.outcome == Outcome::AcceptedRisk
 			&& decision
@@ -1451,19 +1472,7 @@ impl ItemSummary {
 				.is_some_and(|date| date <= today);
 		if review_due {
 			// Past its review date, before the scan has written it up as reopened.
-			let reason = Reopening::ReviewDue;
-			return (
-				Status::Open,
-				Some(Reopened {
-					id: Uuid::nil(),
-					vulnerability_id: decision.vulnerability_id.clone(),
-					source: decision.source,
-					decision_id: decision.id,
-					why: reason.describe(),
-					reason,
-					created_at: decision.created_at,
-				}),
-			);
+			return (Status::Open, Some(Reopening::ReviewDue.into()));
 		}
 		(Status::from(decision.outcome), None)
 	}

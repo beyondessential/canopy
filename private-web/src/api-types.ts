@@ -14920,7 +14920,7 @@ export interface components {
             id: string;
             /** @description The affected packages that match something the fleet counts. */
             packages: string[];
-            reopened?: null | components["schemas"]["VulnerabilityReopened"];
+            reopened?: null | components["schemas"]["VulnerabilityReopenedBecause"];
             /** @description The advisory's severity. */
             severity: components["schemas"]["VulnerabilitySeverity"];
             /** @description Where the item's exposure comes from. */
@@ -14989,6 +14989,16 @@ export interface components {
             source: components["schemas"]["VulnerabilitySource"];
             /** @description The advisory's OSV identifier. */
             vulnerability_id: string;
+            /** @description Why, in words. */
+            why: string;
+        };
+        /**
+         * @description Why a decided item is open again: a reopening Canopy recorded, or an
+         *     accepted risk past its review date that the scan has yet to record.
+         */
+        VulnerabilityReopenedBecause: {
+            /** @description Why, as a tagged reason: `review_due`, `severity_rose` or `range_widened`. */
+            reason: Record<string, never>;
             /** @description Why, in words. */
             why: string;
         };
