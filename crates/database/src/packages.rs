@@ -115,7 +115,9 @@ impl PackageReport {
 		let release = self.release.trim();
 		match self.distribution.trim().to_ascii_lowercase().as_str() {
 			"ubuntu" => {
-				let (year, month) = release.split_once('.')?;
+				// A point release (24.04.1) is placed in its release.
+				let mut fields = release.split('.');
+				let (year, month) = (fields.next()?, fields.next()?);
 				let (year_n, month_n) = (year.parse::<u32>().ok()?, month.parse::<u32>().ok()?);
 				let lts = year_n % 2 == 0 && month_n == 4;
 				Some(if lts {
@@ -306,6 +308,10 @@ mod tests {
 		assert_eq!(
 			report("ubuntu", "23.04").ecosystem().as_deref(),
 			Some("Ubuntu:23.04")
+		);
+		assert_eq!(
+			report("ubuntu", "24.04.1").ecosystem().as_deref(),
+			Some("Ubuntu:24.04:LTS")
 		);
 	}
 
