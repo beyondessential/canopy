@@ -523,6 +523,77 @@ async fn a_production_machine_exposes_and_an_archived_one_does_not() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_linux_item_presents_the_fixes_of_the_releases_its_machines_run() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let machine = Machine::create(
+			&mut conn,
+			NewMachine {
+				rank: Some(ServerRank::Production),
+				..NewMachine::named("box")
+			},
+		)
+		.await
+		.unwrap();
+		MachinePackageReport::store(
+			&mut conn,
+			machine.id,
+			&PackageReport {
+				distribution: "ubuntu".into(),
+				release: "24.04".into(),
+				packages: vec![ReportedPackage {
+					name: "openssl".into(),
+					version: "3.0.13-0ubuntu3.4".into(),
+				}],
+			},
+		)
+		.await
+		.unwrap();
+		Advisory::upsert(
+			&mut conn,
+			&record(
+				"UBUNTU-1",
+				"high",
+				vec![
+					range(
+						"Ubuntu:22.04:LTS",
+						"openssl",
+						"ECOSYSTEM",
+						&[("introduced", "0"), ("fixed", "3.0.2-0ubuntu1.18")],
+					),
+					range(
+						"Ubuntu:24.04:LTS",
+						"openssl",
+						"ECOSYSTEM",
+						&[("introduced", "0"), ("fixed", "3.0.13-0ubuntu3.5")],
+					),
+				],
+			),
+		)
+		.await
+		.unwrap();
+		replace_matches(
+			&mut conn,
+			&[(
+				Counted {
+					ecosystem: "Ubuntu:24.04:LTS".into(),
+					name: "openssl".into(),
+					version: "3.0.13-0ubuntu3.4".into(),
+				},
+				vec!["UBUNTU-1".into()],
+			)],
+		)
+		.await
+		.unwrap();
+
+		let detail = ItemDetail::load(&mut conn, "UBUNTU-1", Source::Linux, today())
+			.await
+			.unwrap();
+		assert_eq!(detail.fixed_in["openssl"], ["3.0.13-0ubuntu3.5"]);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_application_on_a_non_production_box_exposes_nothing() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let v = version(&mut conn, 3, 0, 0).await;

@@ -1756,27 +1756,44 @@ impl ItemDetail {
 			.map(|(_, machine)| machine)
 			.collect();
 
+		// A Linux item's fixes are those of the releases its machines run.
+		let ecosystems: Vec<String> = match source {
+			Source::Tamanu => vec![NPM.to_owned()],
+			Source::Linux => {
+				#[derive(QueryableByName)]
+				struct Row {
+					#[diesel(sql_type = sql_types::Text)]
+					ecosystem: String,
+				}
+				let machine_ids: Vec<Uuid> = machines.iter().map(|m| m.machine_id).collect();
+				diesel::sql_query(
+					"SELECT DISTINCT ecosystem FROM machine_package_reports \
+					 WHERE machine_id = ANY($1) AND ecosystem IS NOT NULL ORDER BY ecosystem",
+				)
+				.bind::<sql_types::Array<sql_types::Uuid>, _>(&machine_ids)
+				.load::<Row>(conn)
+				.await?
+				.into_iter()
+				.map(|row| row.ecosystem)
+				.collect()
+			}
+		};
+		let record = Record {
+			id: advisory.id.clone(),
+			affected: advisory.affected.clone(),
+			..Default::default()
+		};
 		let mut fixed_in = BTreeMap::new();
 		for package in &item.packages {
-			let ecosystems: Vec<String> = match source {
-				Source::Tamanu => vec![NPM.to_owned()],
-				Source::Linux => advisory
-					.affected
-					.iter()
-					.filter_map(|a| a.package.as_ref().map(|p| p.ecosystem.clone()))
-					.collect(),
-			};
-			let record = Record {
-				id: advisory.id.clone(),
-				affected: advisory.affected.clone(),
-				..Default::default()
-			};
-			let mut fixes: Vec<String> = ecosystems
+			let mut fixes: Vec<String> = Vec::new();
+			for fix in ecosystems
 				.iter()
 				.flat_map(|ecosystem| record.fixed_in(ecosystem, package))
-				.collect();
-			fixes.sort();
-			fixes.dedup();
+			{
+				if !fixes.contains(&fix) {
+					fixes.push(fix);
+				}
+			}
 			fixed_in.insert(package.clone(), fixes);
 		}
 
