@@ -85,6 +85,8 @@ pub enum RecordKind {
 	Name,
 	Certificate,
 	RelyingParty,
+	/// An OSV advisory, by its identifier.
+	Advisory,
 }
 
 /// A record an action acted on: its identifier, and its name as it was when the
@@ -711,6 +713,34 @@ actions! {
 	VersionRemoved = "version_removed", "Remove version" {
 		records { version: Record, device: Record }
 		detail { }
+	}
+
+	/// A vulnerability triage decision was recorded for an advisory within a
+	/// source, by an operator, a fleet query access token, or Canopy's AI worker.
+	// spec: VTR#audit
+	VulnerabilityDecided = "vulnerability_decided", "Record vulnerability decision" {
+		records { advisory: Record }
+		detail {
+			source: String, outcome: String, reason: Option<String>,
+			review_by: Option<String>, issue_url: Option<String>, via: String,
+		}
+	}
+
+	/// A decided vulnerability opened again, because an accepted risk's review
+	/// date passed or OSV revised the advisory so the decision no longer covers
+	/// what the fleet runs.
+	// spec: VTR#reopening
+	VulnerabilityReopened = "vulnerability_reopened", "Reopen vulnerability" {
+		records { advisory: Record }
+		detail { source: String, why: String }
+	}
+
+	/// A machine reported a changed list of installed packages. Pushed whenever a
+	/// machine's list changes, across the fleet, so routine.
+	// spec: PKG#report
+	MachinePackagesReported = "machine_packages_reported", "Report machine packages", tier = Routine {
+		records { machine: Record }
+		detail { distribution: String, release: String, package_count: i64 }
 	}
 
 	/// An identity token was issued, or refused as not granted, in which case

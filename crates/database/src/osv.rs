@@ -15,7 +15,18 @@ use serde::{Deserialize, Serialize};
 
 /// The qualitative rating an advisory carries, lowest first.
 #[derive(
-	Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+	Clone,
+	Copy,
+	Debug,
+	Default,
+	PartialEq,
+	Eq,
+	PartialOrd,
+	Ord,
+	Hash,
+	Serialize,
+	Deserialize,
+	utoipa::ToSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
@@ -104,13 +115,13 @@ pub struct SeverityEntry {
 	pub score: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Reference {
 	pub r#type: String,
 	pub url: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Affected {
 	#[serde(default)]
 	pub package: Option<Package>,
@@ -119,18 +130,20 @@ pub struct Affected {
 	#[serde(default)]
 	pub versions: Vec<String>,
 	#[serde(default)]
+	#[schema(value_type = Object)]
 	pub ecosystem_specific: serde_json::Value,
 	#[serde(default)]
+	#[schema(value_type = Object)]
 	pub database_specific: serde_json::Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Package {
 	pub ecosystem: String,
 	pub name: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Range {
 	pub r#type: String,
 	#[serde(default)]
@@ -138,7 +151,7 @@ pub struct Range {
 }
 
 /// One event of a range. OSV holds exactly one of the four per event.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Event {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub introduced: Option<String>,

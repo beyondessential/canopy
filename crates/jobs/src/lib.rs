@@ -11,3 +11,4 @@ pub mod domains;
 pub mod identity;
 pub mod relay;
 pub mod session_sweep;
+pub mod vulnerabilities;

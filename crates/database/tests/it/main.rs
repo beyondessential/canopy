@@ -93,3 +93,4 @@ mod upgrade_plans;
 mod version_known_issue_provenance;
 mod version_updates_view;
 mod versions;
+mod vulnerabilities;

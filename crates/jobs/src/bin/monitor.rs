@@ -21,6 +21,9 @@
 //! - **operator sessions** — retires safety-mode sessions no client has
 //!   presented for a day, on its own hourly timer (see `jobs::session_sweep`).
 //!
+//! - **vulnerabilities** — asks OSV which advisories affect what production runs, on its
+//!   own timer (see `jobs::vulnerabilities::scan`).
+//!
 //! Plus a startup **incident reconciliation** pass (see below).
 
 use std::time::Duration;
@@ -134,6 +137,11 @@ pub fn spawn() -> JoinHandle<()> {
 		// abandoned start does not hold an environment shut and a lease that
 		// expires is on the record.
 		jobs::ansible::leases::spawn();
+
+		// OSV matches for what production runs: Tamanu's dependencies and each
+		// machine's packages. Asks OSV, so on a timer of its own.
+		// spec: VUL#matching
+		jobs::vulnerabilities::scan::spawn();
 
 		// Deferred incident (re-)evaluation worker. The status-ingest path
 		// enqueues applications instead of evaluating incident membership inline

@@ -21,6 +21,7 @@ mod machine_enrollment;
 mod mcp;
 mod names;
 mod openapi_spec;
+mod packages;
 mod password;
 mod policy_regrade;
 mod reporting_schemas;
