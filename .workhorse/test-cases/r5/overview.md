@@ -9,6 +9,7 @@
 - [x] The newest published Tamanu version is scanned with nothing running it, and its items show zero applications exposed (verifies spec: VUL)
 - [ ] A non-production or archived machine's packages expose nothing (verifies spec: VUL)
 - [x] Re-ranking an application out of production removes its exposure without a rescan (verifies spec: VUL)
+- [x] A version carrying several affected packages counts its applications once for the item (verifies spec: VUL)
 - [ ] An application on a cluster has Tamanu exposure and no Linux exposure (verifies spec: VUL)
 - [x] An item nothing counts for leaves the open list, and returns when something counts for it again (verifies spec: VUL)
 - [x] Each distinct package version is queried once however many versions or machines carry it (verifies spec: VUL)
@@ -23,6 +24,7 @@
 - [x] A changed report is audited as a routine action (verifies spec: PKG)
 - [x] A device with no machine is refused (verifies spec: PKG)
 - [x] Ubuntu LTS and non-LTS releases and Debian releases are placed in the right OSV ecosystem (verifies spec: PKG)
+- [x] An Ubuntu point release (24.04.1) is placed in its release
 - [x] A report from an unplaceable distribution is kept, matches nothing, and the machine flags it (verifies spec: PKG)
 - [ ] The public API change passes the semver check against the previous client crate
 
@@ -35,6 +37,7 @@
 ## Triage decisions
 
 - [x] Not affected needs a reason; accepted risk needs a reason and a review date; will fix takes an optional reason and issue link (verifies spec: VTR)
+- [x] A will-fix issue link that is not an http or https address is refused
 - [x] A Tamanu decision covers a later Tamanu version carrying a package version inside the decision's ranges (verifies spec: VTR)
 - [ ] A Linux decision covers every machine with an affected package version (verifies spec: VTR)
 - [x] Recording a decision in the operator interface needs an admin and a write-mode session (verifies spec: VTR, SAFE)
@@ -50,8 +53,10 @@
 - [x] A new item is looked at once; a reopened item is looked at again (verifies spec: VTR)
 - [x] A not-affected answer on a listed ground becomes the model's decision (verifies spec: VTR)
 - [x] A not-affected answer naming no listed ground is kept as a suggestion (verifies spec: VTR)
+- [x] An answer naming a ground outside the list is kept as a suggestion (verifies spec: VTR)
 - [x] Any other outcome is kept as a suggestion, and the item stays open (verifies spec: VTR)
 - [x] On an item a person has decided before, the model only suggests (verifies spec: VTR)
+- [x] A person deciding while the model answers keeps their decision, and the answer is kept as a suggestion (verifies spec: VTR)
 - [x] With no model configured, nothing is looked at and new items stay open (verifies spec: VTR)
 - [x] An invalid model reply leaves the item with no suggestion
 
