@@ -678,6 +678,38 @@ async fn a_model_refusing_structured_output_is_asked_for_json_in_the_reply() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_model_that_refused_structured_output_is_not_asked_for_it_again() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let (fake, base) = scanned(&mut conn).await;
+		{
+			let mut f = fake.lock().unwrap();
+			f.structured_refusals.push(400);
+			for _ in 0..2 {
+				f.replies.push(
+					json!({"outcome": "will_fix", "ground": "none", "reason": "Reachable."})
+						.to_string(),
+				);
+			}
+		}
+		let model = model(&base);
+
+		ai::look_at(&mut conn, &model, "GHSA-1", Source::Tamanu)
+			.await
+			.unwrap();
+		diesel::sql_query("DELETE FROM vulnerability_suggestions")
+			.execute(&mut conn)
+			.await
+			.unwrap();
+		ai::look_at(&mut conn, &model, "GHSA-1", Source::Tamanu)
+			.await
+			.unwrap();
+
+		assert_eq!(fake.lock().unwrap().structured, [true, false, false]);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_provider_failure_is_not_retried_without_structured_output() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let (fake, base) = scanned(&mut conn).await;

@@ -8,7 +8,13 @@
 //! outcome is not affected on one of the fixed grounds, and only for an item
 //! no person has ever decided. Anything else is kept as a suggestion.
 
-use std::time::Duration;
+use std::{
+	sync::{
+		Arc,
+		atomic::{AtomicBool, Ordering},
+	},
+	time::Duration,
+};
 
 use commons_errors::{AppError, Result};
 use database::{
@@ -264,6 +270,9 @@ fn untrusted(text: &str) -> String {
 pub struct Model {
 	http: reqwest::Client,
 	config: Config,
+	/// Set once the provider has refused structured output for this model, so
+	/// later items go straight to JSON in the reply.
+	unstructured: Arc<AtomicBool>,
 }
 
 #[derive(Deserialize)]
@@ -289,6 +298,7 @@ impl Model {
 				.build()
 				.unwrap_or_default(),
 			config,
+			unstructured: Arc::default(),
 		}
 	}
 
@@ -351,13 +361,18 @@ impl Model {
 	pub async fn ask(&self, prompt: &str) -> Result<Option<Answer>> {
 		let refused =
 			|status: StatusCode| AppError::Upstream(format!("OpenRouter answered {status}"));
-		let reply = match self.complete(prompt, true).await? {
-			Ok(reply) => reply,
-			Err(status) if refuses_structured_output(status) => {
-				debug!("structured output refused ({status}); asking for JSON in the reply");
-				self.complete(prompt, false).await?.map_err(refused)?
+		let reply = if self.unstructured.load(Ordering::Relaxed) {
+			self.complete(prompt, false).await?.map_err(refused)?
+		} else {
+			match self.complete(prompt, true).await? {
+				Ok(reply) => reply,
+				Err(status) if refuses_structured_output(status) => {
+					debug!("structured output refused ({status}); asking for JSON in the reply");
+					self.unstructured.store(true, Ordering::Relaxed);
+					self.complete(prompt, false).await?.map_err(refused)?
+				}
+				Err(status) => return Err(refused(status)),
 			}
-			Err(status) => return Err(refused(status)),
 		};
 		Ok(Answer::parse(&reply))
 	}
