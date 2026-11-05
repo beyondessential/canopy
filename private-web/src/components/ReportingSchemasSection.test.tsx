@@ -202,6 +202,29 @@ describe("the environment a pair is for", () => {
 		expect(await screen.findByText("demo")).toBeTruthy();
 	});
 
+	it("lists pairs by environment, then by version", async () => {
+		stubApi([
+			pair({ rank: "demo", version_id: "1", version: "2.60.0", state: "built" }),
+			pair({ rank: "production", version_id: "2", version: "2.60.10", state: "built" }),
+			pair({ rank: "clone", version_id: "3", version: "2.60.0", state: "built" }),
+			pair({ rank: "production", version_id: "4", version: "2.60.9", state: "built" }),
+		]);
+		render(<ReportingSchemasSection groupId={GROUP} />);
+
+		const rows = await screen.findAllByTestId("reporting-schema-row");
+		expect(
+			rows.map((row) => {
+				const [rank, version] = row.querySelectorAll("td");
+				return `${rank.textContent} ${version.textContent}`;
+			}),
+		).toEqual([
+			"production 2.60.9",
+			"production 2.60.10",
+			"clone 2.60.0",
+			"demo 2.60.0",
+		]);
+	});
+
 	it("offers the built schema to read and nothing where none was built", async () => {
 		stubApi([
 			pair({ rank: "production", version_id: "1", state: "built", artifact_id: "art-1" }),
