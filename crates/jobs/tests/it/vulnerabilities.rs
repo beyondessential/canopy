@@ -30,7 +30,7 @@ use database::{
 		today,
 	},
 };
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use jiff::SignedDuration;
 use jobs::vulnerabilities::{
 	ai::{self, Config, Model},
@@ -54,6 +54,8 @@ struct Fake {
 	lockfiles: Vec<String>,
 	/// What the model replies with, in order.
 	replies: Vec<String>,
+	/// A database a person records a decision in while the model answers.
+	decided_while_answering: Option<String>,
 }
 
 type Shared = Arc<Mutex<Fake>>;
@@ -122,12 +124,35 @@ async fn lockfile(State(fake): State<Shared>, Path(version): Path<String>) -> St
 }
 
 async fn completion(State(fake): State<Shared>) -> Json<Value> {
-	let mut fake = fake.lock().unwrap();
-	let reply = if fake.replies.is_empty() {
-		String::new()
-	} else {
-		fake.replies.remove(0)
+	let (reply, decided_in) = {
+		let mut fake = fake.lock().unwrap();
+		let reply = if fake.replies.is_empty() {
+			String::new()
+		} else {
+			fake.replies.remove(0)
+		};
+		(reply, fake.decided_while_answering.take())
 	};
+	if let Some(url) = decided_in {
+		let mut conn = AsyncPgConnection::establish(&url).await.unwrap();
+		Decision::record(
+			&mut conn,
+			NewDecision {
+				vulnerability_id: "GHSA-1".into(),
+				source: Source::Tamanu,
+				outcome: Outcome::WillFix,
+				reason: None,
+				review_by: None,
+				issue_url: None,
+				ground: None,
+				actor: Actor::operator("admin@example.com", None),
+				via: Via::Ui,
+			},
+			today(),
+		)
+		.await
+		.unwrap();
+	}
 	Json(json!({ "choices": [{ "message": { "content": reply } }] }))
 }
 
@@ -541,6 +566,34 @@ async fn an_item_a_person_decided_before_only_gets_a_suggestion() {
 			"a person's decision is not replaced"
 		);
 		assert!(detail.item.suggestion.is_some());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_person_deciding_while_the_model_answers_keeps_their_decision() {
+	commons_tests::db::TestDb::run(async |mut conn, url| {
+		let (fake, base) = scanned(&mut conn).await;
+		{
+			let mut f = fake.lock().unwrap();
+			f.replies.push(
+				json!({"outcome": "not_affected", "ground": "frontend_only", "reason": "Browser only."})
+					.to_string(),
+			);
+			f.decided_while_answering = Some(url.to_string());
+		}
+
+		ai::pass(&mut conn, &model(&base), 10).await.unwrap();
+
+		let detail = item(&mut conn).await;
+		assert_eq!(detail.item.status, Status::WillFix);
+		assert_eq!(detail.item.decision.unwrap().via, Via::Ui);
+		assert!(
+			Suggestion::get(&mut conn, "GHSA-1", Source::Tamanu)
+				.await
+				.unwrap()
+				.is_some()
+		);
 	})
 	.await;
 }

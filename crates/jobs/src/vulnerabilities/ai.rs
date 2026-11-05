@@ -328,58 +328,63 @@ pub async fn look_at(
 		return Ok(Looked::NoAnswer);
 	};
 
-	match plan(&answer, detail.person_has_decided) {
-		Plan::Decide(ground) => {
-			conn.transaction::<_, AppError, _>(async |conn| {
-				let decision = Decision::record(
-					conn,
-					NewDecision {
-						vulnerability_id: id.to_owned(),
+	// A person may decide the item while the model is answering, so whether one
+	// has is checked again, holding the item, as the answer is written.
+	let looked = conn
+		.transaction::<_, AppError, _>(async |conn| {
+			Decision::lock_item(conn, id, source).await?;
+			let person_has_decided = Decision::person_has_decided(conn, id, source).await?;
+			match plan(&answer, person_has_decided) {
+				Plan::Decide(ground) => {
+					let decision = Decision::record(
+						conn,
+						NewDecision {
+							vulnerability_id: id.to_owned(),
+							source,
+							outcome: Outcome::NotAffected,
+							reason: Some(answer.reason.clone()),
+							review_by: None,
+							issue_url: None,
+							ground: Some(ground),
+							actor: Actor::canopy(JOB),
+							via: Via::Model,
+						},
+						today,
+					)
+					.await?;
+					audit::record(
+						conn,
+						&Actor::canopy(JOB),
+						&Action::VulnerabilityDecided {
+							advisory: Record::new(RecordKind::Advisory, id, id),
+							source: source.as_str().to_owned(),
+							outcome: decision.outcome.as_str().to_owned(),
+							reason: decision.reason.clone(),
+							review_by: None,
+							issue_url: None,
+							via: Via::Model.as_str().to_owned(),
+						},
+					)
+					.await?;
+					Ok(Looked::Decided)
+				}
+				Plan::Suggest => {
+					Suggestion::record(
+						conn,
+						id,
 						source,
-						outcome: Outcome::NotAffected,
-						reason: Some(answer.reason.clone()),
-						review_by: None,
-						issue_url: None,
-						ground: Some(ground),
-						actor: Actor::canopy(JOB),
-						via: Via::Model,
-					},
-					today,
-				)
-				.await?;
-				audit::record(
-					conn,
-					&Actor::canopy(JOB),
-					&Action::VulnerabilityDecided {
-						advisory: Record::new(RecordKind::Advisory, id, id),
-						source: source.as_str().to_owned(),
-						outcome: decision.outcome.as_str().to_owned(),
-						reason: decision.reason.clone(),
-						review_by: None,
-						issue_url: None,
-						via: Via::Model.as_str().to_owned(),
-					},
-				)
-				.await?;
-				Ok(())
-			})
-			.await?;
-			Ok(Looked::Decided)
-		}
-		Plan::Suggest => {
-			Suggestion::record(
-				conn,
-				id,
-				source,
-				answer.outcome,
-				answer.ground,
-				&answer.reason,
-				model.name(),
-			)
-			.await?;
-			Ok(Looked::Suggested)
-		}
-	}
+						answer.outcome,
+						answer.ground,
+						&answer.reason,
+						model.name(),
+					)
+					.await?;
+					Ok(Looked::Suggested)
+				}
+			}
+		})
+		.await?;
+	Ok(looked)
 }
 
 /// Claim what is waiting and look at it. Returns how many items were looked at.

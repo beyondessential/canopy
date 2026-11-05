@@ -942,24 +942,7 @@ impl Decision {
 			_ => None,
 		};
 
-		let exists: Option<String> = diesel::sql_query(
-			"SELECT vulnerability_id AS id FROM vulnerability_items \
-			 WHERE vulnerability_id = $1 AND source = $2",
-		)
-		.bind::<sql_types::Text, _>(&new.vulnerability_id)
-		.bind::<sql_types::Text, _>(new.source.as_str())
-		.load::<IdRow>(conn)
-		.await?
-		.into_iter()
-		.next()
-		.map(|row| row.id);
-		if exists.is_none() {
-			return Err(AppError::NotFound(format!(
-				"no {} vulnerability {}",
-				new.source.as_str(),
-				new.vulnerability_id
-			)));
-		}
+		Self::lock_item(conn, &new.vulnerability_id, new.source).await?;
 
 		let row: DecisionRow = diesel::sql_query(format!(
 			"INSERT INTO vulnerability_decisions \
@@ -981,6 +964,31 @@ impl Decision {
 		.get_result(conn)
 		.await?;
 		Ok(row.into())
+	}
+
+	/// Hold the item until the transaction ends, so decisions on it are
+	/// recorded one at a time and a check made under the hold stays true until
+	/// the decision is written. An item that does not exist is not found.
+	pub async fn lock_item(
+		conn: &mut AsyncPgConnection,
+		vulnerability_id: &str,
+		source: Source,
+	) -> Result<()> {
+		let held = diesel::sql_query(
+			"SELECT 1 FROM vulnerability_items \
+			 WHERE vulnerability_id = $1 AND source = $2 FOR UPDATE",
+		)
+		.bind::<sql_types::Text, _>(vulnerability_id)
+		.bind::<sql_types::Text, _>(source.as_str())
+		.execute(conn)
+		.await?;
+		if held == 0 {
+			return Err(AppError::NotFound(format!(
+				"no {} vulnerability {vulnerability_id}",
+				source.as_str()
+			)));
+		}
+		Ok(())
 	}
 
 	/// An item's decisions, newest first.
@@ -1022,12 +1030,6 @@ impl Decision {
 		.await?;
 		Ok(row.decided)
 	}
-}
-
-#[derive(QueryableByName)]
-struct IdRow {
-	#[diesel(sql_type = sql_types::Text)]
-	id: String,
 }
 
 // ── Reopening ───────────────────────────────────────────────────────────────
