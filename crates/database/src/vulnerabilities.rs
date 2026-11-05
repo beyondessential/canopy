@@ -937,6 +937,19 @@ pub struct NewDecision {
 }
 
 impl NewDecision {
+	/// A review date as a surface takes it, `YYYY-MM-DD`; blank is none.
+	pub fn parse_review_by(value: Option<&str>) -> Result<Option<Date>> {
+		value
+			.map(str::trim)
+			.filter(|date| !date.is_empty())
+			.map(|date| {
+				date.parse().map_err(|_| {
+					AppError::BadRequest(format!("{date:?} is not a date (YYYY-MM-DD)"))
+				})
+			})
+			.transpose()
+	}
+
 	/// What the outcome requires: a reason for not affected and accepted risk,
 	/// a review date in the future for accepted risk, and for will fix an issue
 	/// link that is a web address, since it is presented as a link.

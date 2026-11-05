@@ -6,7 +6,7 @@
 
 use axum::{Json, extract::State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
-use commons_errors::{AppError, ProblemDetailsSchema, Result};
+use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::{
 	audit::Audit,
 	tailscale_auth::{TailscaleAdmin, TailscaleUser},
@@ -20,7 +20,6 @@ use database::{
 		Status, Via, today,
 	},
 };
-use jiff::civil::Date;
 use serde::Deserialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -166,16 +165,7 @@ pub async fn decide(
 	TailscaleAdmin(admin): TailscaleAdmin,
 	Json(args): Json<VulnerabilityDecideArgs>,
 ) -> Result<Json<Decision>> {
-	let review_by: Option<Date> = args
-		.review_by
-		.as_deref()
-		.filter(|date| !date.trim().is_empty())
-		.map(|date| {
-			date.trim()
-				.parse()
-				.map_err(|_| AppError::BadRequest(format!("{date:?} is not a date (YYYY-MM-DD)")))
-		})
-		.transpose()?;
+	let review_by = NewDecision::parse_review_by(args.review_by.as_deref())?;
 
 	let mut conn = audit.begin().await?;
 	let decision = Decision::record(

@@ -178,16 +178,13 @@ impl CanopyMcp {
 		let source = source(&args.source)?;
 		let outcome =
 			Outcome::parse(&args.outcome).ok_or_else(|| invalid("outcome", &args.outcome))?;
-		let review_by = args
-			.review_by
-			.as_deref()
-			.filter(|date| !date.trim().is_empty())
-			.map(|date| {
-				date.trim()
-					.parse()
-					.map_err(|_| invalid("review_by (expected YYYY-MM-DD)", date))
-			})
-			.transpose()?;
+		let review_by =
+			NewDecision::parse_review_by(args.review_by.as_deref()).map_err(|e| match e {
+				commons_errors::AppError::BadRequest(message) => {
+					McpError::invalid_params(message, None)
+				}
+				e => mcp_err(e),
+			})?;
 
 		let actor = caller.actor();
 		let mut conn = self.db_write.get().await.map_err(mcp_err)?;
