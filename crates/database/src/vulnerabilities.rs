@@ -1163,8 +1163,7 @@ impl Reopened {
 	) -> Result<Option<Self>> {
 		let row: Option<ReopenedRow> = diesel::sql_query(
 			"INSERT INTO vulnerability_reopenings (vulnerability_id, source, decision_id, reason) \
-			 SELECT $1, $2, $3, $4 \
-			 WHERE NOT EXISTS (SELECT 1 FROM vulnerability_reopenings WHERE decision_id = $3) \
+			 VALUES ($1, $2, $3, $4) ON CONFLICT (decision_id) DO NOTHING \
 			 RETURNING id, vulnerability_id, source, decision_id, reason, created_at",
 		)
 		.bind::<sql_types::Text, _>(&decision.vulnerability_id)

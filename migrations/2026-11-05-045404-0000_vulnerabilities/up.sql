@@ -148,7 +148,8 @@ CREATE TABLE vulnerability_reopenings (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	vulnerability_id TEXT NOT NULL,
 	source TEXT NOT NULL,
-	decision_id UUID NOT NULL REFERENCES vulnerability_decisions (id) ON DELETE CASCADE,
+	-- A decision reopens once.
+	decision_id UUID NOT NULL UNIQUE REFERENCES vulnerability_decisions (id) ON DELETE CASCADE,
 	reason JSONB NOT NULL,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	FOREIGN KEY (vulnerability_id, source)
