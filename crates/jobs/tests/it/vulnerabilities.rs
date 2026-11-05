@@ -502,6 +502,25 @@ async fn a_not_affected_answer_on_a_listed_ground_becomes_the_models_decision() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_frontend_only_ground_the_lockfile_contradicts_is_a_suggestion() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		// left-pad is reached from the server workspace, not the frontend's.
+		let (fake, base) = scanned(&mut conn).await;
+		fake.lock().unwrap().replies.push(
+			json!({"outcome": "not_affected", "ground": "frontend_only", "reason": "Browser only."})
+				.to_string(),
+		);
+
+		ai::pass(&mut conn, &model(&base), 10).await.unwrap();
+
+		let detail = item(&mut conn).await;
+		assert_eq!(detail.item.status, Status::Open);
+		assert!(detail.item.suggestion.is_some());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn any_other_answer_is_a_suggestion_and_the_item_stays_open() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let (fake, base) = scanned(&mut conn).await;

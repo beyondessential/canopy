@@ -109,11 +109,34 @@ pub enum Plan {
 	Suggest,
 }
 
+/// The workspace Tamanu's web frontend is built from.
+const FRONTEND_WORKSPACE: &str = "@tamanu/web";
+
+/// Whether what Canopy holds bears out a ground the model gave, where it holds
+/// anything to check it against. `frontend_only` needs every workspace that
+/// reaches the package, in every exposed version, to be the frontend's.
+fn ground_holds(ground: Ground, detail: &ItemDetail) -> bool {
+	match ground {
+		Ground::FrontendOnly => {
+			detail.item.source == Source::Tamanu
+				&& !detail.versions.is_empty()
+				&& detail.versions.iter().all(|version| {
+					!version.workspaces.is_empty()
+						&& version
+							.workspaces
+							.iter()
+							.all(|workspace| workspace == FRONTEND_WORKSPACE)
+				})
+		}
+		Ground::BuildTimeOnly | Ground::UnaffectedPlatform => true,
+	}
+}
+
 /// Canopy's check of the model's answer: a decision only for not affected on a
-/// listed ground, on an item no person has ever decided.
-pub fn plan(answer: &Answer, person_has_decided: bool) -> Plan {
+/// listed ground that holds, on an item no person has ever decided.
+pub fn plan(answer: &Answer, person_has_decided: bool, ground_holds: bool) -> Plan {
 	match (answer.outcome, answer.ground, person_has_decided) {
-		(Outcome::NotAffected, Some(ground), false) => Plan::Decide(ground),
+		(Outcome::NotAffected, Some(ground), false) if ground_holds => Plan::Decide(ground),
 		_ => Plan::Suggest,
 	}
 }
@@ -377,7 +400,10 @@ pub async fn look_at(
 		.transaction::<_, AppError, _>(async |conn| {
 			Decision::lock_item(conn, id, source).await?;
 			let person_has_decided = Decision::person_has_decided(conn, id, source).await?;
-			match plan(&answer, person_has_decided) {
+			let grounds_hold = answer
+				.ground
+				.is_none_or(|ground| ground_holds(ground, &detail));
+			match plan(&answer, person_has_decided, grounds_hold) {
 				Plan::Decide(ground) => {
 					let decision = Decision::record(
 						conn,
@@ -447,7 +473,8 @@ mod tests {
 		assert_eq!(
 			plan(
 				&answer(Outcome::NotAffected, Some(Ground::FrontendOnly)),
-				false
+				false,
+				true
 			),
 			Plan::Decide(Ground::FrontendOnly)
 		);
@@ -456,7 +483,7 @@ mod tests {
 	#[test]
 	fn not_affected_on_no_listed_ground_is_a_suggestion() {
 		assert_eq!(
-			plan(&answer(Outcome::NotAffected, None), false),
+			plan(&answer(Outcome::NotAffected, None), false, true),
 			Plan::Suggest
 		);
 	}
@@ -465,10 +492,22 @@ mod tests {
 	fn any_other_outcome_is_a_suggestion_whatever_ground_it_claims() {
 		for outcome in [Outcome::AcceptedRisk, Outcome::WillFix] {
 			assert_eq!(
-				plan(&answer(outcome, Some(Ground::BuildTimeOnly)), false),
+				plan(&answer(outcome, Some(Ground::BuildTimeOnly)), false, true),
 				Plan::Suggest
 			);
 		}
+	}
+
+	#[test]
+	fn a_ground_that_does_not_hold_is_a_suggestion() {
+		assert_eq!(
+			plan(
+				&answer(Outcome::NotAffected, Some(Ground::FrontendOnly)),
+				false,
+				false
+			),
+			Plan::Suggest
+		);
 	}
 
 	#[test]
@@ -476,6 +515,7 @@ mod tests {
 		assert_eq!(
 			plan(
 				&answer(Outcome::NotAffected, Some(Ground::UnaffectedPlatform)),
+				true,
 				true
 			),
 			Plan::Suggest
@@ -507,7 +547,7 @@ mod tests {
 		let reply = r#"{"outcome": "not_affected", "ground": "my_own_ground", "reason": "x"}"#;
 		let answer = Answer::parse(reply).unwrap();
 		assert_eq!(answer.ground, None);
-		assert_eq!(plan(&answer, false), Plan::Suggest);
+		assert_eq!(plan(&answer, false, true), Plan::Suggest);
 	}
 
 	#[test]
