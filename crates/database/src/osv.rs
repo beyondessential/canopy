@@ -502,6 +502,10 @@ impl Held {
 				to: now_severity,
 			});
 		}
+		// Unchanged ranges reach what they reached, so there is nothing to walk.
+		if now_affected == self.affected.as_slice() {
+			return None;
+		}
 		let reached = counted.iter().find(|c| {
 			reaches(now_affected, &c.ecosystem, &c.name, &c.version)
 				&& !reaches(&self.affected, &c.ecosystem, &c.name, &c.version)
