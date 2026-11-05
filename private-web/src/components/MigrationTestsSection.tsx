@@ -131,6 +131,7 @@ export default function MigrationTestsSection({
 							(a, b) =>
 								serverSortKey(byId.get(a.server_id) ?? {}) -
 									serverSortKey(byId.get(b.server_id) ?? {}) ||
+								VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] ||
 								nameOf(a.server_id).localeCompare(nameOf(b.server_id)),
 						)
 						.map((row) => (
@@ -148,6 +149,13 @@ export default function MigrationTestsSection({
 		</Paper>
 	);
 }
+
+/// Problems first: a passing server is the row an operator scrolls past.
+const VERDICT_ORDER: Record<string, number> = {
+	failed: 0,
+	nottested: 1,
+	passed: 2,
+};
 
 function SectionHeading() {
 	return (

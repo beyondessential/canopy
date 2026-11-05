@@ -14,7 +14,7 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-it("lists rows by environment, then by name", async () => {
+it("lists rows by environment, then problems first, then by name", async () => {
 	const servers = [
 		server("1", "kamaka demo", "demo"),
 		server("2", "drifting", "production"),
@@ -26,7 +26,7 @@ it("lists rows by environment, then by name", async () => {
 		{ server_id: "1", target_version: "2.60.0", verdict: "failed", latest: null },
 		{ server_id: "2", target_version: "2.60.0", verdict: "passed", latest: null },
 		{ server_id: "3", target_version: "2.60.0", verdict: "nottested", latest: null },
-		{ server_id: "4", target_version: "2.60.0", verdict: "passed", latest: null },
+		{ server_id: "4", target_version: "2.60.0", verdict: "failed", latest: null },
 		{ server_id: "5", target_version: "2.60.0", verdict: "failed", latest: null },
 	];
 	vi.stubGlobal(
@@ -48,8 +48,8 @@ it("lists rows by environment, then by name", async () => {
 
 	const rows = await screen.findAllByTestId("migration-test-row");
 	expect(rows.map((row) => row.querySelector("a")?.textContent)).toEqual([
-		"drifting",
 		"kamaka",
+		"drifting",
 		"kamaka clone",
 		"kamaka demo",
 		"aardvark",

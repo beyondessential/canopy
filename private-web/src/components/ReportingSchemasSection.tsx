@@ -19,6 +19,7 @@ import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { GradedAction } from "./GradedAction";
 import ServerRankChip from "./ServerRankChip";
+import { versionCompare } from "../lib/valueOrder";
 import { serverSortKey } from "../types";
 
 type PairState = "awaiting" | "built" | "failed";
@@ -104,7 +105,7 @@ export default function ReportingSchemasSection({
 						.sort(
 							(a, b) =>
 								serverSortKey(a) - serverSortKey(b) ||
-								a.version.localeCompare(b.version, undefined, { numeric: true }),
+								versionCompare(a.version, b.version),
 						)
 						.map((pair) => (
 							<TableRow

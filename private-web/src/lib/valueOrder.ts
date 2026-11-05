@@ -42,7 +42,7 @@ function numericCompare(a: string, b: string): number {
 /// counting as zero, so `2.10` beats `2.9` and `16` beats `9.6`. A trailing
 /// `-rc1`/`+build` breaks a tie between equal cores, the bare version
 /// sorting above its own prereleases as semver has it.
-function versionCompare(a: string, b: string): number {
+export function versionCompare(a: string, b: string): number {
 	const [aCore, aTail] = splitTail(a);
 	const [bCore, bTail] = splitTail(b);
 	const aParts = aCore.split(".");
