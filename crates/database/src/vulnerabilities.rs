@@ -1431,11 +1431,49 @@ impl ItemSummary {
 	) -> Result<Listing> {
 		let fleet = CountedFleet::load(conn).await?;
 		let exposure = Exposure::load(conn, &fleet, None).await?;
-		let tallies = exposure.tallies();
+		let mut items: Vec<Self> = Self::load(conn, &exposure, None, today)
+			.await?
+			.into_iter()
+			.filter(|item| {
+				!(filter.source.is_some_and(|s| s != item.source)
+					|| filter.status.is_some_and(|s| s != item.status)
+					|| filter.min_severity.is_some_and(|s| item.severity < s)
+					|| (!filter.include_uncounted && !item.counts))
+			})
+			.collect();
 
-		let rows: Vec<ItemRow> = diesel::sql_query(
-			"SELECT vulnerability_id, source, first_seen_at FROM vulnerability_items",
-		)
+		items.sort_by(|a, b| {
+			b.severity
+				.cmp(&a.severity)
+				.then(b.exposed.cmp(&a.exposed))
+				.then_with(|| a.id.cmp(&b.id))
+				.then_with(|| a.source.as_str().cmp(b.source.as_str()))
+		});
+		let truncated = filter.limit.is_some_and(|limit| items.len() > limit);
+		if let Some(limit) = filter.limit {
+			items.truncate(limit);
+		}
+		Ok(Listing { items, truncated })
+	}
+
+	/// The items `exposure` was worked out for, or the one item `only` names.
+	async fn load(
+		conn: &mut AsyncPgConnection,
+		exposure: &Exposure,
+		only: Option<(&str, Source)>,
+		today: Date,
+	) -> Result<Vec<Self>> {
+		let tallies = exposure.tallies();
+		let only_id = only.map(|(id, _)| id);
+		let only_source = only.map(|(_, source)| source.as_str());
+		const ONLY: &str = "($1::text IS NULL OR vulnerability_id = $1) \
+			AND ($2::text IS NULL OR source = $2)";
+
+		let rows: Vec<ItemRow> = diesel::sql_query(format!(
+			"SELECT vulnerability_id, source, first_seen_at FROM vulnerability_items WHERE {ONLY}"
+		))
+		.bind::<sql_types::Nullable<sql_types::Text>, _>(only_id)
+		.bind::<sql_types::Nullable<sql_types::Text>, _>(only_source)
 		.load(conn)
 		.await?;
 		let ids: Vec<String> = rows
@@ -1451,9 +1489,11 @@ impl ItemSummary {
 		let decisions: HashMap<(String, Source), Decision> = {
 			let rows: Vec<DecisionRow> = diesel::sql_query(format!(
 				"SELECT DISTINCT ON (vulnerability_id, source) {DECISION_COLUMNS} \
-				 FROM vulnerability_decisions \
+				 FROM vulnerability_decisions WHERE {ONLY} \
 				 ORDER BY vulnerability_id, source, created_at DESC, id"
 			))
+			.bind::<sql_types::Nullable<sql_types::Text>, _>(only_id)
+			.bind::<sql_types::Nullable<sql_types::Text>, _>(only_source)
 			.load(conn)
 			.await?;
 			rows.into_iter()
@@ -1462,12 +1502,14 @@ impl ItemSummary {
 				.collect()
 		};
 		let reopenings: HashMap<(String, Source), Reopened> = {
-			let rows: Vec<ReopenedRow> = diesel::sql_query(
+			let rows: Vec<ReopenedRow> = diesel::sql_query(format!(
 				"SELECT DISTINCT ON (vulnerability_id, source) \
 				 id, vulnerability_id, source, decision_id, reason, created_at \
-				 FROM vulnerability_reopenings \
-				 ORDER BY vulnerability_id, source, created_at DESC, id",
-			)
+				 FROM vulnerability_reopenings WHERE {ONLY} \
+				 ORDER BY vulnerability_id, source, created_at DESC, id"
+			))
+			.bind::<sql_types::Nullable<sql_types::Text>, _>(only_id)
+			.bind::<sql_types::Nullable<sql_types::Text>, _>(only_source)
 			.load(conn)
 			.await?;
 			rows.into_iter()
@@ -1476,10 +1518,12 @@ impl ItemSummary {
 				.collect()
 		};
 		let suggestions: HashMap<(String, Source), Suggestion> = {
-			let rows: Vec<SuggestionRow> = diesel::sql_query(
+			let rows: Vec<SuggestionRow> = diesel::sql_query(format!(
 				"SELECT vulnerability_id, source, outcome, ground, reason, model, created_at \
-				 FROM vulnerability_suggestions",
-			)
+				 FROM vulnerability_suggestions WHERE {ONLY}"
+			))
+			.bind::<sql_types::Nullable<sql_types::Text>, _>(only_id)
+			.bind::<sql_types::Nullable<sql_types::Text>, _>(only_source)
 			.load(conn)
 			.await?;
 			rows.into_iter().map(SuggestionRow::split).collect()
@@ -1515,7 +1559,7 @@ impl ItemSummary {
 			let reopened = reopenings.get(&key);
 			let (status, reopened) = Self::standing(decision, reopened, today);
 
-			let item = Self {
+			items.push(Self {
 				id: row.vulnerability_id,
 				source,
 				aliases: advisory.aliases.clone(),
@@ -1531,29 +1575,9 @@ impl ItemSummary {
 					.then(|| suggestions.get(&key).cloned())
 					.flatten(),
 				first_seen_at: row.first_seen_at,
-			};
-			if filter.source.is_some_and(|s| s != item.source)
-				|| filter.status.is_some_and(|s| s != item.status)
-				|| filter.min_severity.is_some_and(|s| item.severity < s)
-				|| (!filter.include_uncounted && !item.counts)
-			{
-				continue;
-			}
-			items.push(item);
+			});
 		}
-
-		items.sort_by(|a, b| {
-			b.severity
-				.cmp(&a.severity)
-				.then(b.exposed.cmp(&a.exposed))
-				.then_with(|| a.id.cmp(&b.id))
-				.then_with(|| a.source.as_str().cmp(b.source.as_str()))
-		});
-		let truncated = filter.limit.is_some_and(|limit| items.len() > limit);
-		if let Some(limit) = filter.limit {
-			items.truncate(limit);
-		}
-		Ok(Listing { items, truncated })
+		Ok(items)
 	}
 }
 
@@ -1614,26 +1638,15 @@ impl ItemDetail {
 		let advisory = Advisory::get(conn, id)
 			.await?
 			.ok_or_else(|| AppError::NotFound(format!("no vulnerability {id}")))?;
-		let listing = ItemSummary::list(
-			conn,
-			&ListFilter {
-				source: Some(source),
-				include_uncounted: true,
-				..Default::default()
-			},
-			today,
-		)
-		.await?;
-		let item = listing
-			.items
+		let fleet = CountedFleet::load(conn).await?;
+		let exposure = Exposure::load(conn, &fleet, Some(id)).await?;
+		let item = ItemSummary::load(conn, &exposure, Some((id, source)), today)
+			.await?
 			.into_iter()
-			.find(|item| item.id == id)
+			.next()
 			.ok_or_else(|| {
 				AppError::NotFound(format!("no {} vulnerability {id}", source.as_str()))
 			})?;
-
-		let fleet = CountedFleet::load(conn).await?;
-		let exposure = Exposure::load(conn, &fleet, Some(id)).await?;
 		let versions: Vec<ExposedVersion> = exposure
 			.versions
 			.into_iter()
