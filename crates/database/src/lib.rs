@@ -40,6 +40,7 @@ pub mod mcp_tokens;
 pub mod migration_tests;
 pub mod notes;
 pub mod operator_sessions;
+pub mod osv;
 pub mod partitions;
 pub mod pg_duration;
 pub mod recovery_vault;
