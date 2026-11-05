@@ -92,6 +92,7 @@ pub async fn list(
 pub struct VulnerabilityItemArgs {
 	/// The advisory's OSV identifier.
 	pub id: String,
+	/// The source the item belongs to.
 	pub source: Source,
 }
 
@@ -128,7 +129,9 @@ pub async fn get(
 pub struct VulnerabilityDecideArgs {
 	/// The advisory's OSV identifier.
 	pub id: String,
+	/// The source the decision covers.
 	pub source: Source,
+	/// What it decides.
 	pub outcome: Outcome,
 	/// Why. Required for not affected and accepted risk.
 	pub reason: Option<String>,
@@ -198,6 +201,7 @@ pub async fn decide(
 /// Which machine.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct VulnerabilityMachineArgs {
+	/// The machine to read.
 	pub machine_id: Uuid,
 }
 

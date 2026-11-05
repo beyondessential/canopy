@@ -47,6 +47,7 @@ use utoipa::{
 		(name = "sql", description = "Read-only SQL playground."),
 		(name = "statuses", description = "Live server status and version-distance summaries."),
 		(name = "versions", description = "Canopy release versions and downloadable artifacts."),
+		(name = "vulnerabilities", description = "Published vulnerabilities in what the production fleet runs, and their triage."),
 	),
 )]
 pub struct ApiDoc;

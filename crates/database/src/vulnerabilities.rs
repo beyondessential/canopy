@@ -223,14 +223,24 @@ fn strings(array: Vec<Option<String>>) -> Vec<String> {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityAdvisory)]
 pub struct Advisory {
+	/// The advisory's OSV identifier.
 	pub id: String,
+	/// Other identifiers for the same flaw, such as its CVE.
 	pub aliases: Vec<String>,
+	/// A one-line summary.
 	pub summary: String,
+	/// The advisory's full description, in Markdown.
 	pub details: String,
+	/// The severity Canopy ranks it by: its CVSS score where it has one,
+	/// otherwise its database's rating.
 	pub severity: Severity,
+	/// The packages it affects, with their affected versions and ranges.
 	pub affected: Vec<Affected>,
+	/// Links it gives: articles, reports, fixes.
 	pub references: Vec<osv::Reference>,
+	/// When it was published, where OSV says.
 	pub published_at: Option<Timestamp>,
+	/// When OSV last revised it.
 	pub modified_at: Timestamp,
 }
 
@@ -612,11 +622,13 @@ pub async fn prune_matches(conn: &mut AsyncPgConnection, keep: &[Counted]) -> Re
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityExposedVersion)]
 pub struct ExposedVersion {
+	/// The Tamanu version's identifier.
 	pub version_id: Uuid,
 	/// `major.minor.patch`.
 	pub version: String,
 	/// The affected package, as this version carries it.
 	pub package: String,
+	/// The version of the package this version carries.
 	pub package_version: String,
 	/// The Tamanu workspaces that reach the package.
 	pub workspaces: Vec<String>,
@@ -634,11 +646,17 @@ pub struct ExposedVersion {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityExposedMachine)]
 pub struct ExposedMachine {
+	/// The machine's identifier.
 	pub machine_id: Uuid,
+	/// The machine's name.
 	pub machine_name: String,
+	/// The group the machine is in, if any.
 	pub group_id: Option<Uuid>,
+	/// That group's name.
 	pub group_name: Option<String>,
+	/// The affected package, as installed on the machine.
 	pub package: String,
+	/// The version of it installed.
 	pub package_version: String,
 }
 
@@ -821,18 +839,27 @@ pub async fn refresh_counts(conn: &mut AsyncPgConnection, exposure: &Exposure) -
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityDecision)]
 pub struct Decision {
+	/// The decision's identifier.
 	pub id: Uuid,
+	/// The advisory's OSV identifier.
 	pub vulnerability_id: String,
+	/// The source it decides the advisory for.
 	pub source: Source,
+	/// What it decides.
 	pub outcome: Outcome,
+	/// Why it was decided so.
 	pub reason: Option<String>,
 	/// For an accepted risk, the date it is looked at again, `YYYY-MM-DD`.
 	pub review_by: Option<String>,
+	/// For will fix, a link to the issue tracking the fix.
 	pub issue_url: Option<String>,
 	/// The ground the model decided on.
 	pub ground: Option<Ground>,
+	/// Who decided it.
 	pub actor: Actor,
+	/// How it was decided.
 	pub via: Via,
+	/// When it was decided.
 	pub created_at: Timestamp,
 	#[serde(skip)]
 	#[schema(ignore)]
@@ -1078,14 +1105,20 @@ impl Decision {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityReopened)]
 pub struct Reopened {
+	/// The reopening's identifier.
 	pub id: Uuid,
+	/// The advisory's OSV identifier.
 	pub vulnerability_id: String,
+	/// The source the item belongs to.
 	pub source: Source,
+	/// The decision it opened from.
 	pub decision_id: Uuid,
 	/// Why, in words.
 	pub why: String,
+	/// Why, as a tagged reason: `review_due`, `severity_rose` or `range_widened`.
 	#[schema(value_type = Object)]
 	pub reason: Reopening,
+	/// When it opened again.
 	pub created_at: Timestamp,
 }
 
@@ -1236,10 +1269,15 @@ impl Reopened {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilitySuggestion)]
 pub struct Suggestion {
+	/// The decision the model suggests.
 	pub outcome: Outcome,
+	/// The ground it suggests not affected on, when it does.
 	pub ground: Option<Ground>,
+	/// Why, in the model's words.
 	pub reason: String,
+	/// The model that made it.
 	pub model: String,
+	/// When it was made.
 	pub created_at: Timestamp,
 }
 
@@ -1333,10 +1371,15 @@ impl Suggestion {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityItem)]
 pub struct ItemSummary {
+	/// The advisory's OSV identifier.
 	pub id: String,
+	/// Where the item's exposure comes from.
 	pub source: Source,
+	/// Other identifiers for the same flaw, such as its CVE.
 	pub aliases: Vec<String>,
+	/// The advisory's one-line summary.
 	pub summary: String,
+	/// The advisory's severity.
 	pub severity: Severity,
 	/// The affected packages that match something the fleet counts.
 	pub packages: Vec<String>,
@@ -1344,12 +1387,15 @@ pub struct ItemSummary {
 	pub exposed: i64,
 	/// Whether anything counts for it.
 	pub counts: bool,
+	/// Where its triage stands.
 	pub status: Status,
 	/// The current decision, if the item has been decided and not reopened.
 	pub decision: Option<Decision>,
 	/// Why the item opened again, when it has.
 	pub reopened: Option<Reopened>,
+	/// The model's latest suggestion, if it has made one.
 	pub suggestion: Option<Suggestion>,
+	/// When a scan first found it.
 	pub first_seen_at: Timestamp,
 }
 
@@ -1368,6 +1414,7 @@ pub struct ListFilter {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityListing)]
 pub struct Listing {
+	/// The items, in order.
 	pub items: Vec<ItemSummary>,
 	/// Whether more matched than are listed.
 	pub truncated: bool,
@@ -1614,7 +1661,9 @@ impl HistoryEntry {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityDetail)]
 pub struct ItemDetail {
+	/// The item as the list presents it.
 	pub item: ItemSummary,
+	/// The advisory, as cached from OSV.
 	pub advisory: Advisory,
 	/// The versions that fix it, for each affected package it matches.
 	pub fixed_in: BTreeMap<String, Vec<String>>,

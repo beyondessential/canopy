@@ -116,41 +116,56 @@ pub struct SeverityEntry {
 	pub score: String,
 }
 
+/// A link an advisory gives: an article, a report, a fix.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = OsvReference)]
 pub struct Reference {
+	/// What kind of link OSV calls it: `ADVISORY`, `ARTICLE`, `REPORT`, `FIX`, `WEB` and so on.
 	pub r#type: String,
+	/// Where it points.
 	pub url: String,
 }
 
+/// A package an advisory affects, with the versions and ranges affected.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = OsvAffected)]
 pub struct Affected {
+	/// The package affected, absent where the advisory names none.
 	#[serde(default)]
 	pub package: Option<Package>,
+	/// The ranges of affected versions.
 	#[serde(default)]
 	pub ranges: Vec<Range>,
+	/// Affected versions listed one by one, alongside the ranges.
 	#[serde(default)]
 	pub versions: Vec<String>,
+	/// Whatever the package's ecosystem adds about it, such as a severity of its own.
 	#[serde(default)]
 	#[schema(value_type = Object)]
 	pub ecosystem_specific: serde_json::Value,
+	/// Whatever the advisory's database adds about it, such as a severity of its own.
 	#[serde(default)]
 	#[schema(value_type = Object)]
 	pub database_specific: serde_json::Value,
 }
 
+/// A package, named within its ecosystem.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = OsvPackage)]
 pub struct Package {
+	/// The ecosystem it belongs to, such as `npm` or `Ubuntu:24.04:LTS`.
 	pub ecosystem: String,
+	/// Its name within the ecosystem.
 	pub name: String,
 }
 
+/// A range of affected versions, as events in version order.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = OsvRange)]
 pub struct Range {
+	/// How its versions order: `SEMVER`, `ECOSYSTEM` for the ecosystem's own order, or `GIT`.
 	pub r#type: String,
+	/// The points where versions enter and leave the range.
 	#[serde(default)]
 	pub events: Vec<Event>,
 }
@@ -159,12 +174,16 @@ pub struct Range {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = OsvEvent)]
 pub struct Event {
+	/// The version the flaw is introduced in; "0" for every version before the next event.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub introduced: Option<String>,
+	/// The first version the flaw is fixed in.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub fixed: Option<String>,
+	/// The last version the flaw is in; everything after it is unaffected.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub last_affected: Option<String>,
+	/// A version the range ends before, whatever events come after.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub limit: Option<String>,
 }

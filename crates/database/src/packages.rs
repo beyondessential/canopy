@@ -175,16 +175,23 @@ pub enum Reported {
 )]
 #[schema(as = MachinePackageReport)]
 pub struct MachinePackageReport {
+	/// The machine that reported.
 	#[diesel(sql_type = sql_types::Uuid)]
 	pub machine_id: Uuid,
+	/// The distribution it runs, as it reported it.
 	#[diesel(sql_type = sql_types::Text)]
 	pub distribution: String,
+	/// The distribution's release, as it reported it.
 	#[diesel(sql_type = sql_types::Text)]
 	pub release: String,
+	/// The OSV ecosystem its packages are checked in, `None` when its
+	/// distribution and release could not be placed in one.
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
 	pub ecosystem: Option<String>,
+	/// How many distinct packages it reported.
 	#[diesel(sql_type = sql_types::Integer)]
 	pub package_count: i32,
+	/// When the package list last changed.
 	#[diesel(sql_type = sql_types::Timestamptz, deserialize_as = jiff_diesel::Timestamp)]
 	pub reported_at: Timestamp,
 }
