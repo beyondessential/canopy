@@ -294,6 +294,13 @@ impl VersionKind {
 		}
 	}
 
+	fn parses(self, version: &str) -> bool {
+		match self {
+			Self::Dpkg => true,
+			Self::Semver => node_semver::Version::parse(version).is_ok(),
+		}
+	}
+
 	fn compare(self, a: &str, b: &str) -> Option<Ordering> {
 		match self {
 			Self::Dpkg => Some(dpkg_compare(a, b)),
@@ -332,7 +339,15 @@ fn in_range(events: &[Event], version: &str, kind: VersionKind) -> bool {
 			(true, false) => Ordering::Less,
 			(false, true) => Ordering::Greater,
 			(true, true) => Ordering::Equal,
-			(false, false) => kind.compare(a.at, b.at).unwrap_or(Ordering::Equal),
+			// Versions that do not parse go last, in a fixed order, so the
+			// order stays total and the ones that parse stay in version order.
+			(false, false) => kind.compare(a.at, b.at).unwrap_or_else(|| {
+				match (kind.parses(a.at), kind.parses(b.at)) {
+					(true, false) => Ordering::Less,
+					(false, true) => Ordering::Greater,
+					_ => a.at.cmp(b.at),
+				}
+			}),
 		}
 	});
 
@@ -557,6 +572,18 @@ mod tests {
 
 	fn hits(affected: &[Affected], version: &str) -> bool {
 		reaches(affected, "npm", "left-pad", version)
+	}
+
+	#[test]
+	fn an_unparseable_event_leaves_the_others_in_version_order() {
+		let affected = semver_range(&[
+			("fixed", "1.2.5"),
+			("introduced", "not-a-version"),
+			("introduced", "1.2.0"),
+		]);
+		assert!(!hits(&affected, "1.1.9"));
+		assert!(hits(&affected, "1.2.4"));
+		assert!(!hits(&affected, "1.2.5"));
 	}
 
 	#[test]
