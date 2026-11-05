@@ -63,10 +63,29 @@ async fn an_admin_records_a_decision_and_it_is_audited_as_theirs() {
 		an_item(&mut conn).await;
 		Admin::add(&mut conn, ADMIN).await.expect("add admin");
 
+		let session = private
+			.post("/api/safety/session")
+			.add_header("Tailscale-User-Login", ADMIN)
+			.add_header("Tailscale-User-Name", "Admin")
+			.json(&json!({}))
+			.await;
+		session.assert_status_ok();
+		let session: serde_json::Value = session.json();
+		let id = session["id"].as_str().expect("session id").to_owned();
+		private
+			.post("/api/safety/raise")
+			.add_header("Tailscale-User-Login", ADMIN)
+			.add_header("Tailscale-User-Name", "Admin")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({"mode": "write"}))
+			.await
+			.assert_status_ok();
+
 		let decided = private
 			.post("/api/vulnerabilities/decide")
 			.add_header("Tailscale-User-Login", ADMIN)
 			.add_header("Tailscale-User-Name", "Admin")
+			.add_header(SESSION_HEADER, &id)
 			.json(&decision())
 			.await;
 		decided.assert_status_ok();

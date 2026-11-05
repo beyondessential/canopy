@@ -262,7 +262,7 @@ async fn a_scan_reads_each_lockfile_once_and_each_advisory_until_it_is_revised()
 		);
 		{
 			let f = fake.lock().unwrap();
-			assert_eq!(f.lockfiles, ["2.3.4"]);
+			assert_eq!(f.lockfiles, ["v2.3.4"]);
 			assert!(
 				f.queries.iter().any(|(_, _, token)| token.is_some()),
 				"the second page was asked for"

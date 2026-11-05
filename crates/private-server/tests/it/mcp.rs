@@ -1582,8 +1582,9 @@ async fn incidents_name_the_environment_they_target() {
 /// Every tool on the fleet query interface declares itself read-only, and needs
 /// no raised session.
 ///
-/// The interface changes nothing, so it is graded read-only as a whole (see the
-/// SAFE spec). It is not served through the graded route tables, so this is
+/// The interface changes nothing on the fleet, so it is graded read-only as a
+/// whole except its one write, recording a vulnerability triage decision (see
+/// the SAFE spec). It is not served through the graded route tables, so this is
 /// what holds a new tool to the same line: listed without the read-only hint,
 /// it fails here.
 #[tokio::test(flavor = "multi_thread")]
@@ -1607,9 +1608,10 @@ async fn every_tool_is_read_only() {
 			.filter(|tool| tool["annotations"]["readOnlyHint"] != serde_json::Value::Bool(true))
 			.filter_map(|tool| tool["name"].as_str())
 			.collect();
-		assert!(
-			not_read_only.is_empty(),
-			"tools not declared read-only: {not_read_only:?}"
+		assert_eq!(
+			not_read_only,
+			["record_vulnerability_decision"],
+			"tools not declared read-only"
 		);
 	})
 	.await
