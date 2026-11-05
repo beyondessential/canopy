@@ -13,13 +13,14 @@ use std::{
 use commons_errors::{AppError, Result};
 use database::{
 	audit::{self, Action, Actor, Record, RecordKind},
-	osv::Counted,
+	osv::{self, Counted},
 	packages::VersionPackage,
 	vulnerabilities::{
 		Advisory, CountedFleet, Exposure, Reopened, prune_matches, refresh_counts, replace_matches,
 	},
 };
 use diesel_async::{AsyncConnection, AsyncPgConnection};
+use futures::{StreamExt as _, stream};
 use jiff::{Timestamp, tz::TimeZone};
 use tokio::{
 	task::{self, JoinHandle},
@@ -42,6 +43,9 @@ const RESCAN_EVERY: Duration = Duration::from_secs(6 * 3600);
 /// How often to look for something that makes a scan due sooner: a version or
 /// a machine's package list that has come to count.
 const WATCH_EVERY: Duration = Duration::from_secs(60);
+
+/// How many advisory records are fetched from OSV at once.
+const FETCH_CONCURRENCY: usize = 8;
 
 /// How long after a failed pass to try again.
 const RETRY_AFTER: Duration = Duration::from_secs(10 * 60);
@@ -134,21 +138,29 @@ impl Scanner {
 		let held = Advisory::modified_ats(conn, &ids).await?;
 		let mut fetched = Vec::new();
 		let mut unavailable: HashSet<&str> = HashSet::new();
-		for (id, modified) in &revisions {
-			let newer = held.get(*id).is_none_or(|held| modified > held);
-			if !newer {
-				continue;
-			}
-			match self.osv.get(id).await {
+		let wanted: Vec<&str> = revisions
+			.iter()
+			.filter(|(id, modified)| held.get(**id).is_none_or(|held| *modified > held))
+			.map(|(id, _)| *id)
+			.collect();
+		let osv = &self.osv;
+		let fetches: Vec<_> = wanted
+			.into_iter()
+			.map(|id| fetch_advisory(osv, id))
+			.collect();
+		let mut records = stream::iter(fetches).buffer_unordered(FETCH_CONCURRENCY);
+		while let Some((id, record)) = records.next().await {
+			match record {
 				Ok(record) => fetched.push(record),
 				Err(e) => {
 					warn!("vulnerability scan: fetching {id}: {e}");
-					if !held.contains_key(*id) {
+					if !held.contains_key(id) {
 						unavailable.insert(id);
 					}
 				}
 			}
 		}
+		drop(records);
 		report.advisories_fetched = fetched.len();
 
 		let today = Timestamp::now().to_zoned(TimeZone::UTC).date();
@@ -212,6 +224,10 @@ impl Scanner {
 		packages.hash(&mut hasher);
 		Ok(hasher.finish())
 	}
+}
+
+async fn fetch_advisory<'a>(osv: &OsvClient, id: &'a str) -> (&'a str, Result<osv::Record>) {
+	(id, osv.get(id).await)
 }
 
 /// Scan at once on starting, then on the schedule, and early when something
