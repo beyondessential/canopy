@@ -34,12 +34,14 @@ async fn an_item(conn: &mut AsyncPgConnection) {
 	.unwrap();
 	replace_matches(
 		conn,
-		&Counted {
-			ecosystem: "npm".into(),
-			name: "left-pad".into(),
-			version: "1.0.0".into(),
-		},
-		&["GHSA-1".into()],
+		&[(
+			Counted {
+				ecosystem: "npm".into(),
+				name: "left-pad".into(),
+				version: "1.0.0".into(),
+			},
+			vec!["GHSA-1".into()],
+		)],
 	)
 	.await
 	.unwrap();

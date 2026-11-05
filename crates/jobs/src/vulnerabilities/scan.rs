@@ -157,16 +157,19 @@ impl Scanner {
 				for record in &fetched {
 					Advisory::upsert(conn, record).await?;
 				}
-				for (query, found) in counted.iter().zip(&answers) {
-					let found: Vec<String> = found
-						.iter()
-						.map(|v| v.id.clone())
-						.filter(|id| !unavailable.contains(id.as_str()))
-						.collect::<HashSet<_>>()
-						.into_iter()
-						.collect();
-					replace_matches(conn, query, &found).await?;
-				}
+				let matched: Vec<(Counted, Vec<String>)> = counted
+					.iter()
+					.zip(&answers)
+					.map(|(query, found)| {
+						let found: HashSet<String> = found
+							.iter()
+							.map(|v| v.id.clone())
+							.filter(|id| !unavailable.contains(id.as_str()))
+							.collect();
+						(query.clone(), found.into_iter().collect())
+					})
+					.collect();
+				replace_matches(conn, &matched).await?;
 				prune_matches(conn, &counted).await?;
 
 				let exposure = Exposure::load(conn, &fleet, None).await?;

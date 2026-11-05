@@ -162,12 +162,14 @@ async fn tamanu_on_production(
 async fn scan_npm(conn: &mut AsyncPgConnection, name: &str, version: &str, ids: &[&str]) {
 	replace_matches(
 		conn,
-		&Counted {
-			ecosystem: NPM.into(),
-			name: name.into(),
-			version: version.into(),
-		},
-		&ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>(),
+		&[(
+			Counted {
+				ecosystem: NPM.into(),
+				name: name.into(),
+				version: version.into(),
+			},
+			ids.iter().map(|id| (*id).to_owned()).collect(),
+		)],
 	)
 	.await
 	.unwrap();
@@ -479,12 +481,14 @@ async fn a_production_machine_exposes_and_an_archived_one_does_not() {
 		.unwrap();
 		replace_matches(
 			&mut conn,
-			&Counted {
-				ecosystem: "Ubuntu:24.04:LTS".into(),
-				name: "openssl".into(),
-				version: "3.0.13-0ubuntu3.4".into(),
-			},
-			&["UBUNTU-1".into()],
+			&[(
+				Counted {
+					ecosystem: "Ubuntu:24.04:LTS".into(),
+					name: "openssl".into(),
+					version: "3.0.13-0ubuntu3.4".into(),
+				},
+				vec!["UBUNTU-1".into()],
+			)],
 		)
 		.await
 		.unwrap();
@@ -958,6 +962,49 @@ async fn matches_for_package_versions_no_longer_counted_are_pruned() {
 		one_open_item(&mut conn).await;
 		let pruned = prune_matches(&mut conn, &[]).await.unwrap();
 		assert_eq!(pruned, 1);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_query_that_no_longer_finds_an_advisory_drops_only_its_own_match() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		for id in ["GHSA-1", "GHSA-2"] {
+			Advisory::upsert(
+				&mut conn,
+				&record(
+					id,
+					"HIGH",
+					vec![range(NPM, "left-pad", "SEMVER", &[("introduced", "0")])],
+				),
+			)
+			.await
+			.unwrap();
+		}
+		scan_npm(&mut conn, "left-pad", "1.0.0", &["GHSA-1", "GHSA-2"]).await;
+		scan_npm(&mut conn, "left-pad", "2.0.0", &["GHSA-1"]).await;
+
+		scan_npm(&mut conn, "left-pad", "1.0.0", &["GHSA-2"]).await;
+
+		#[derive(diesel::QueryableByName)]
+		struct Row {
+			#[diesel(sql_type = diesel::sql_types::Text)]
+			vulnerability_id: String,
+			#[diesel(sql_type = diesel::sql_types::Text)]
+			package_version: String,
+		}
+		let rows: Vec<Row> = diesel::sql_query(
+			"SELECT vulnerability_id, package_version FROM vulnerability_matches \
+			 ORDER BY vulnerability_id, package_version",
+		)
+		.load(&mut conn)
+		.await
+		.unwrap();
+		let held: Vec<(&str, &str)> = rows
+			.iter()
+			.map(|r| (r.vulnerability_id.as_str(), r.package_version.as_str()))
+			.collect();
+		assert_eq!(held, [("GHSA-1", "2.0.0"), ("GHSA-2", "1.0.0")]);
 	})
 	.await;
 }

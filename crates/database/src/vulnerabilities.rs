@@ -520,48 +520,71 @@ impl CountedFleet {
 
 // ── Matches ─────────────────────────────────────────────────────────────────
 
-/// Replace what advisories match one package version with `found`, from the
-/// last OSV query for it. The advisories in `found` must already be stored.
+/// Replace what advisories match each queried package version with what the
+/// last OSV query for it found. The advisories found must already be stored.
 pub async fn replace_matches(
 	conn: &mut AsyncPgConnection,
-	queried: &Counted,
-	found: &[String],
+	answers: &[(Counted, Vec<String>)],
 ) -> Result<()> {
-	let source = Source::of_ecosystem(&queried.ecosystem);
+	let (mut ecosystems, mut names, mut versions) = (Vec::new(), Vec::new(), Vec::new());
+	let (mut ids, mut sources) = (Vec::new(), Vec::new());
+	let (mut found_ecosystems, mut found_names, mut found_versions) =
+		(Vec::new(), Vec::new(), Vec::new());
+	for (queried, found) in answers {
+		ecosystems.push(queried.ecosystem.as_str());
+		names.push(queried.name.as_str());
+		versions.push(queried.version.as_str());
+		let source = Source::of_ecosystem(&queried.ecosystem);
+		for id in found {
+			ids.push(id.as_str());
+			sources.push(source.as_str());
+			found_ecosystems.push(queried.ecosystem.as_str());
+			found_names.push(queried.name.as_str());
+			found_versions.push(queried.version.as_str());
+		}
+	}
+
 	diesel::sql_query(
-		"DELETE FROM vulnerability_matches \
-		 WHERE ecosystem = $1 AND package = $2 AND package_version = $3 \
-		 AND vulnerability_id <> ALL($4)",
+		"DELETE FROM vulnerability_matches m \
+		 USING unnest($1::text[], $2::text[], $3::text[]) AS q(e, p, v) \
+		 WHERE m.ecosystem = q.e AND m.package = q.p AND m.package_version = q.v \
+		 AND NOT EXISTS ( \
+		   SELECT 1 FROM unnest($4::text[], $5::text[], $6::text[], $7::text[]) AS f(id, e, p, v) \
+		   WHERE f.id = m.vulnerability_id AND f.e = m.ecosystem \
+		   AND f.p = m.package AND f.v = m.package_version)",
 	)
-	.bind::<sql_types::Text, _>(&queried.ecosystem)
-	.bind::<sql_types::Text, _>(&queried.name)
-	.bind::<sql_types::Text, _>(&queried.version)
-	.bind::<sql_types::Array<sql_types::Text>, _>(found)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&ecosystems)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&names)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&versions)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&ids)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&found_ecosystems)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&found_names)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&found_versions)
 	.execute(conn)
 	.await?;
 
-	for id in found {
-		diesel::sql_query(
-			"INSERT INTO vulnerability_items (vulnerability_id, source) VALUES ($1, $2) \
-			 ON CONFLICT DO NOTHING",
-		)
-		.bind::<sql_types::Text, _>(id)
-		.bind::<sql_types::Text, _>(source.as_str())
-		.execute(conn)
-		.await?;
-		diesel::sql_query(
-			"INSERT INTO vulnerability_matches \
-			 (vulnerability_id, source, ecosystem, package, package_version) \
-			 VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
-		)
-		.bind::<sql_types::Text, _>(id)
-		.bind::<sql_types::Text, _>(source.as_str())
-		.bind::<sql_types::Text, _>(&queried.ecosystem)
-		.bind::<sql_types::Text, _>(&queried.name)
-		.bind::<sql_types::Text, _>(&queried.version)
-		.execute(conn)
-		.await?;
-	}
+	diesel::sql_query(
+		"INSERT INTO vulnerability_items (vulnerability_id, source) \
+		 SELECT DISTINCT id, src FROM unnest($1::text[], $2::text[]) AS f(id, src) \
+		 ON CONFLICT DO NOTHING",
+	)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&ids)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&sources)
+	.execute(conn)
+	.await?;
+	diesel::sql_query(
+		"INSERT INTO vulnerability_matches \
+		 (vulnerability_id, source, ecosystem, package, package_version) \
+		 SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[]) \
+		 ON CONFLICT DO NOTHING",
+	)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&ids)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&sources)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&found_ecosystems)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&found_names)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&found_versions)
+	.execute(conn)
+	.await?;
 	Ok(())
 }
 
