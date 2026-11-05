@@ -514,7 +514,12 @@ impl Held {
 		if now_affected == self.affected.as_slice() {
 			return None;
 		}
-		let reached = counted.iter().find(|c| {
+		let named = |c: &&Counted| {
+			now_affected
+				.iter()
+				.any(|affected| names(affected, &c.ecosystem, &c.name))
+		};
+		let reached = counted.iter().filter(named).find(|c| {
 			reaches(now_affected, &c.ecosystem, &c.name, &c.version)
 				&& !reaches(&self.affected, &c.ecosystem, &c.name, &c.version)
 		})?;
