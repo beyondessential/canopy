@@ -244,7 +244,15 @@ impl Record {
 			.flat_map(|range| &range.events)
 			.filter_map(|event| event.fixed.clone())
 			.collect();
-		fixed.sort();
+		let kind = VersionKind::of(ecosystem);
+		fixed.sort_by(|a, b| {
+			kind.compare(a, b)
+				.unwrap_or_else(|| match (kind.parses(a), kind.parses(b)) {
+					(true, false) => Ordering::Less,
+					(false, true) => Ordering::Greater,
+					_ => a.cmp(b),
+				})
+		});
 		fixed.dedup();
 		fixed
 	}
@@ -588,6 +596,20 @@ mod tests {
 		assert!(!hits(&affected, "1.1.9"));
 		assert!(hits(&affected, "1.2.4"));
 		assert!(!hits(&affected, "1.2.5"));
+	}
+
+	#[test]
+	fn fixed_versions_are_listed_in_version_order() {
+		let record = Record {
+			affected: semver_range(&[
+				("introduced", "0"),
+				("fixed", "1.10.0"),
+				("introduced", "2.0.0"),
+				("fixed", "1.9.0"),
+			]),
+			..Default::default()
+		};
+		assert_eq!(record.fixed_in("npm", "left-pad"), ["1.9.0", "1.10.0"]);
 	}
 
 	#[test]
