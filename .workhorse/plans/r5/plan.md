@@ -85,15 +85,15 @@ An item's status (open, decided, or reopened) is derived, not stored: open when 
 
 ## Build steps
 
-- [ ] Migrations and models: advisories, version packages, machine packages (with report digest and ecosystem), matches, decisions, suggestions; `mcp_tokens` grants
-- [ ] OSV range evaluation (SEMVER via `node-semver`, ECOSYSTEM for Debian/Ubuntu via dpkg ordering, explicit `versions` lists), with unit tests against real OSV records
-- [ ] Severity derivation from OSV records
-- [ ] Lockfile reader: fetch at `v{x.y.z}`, parse lockfile v3, drop `dev`, compute workspaces reaching each package and directness
-- [ ] Package reporting endpoint on the public server, audited as a routine action; `just gen-openapi && just gen-api`
-- [ ] Scan loop in `monitor`: choose versions and machines that count, querybatch with pagination, fetch revised advisories, write matches, run reopen checks (review dates, material changes)
-- [ ] Audit actions and an advisory `RecordKind`: decision recorded, item reopened, packages reported
-- [ ] AI worker binary in `crates/jobs`: config from env, claim loop, OpenRouter structured output (with prompt-JSON fallback), ground enforcement, suggestion or decision writes
-- [ ] Private API `fns/vulnerabilities.rs`: list (filters), get, record decision (admin, write grade, audited); `just gen-openapi`
-- [ ] SPA: sidebar section, list page, detail page with decision panel and history, machine page package report line; Playwright coverage with seed helpers
-- [ ] MCP: caller identity into request extensions from both gates; admin check on tailnet path for the write; token grants at mint and on the token list; `find_vulnerabilities`, `get_vulnerability`, `record_vulnerability_decision` (in `AUDITED_TOOLS`); update the crate's "read-only" doc comment
-- [ ] Infra: deployment for the AI worker binary, OpenRouter key and model env
+- [x] Migrations and models: advisories, version packages, machine packages (with report digest and ecosystem), matches, decisions, suggestions; `mcp_tokens` grants
+- [x] OSV range evaluation (SEMVER via `node-semver`, ECOSYSTEM for Debian/Ubuntu via dpkg ordering, explicit `versions` lists), with unit tests against real OSV records
+- [x] Severity derivation from OSV records
+- [x] Lockfile reader: fetch at `v{x.y.z}`, parse lockfile v3, drop `dev`, compute workspaces reaching each package and directness
+- [x] Package reporting endpoint on the public server, audited as a routine action; `just gen-openapi && just gen-api`
+- [x] Scan loop in `monitor`: choose versions and machines that count, querybatch with pagination, fetch revised advisories, write matches, run reopen checks (review dates, material changes)
+- [x] Audit actions and an advisory `RecordKind`: decision recorded, item reopened, packages reported
+- [x] AI worker binary in `crates/jobs`: config from env, claim loop, OpenRouter structured output (with prompt-JSON fallback), ground enforcement, suggestion or decision writes
+- [x] Private API `fns/vulnerabilities.rs`: list (filters), get, record decision (admin, write grade, audited); `just gen-openapi`
+- [x] SPA: sidebar section, list page, detail page with decision panel and history, machine page package report line; Playwright coverage with seed helpers
+- [x] MCP: caller identity into request extensions from both gates; admin check on tailnet path for the write; token grants at mint and on the token list; `find_vulnerabilities`, `get_vulnerability`, `record_vulnerability_decision` (in `AUDITED_TOOLS`); update the crate's "read-only" doc comment
+- [x] Infra: the `ai` binary ships in the image (`cd.yml`). Its deployment, OpenRouter key and model env are configured in infra, outside this repo
