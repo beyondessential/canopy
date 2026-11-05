@@ -75,6 +75,7 @@ const SECTIONS: NavSection[] = [
 	},
 	{ label: "Versions", to: "/versions" },
 	{ label: "Upgrades", to: "/upgrades" },
+	{ label: "Vulnerabilities", to: "/vulnerabilities" },
 	{ label: "Maintenance", to: "/maintenance" },
 	{
 		label: "Devices",

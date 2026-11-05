@@ -189,6 +189,38 @@ export type CheckDetailCanopyData = Solidify<
 >;
 export type TagMap = Solidify<Schemas["TagMap"]>;
 
+export type VulnerabilityItem = Solidify<Schemas["VulnerabilityItem"]>;
+export type VulnerabilityDetail = Solidify<Schemas["VulnerabilityDetail"]>;
+export type VulnerabilityDecision = Solidify<Schemas["VulnerabilityDecision"]>;
+export type VulnerabilitySuggestion = Solidify<Schemas["VulnerabilitySuggestion"]>;
+export type VulnerabilityHistoryEntry = Solidify<Schemas["VulnerabilityHistoryEntry"]>;
+export type VulnerabilitySeverity = Solidify<Schemas["VulnerabilitySeverity"]>;
+export type VulnerabilitySource = Solidify<Schemas["VulnerabilitySource"]>;
+export type VulnerabilityStatus = Solidify<Schemas["VulnerabilityStatus"]>;
+export type VulnerabilityOutcome = Solidify<Schemas["VulnerabilityOutcome"]>;
+export type VulnerabilityVia = Solidify<Schemas["VulnerabilityVia"]>;
+export type MachinePackageReport = Solidify<Schemas["MachinePackageReport"]>;
+
+export const VULNERABILITY_SEVERITY_LABEL: Record<VulnerabilitySeverity, string> = {
+	critical: "Critical",
+	high: "High",
+	medium: "Medium",
+	low: "Low",
+	unrated: "Unrated",
+};
+
+export const VULNERABILITY_STATUS_LABEL: Record<VulnerabilityStatus, string> = {
+	open: "Open",
+	not_affected: "Not affected",
+	accepted_risk: "Accepted risk",
+	will_fix: "Will fix",
+};
+
+export const VULNERABILITY_SOURCE_LABEL: Record<VulnerabilitySource, string> = {
+	tamanu: "Tamanu",
+	linux: "Linux",
+};
+
 export type VersionData = Solidify<Schemas["VersionData"]>;
 export type MinorVersionGroup = Solidify<Schemas["MinorVersionGroup"]>;
 export type RelatedVersionData = Solidify<Schemas["RelatedVersionData"]>;

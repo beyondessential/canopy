@@ -40,6 +40,8 @@ pub mod mcp_tokens;
 pub mod migration_tests;
 pub mod notes;
 pub mod operator_sessions;
+pub mod osv;
+pub mod packages;
 pub mod partitions;
 pub mod pg_duration;
 pub mod recovery_vault;
@@ -63,6 +65,7 @@ pub mod url_field;
 pub mod version_known_issues;
 pub mod versions;
 pub mod views;
+pub mod vulnerabilities;
 
 pub use application_certificate_names::ApplicationCertificateName;
 pub use application_certificates::{ApplicationCertificate, OrderState, RevocationReason, Risk};

@@ -737,6 +737,50 @@
         ],
         "type": "object"
       },
+      "MachinePackage": {
+        "description": "One installed package, by its source package.",
+        "properties": {
+          "name": {
+            "description": "The source package's name, as `dpkg-query` gives it in `${source:Package}`.",
+            "type": "string"
+          },
+          "version": {
+            "description": "The source package's version, as `dpkg-query` gives it in `${source:Version}`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "type": "object"
+      },
+      "MachinePackagesArgs": {
+        "description": "The packages installed on a machine.",
+        "properties": {
+          "distribution": {
+            "description": "The distribution's identifier, as `/etc/os-release` gives it in `ID`\n(e.g. `ubuntu`).",
+            "type": "string"
+          },
+          "packages": {
+            "description": "Every installed package, by source package. The whole list: it replaces\nthe one before.",
+            "items": {
+              "$ref": "#/components/schemas/MachinePackage"
+            },
+            "type": "array"
+          },
+          "release": {
+            "description": "The distribution's release, as `/etc/os-release` gives it in\n`VERSION_ID` (e.g. `24.04`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "distribution",
+          "release",
+          "packages"
+        ],
+        "type": "object"
+      },
       "MachineSelfResponse": {
         "description": "The calling identity, the box it is enrolled as, and what runs on that box.",
         "properties": {
@@ -2952,6 +2996,50 @@
         ]
       }
     },
+    "/machine-packages": {
+      "post": {
+        "description": "The machine's whole package list, replacing the one before. A report\nidentical to the last one changes nothing. A machine reports when its list\nchanges, not on every status push.\n\nCanopy places the report in the vulnerability database's ecosystem for the\ndistribution and release. A distribution or release it cannot place is kept\nand matches nothing.\n\nErrors: 400 for a report no real system would send (an empty or malformed\nname, version, distribution or release, or an implausible number of\npackages); 412 when the calling device is not bound to a live machine.",
+        "operationId": "report_machine_packages",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachinePackagesArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Packages recorded."
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Device is not bound to a live machine."
+          }
+        },
+        "security": [
+          {
+            "server-device": []
+          }
+        ],
+        "summary": "Report the packages installed on this machine.",
+        "tags": [
+          "packages"
+        ],
+        "x-canopy-audit": [
+          "machine_packages_reported"
+        ],
+        "x-canopy-audit-optional": true
+      }
+    },
     "/machines/self": {
       "get": {
         "description": "Resolves the caller from its certificate and returns the box it is enrolled\nas, together with the applications Canopy holds for that box. A machine\nauthenticates entirely from its certificate, so it never needs these ids to\nmake calls; this endpoint lets one that has lost track of them recover them.\n\nAn identity belongs to at most one machine, so the answer is never\nambiguous — unlike `GET /servers/self`, which asks which *application* the\ncaller is and cannot answer for a box running more than one.\n\n- **401**: no client certificate, or one that matches no known identity.\n- **412**: the identity is registered but is not enrolled as a machine.",
@@ -3988,6 +4076,10 @@
     {
       "description": "The boxes applications run on: a machine asking which box it is enrolled as, and what Canopy holds running on it.",
       "name": "machines"
+    },
+    {
+      "description": "The Linux packages installed on a machine, reported so Canopy can match them against published vulnerabilities.",
+      "name": "packages"
     },
     {
       "description": "Managed restore replicas: consumer capability registration, worklist, and read-only restore credentials.",

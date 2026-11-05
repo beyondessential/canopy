@@ -22,6 +22,7 @@ use utoipa::{Modify, OpenApi, openapi::security::SecurityScheme};
 		(name = "identity", description = "Identity tokens: short-lived signed tokens naming a machine or one of its applications, for services that trust Canopy as an OpenID Connect issuer."),
 		(name = "names", description = "Public names a server may act on: what it is entitled to, and the addresses to publish for them."),
 		(name = "machines", description = "The boxes applications run on: a machine asking which box it is enrolled as, and what Canopy holds running on it."),
+		(name = "packages", description = "The Linux packages installed on a machine, reported so Canopy can match them against published vulnerabilities."),
 		(name = "restore", description = "Managed restore replicas: consumer capability registration, worklist, and read-only restore credentials."),
 		(name = "applications", description = "Application registry — listing for the public, self-registration for server devices."),
 		(name = "statuses", description = "Heartbeat / status submissions from server devices."),

@@ -19,6 +19,12 @@ use uuid::Uuid;
 /// secret scanning, and so operators can tell what a stray credential is for.
 pub const TOKEN_PREFIX: &str = "canopy_mcp_";
 
+/// What a token may do beyond reading, chosen when it is minted.
+pub const GRANT_TRIAGE: &str = "triage";
+
+/// The grants a token can carry.
+pub const GRANTS: &[&str] = &[GRANT_TRIAGE];
+
 /// Fixed token lifetime: one year from minting.
 pub const TOKEN_TTL: SignedDuration = SignedDuration::from_hours(365 * 24);
 
@@ -41,6 +47,32 @@ pub struct McpToken {
 	pub revoked_at: Option<Timestamp>,
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp)]
 	pub last_used_at: Option<Timestamp>,
+	/// What the token may do beyond reading, fixed at minting.
+	#[diesel(deserialize_as = Grants)]
+	pub grants: Vec<String>,
+}
+
+/// A `TEXT[]` column read as the strings it holds. Diesel types an array's
+/// elements as nullable, and a grant is never null.
+pub struct Grants(Vec<Option<String>>);
+
+impl
+	diesel::deserialize::Queryable<
+		diesel::sql_types::Array<diesel::sql_types::Nullable<diesel::sql_types::Text>>,
+		diesel::pg::Pg,
+	> for Grants
+{
+	type Row = Vec<Option<String>>;
+
+	fn build(row: Self::Row) -> diesel::deserialize::Result<Self> {
+		Ok(Self(row))
+	}
+}
+
+impl From<Grants> for Vec<String> {
+	fn from(grants: Grants) -> Self {
+		grants.0.into_iter().flatten().collect()
+	}
 }
 
 /// SHA-256 of the token string. Unsalted is correct here: the token is 256 bits
@@ -52,6 +84,11 @@ fn hash_token(plaintext: &str) -> Vec<u8> {
 }
 
 impl McpToken {
+	/// Whether the token may record triage decisions.
+	pub fn may_triage(&self) -> bool {
+		self.grants.iter().any(|grant| grant == GRANT_TRIAGE)
+	}
+
 	/// Mint a fresh token, returning the row and the plaintext (which the
 	/// caller must show once and never persist or log). Expiry is always
 	/// [`TOKEN_TTL`] from now; there is deliberately no way to ask for longer.
@@ -59,6 +96,7 @@ impl McpToken {
 		db: &mut AsyncPgConnection,
 		name: &str,
 		created_by: &str,
+		grants: &[String],
 	) -> Result<(Self, String)> {
 		use crate::schema::mcp_tokens::dsl;
 
@@ -79,6 +117,7 @@ impl McpToken {
 				dsl::token_hash.eq(&token_hash),
 				dsl::created_by.eq(created_by),
 				dsl::expires_at.eq(jiff_diesel::Timestamp::from(expires_at)),
+				dsl::grants.eq(grants),
 			))
 			.returning(Self::as_select())
 			.get_result(db)

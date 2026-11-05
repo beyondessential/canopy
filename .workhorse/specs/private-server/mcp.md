@@ -4,8 +4,7 @@ id: MCP
 
 # Fleet query interface
 
-A read-only query interface to the Canopy fleet, exposed for AI agents and other automated clients that operators run.
-It lets such a client discover machines, applications and groups, read their status and health, learn what Tamanu versions exist and which are deployed, see where each of a group's environments plans to move next, and inspect backup state and problems — without granting any ability to change the fleet.
+A query interface to the Canopy fleet, exposed for AI agents and other automated clients that operators run.
 
 ## Why it exists
 
@@ -20,6 +19,7 @@ The interface speaks the Model Context Protocol over HTTP, and is reachable over
 On the operator-facing surface, alongside the operator API and web UI, it is served at `/api/mcp`.
 Every caller there is identified by a tailnet user identity, the same identity the rest of the operator surface uses.
 That path is available to any human tailnet user, not only to administrators, and is not reachable by tagged automation devices.
+Its writes are available only to administrators.
 
 On the internet-facing surface it is served at `/mcp`, for agents that operators run outside the tailnet.
 A caller there authenticates with a bearer access token in the standard authorization header.
@@ -27,6 +27,7 @@ Device identity plays no part on this path: a device credential grants no access
 Requests without a valid token are refused without revealing whether the token is unknown, revoked, or expired, and repeated failures from one origin are rate limited.
 
 Each query a caller makes is attributable to its identity: the tailnet user on the operator path, the token's name on the token path.
+A write is recorded as its caller's: an operator's on the operator path, the token's on the token path.
 
 ## Access tokens
 
@@ -36,13 +37,18 @@ The token secret is shown exactly once, at minting; the system persists only a d
 A token can be revoked at any time, taking effect immediately.
 Each token records when it was last used, so idle tokens are visible.
 
+A token carries the grants chosen when it is minted, which cannot be changed afterwards; a token minted without one never gains it.
+The **triage grant** allows the token to record vulnerability triage decisions.
+A token is minted with no grants unless the administrator chooses one, so every token reads only unless minted to write.
+The token list shows each token's grants.
+
 From fifteen days before a token's expiry until that token expires or is revoked, a [self-alert](self-alerts.md) is raised, so rotation happens on schedule rather than as an outage.
 
-## Read-only
+## Reads and writes
 
-Every query in this interface only reads.
-Nothing it exposes creates, modifies, deletes, or triggers any fleet action, and no query has a side effect beyond being recorded as having happened.
-Mutating the fleet is out of scope for this interface.
+Most of the surface is reads, as that's the safe set. Writes are deliberately added where it makes sense, with some safeguards:
+- A write is refused to a caller not allowed it, without effect: on the operator path, a caller who is not an administrator; on the token path, a token without the triage grant.
+- Each write is audited as the action it takes, recorded the same way as when it is taken in the operator interface (see [AUD](../platform/audit-log.md)).
 
 ## Queries
 
@@ -125,6 +131,20 @@ A client investigating an issue consults this before deriving a check's meaning 
 
 **Get check stability** takes a set of (source, check) pairs — optionally narrowed to one machine, one application, or one group — and returns each matching state's full stability record (see [CHK](../monitoring/checks.md), "Stability"): the observation counts, the transition ring, and the hour-of-week degradation profile, together with the derived flap statistics (recent flap counts, typical degraded-run and healthy-gap durations).
 This is the raw material for analysing whether a check's noise is a flap, a load-dependent pattern, or a real change in behaviour.
+
+### Vulnerabilities
+
+An item is a vulnerability within one source, Tamanu or Linux, as the operator interface presents it (see [VUL](../security/vulnerabilities.md)).
+
+**Find vulnerabilities** takes optional filters for source, triage status, and minimum severity, plus a flag to include items nothing counts for any more, and returns a bounded list of items, sorted as the operator interface sorts them.
+Each carries its identifier and aliases, summary, severity, source, affected package, how many applications or machines it exposes, its triage status with the current decision, and the model's suggestion where there is one.
+When the result is truncated to its bound, the result says so.
+
+**Get vulnerability** takes an item's identifier and source and returns the item in full: the advisory's details and affected ranges, the exposed Tamanu versions with each one's package version, the workspaces that reach the package and whether directly, and how many applications run it, or the exposed machines with each one's group and installed version; its decision history; and the model's suggestion with its reasoning (see [VTR](../security/vulnerability-triage.md)).
+
+**Record vulnerability decision** takes an item's identifier and source and a decision, with the fields its outcome requires, and records it as the item's current decision (see [VTR](../security/vulnerability-triage.md), "Decisions").
+It may replace any decision, an operator's included, and the item's history keeps the one it replaced.
+The decision is presented as made through this interface by its caller.
 
 ### Audit log
 

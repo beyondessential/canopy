@@ -684,6 +684,26 @@ diesel::table! {
 }
 
 diesel::table! {
+	machine_package_reports (machine_id) {
+		machine_id -> Uuid,
+		distribution -> Text,
+		release -> Text,
+		ecosystem -> Nullable<Text>,
+		digest -> Text,
+		package_count -> Int4,
+		reported_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	machine_packages (machine_id, name, version) {
+		machine_id -> Uuid,
+		name -> Text,
+		version -> Text,
+	}
+}
+
+diesel::table! {
 	machine_reported_detail (machine_id, source) {
 		machine_id -> Uuid,
 		source -> Text,
@@ -772,6 +792,7 @@ diesel::table! {
 		expires_at -> Timestamptz,
 		revoked_at -> Nullable<Timestamptz>,
 		last_used_at -> Nullable<Timestamptz>,
+		grants -> Array<Nullable<Text>>,
 	}
 }
 
@@ -853,10 +874,10 @@ diesel::table! {
 diesel::table! {
 	reporting_schema_requests (group_id, rank, version_id) {
 		group_id -> Uuid,
-		rank -> Text,
 		version_id -> Uuid,
 		requested_at -> Timestamptz,
 		requested_by -> Nullable<Text>,
+		rank -> Text,
 	}
 }
 
@@ -1093,6 +1114,24 @@ diesel::table! {
 }
 
 diesel::table! {
+	version_lockfiles (version_id) {
+		version_id -> Uuid,
+		read_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	version_packages (version_id, name, version) {
+		version_id -> Uuid,
+		name -> Text,
+		version -> Text,
+		workspaces -> Array<Nullable<Text>>,
+		direct -> Bool,
+		paths -> Jsonb,
+	}
+}
+
+diesel::table! {
 	versions (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -1103,6 +1142,82 @@ diesel::table! {
 		changelog -> Text,
 		status -> Text,
 		device_id -> Nullable<Uuid>,
+	}
+}
+
+diesel::table! {
+	vulnerabilities (id) {
+		id -> Text,
+		aliases -> Array<Nullable<Text>>,
+		summary -> Text,
+		details -> Text,
+		severity -> Text,
+		affected -> Jsonb,
+		references -> Jsonb,
+		published_at -> Nullable<Timestamptz>,
+		modified_at -> Timestamptz,
+		fetched_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	vulnerability_decisions (id) {
+		id -> Uuid,
+		vulnerability_id -> Text,
+		source -> Text,
+		outcome -> Text,
+		reason -> Nullable<Text>,
+		review_by -> Nullable<Date>,
+		issue_url -> Nullable<Text>,
+		ground -> Nullable<Text>,
+		actor -> Jsonb,
+		via -> Text,
+		severity_held -> Text,
+		affected_held -> Jsonb,
+		created_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	vulnerability_items (vulnerability_id, source) {
+		vulnerability_id -> Text,
+		source -> Text,
+		counts -> Bool,
+		first_seen_at -> Timestamptz,
+		model_attempted_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
+	vulnerability_matches (vulnerability_id, ecosystem, package, package_version) {
+		vulnerability_id -> Text,
+		source -> Text,
+		ecosystem -> Text,
+		package -> Text,
+		package_version -> Text,
+	}
+}
+
+diesel::table! {
+	vulnerability_reopenings (id) {
+		id -> Uuid,
+		vulnerability_id -> Text,
+		source -> Text,
+		decision_id -> Uuid,
+		reason -> Jsonb,
+		created_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	vulnerability_suggestions (vulnerability_id, source) {
+		vulnerability_id -> Text,
+		source -> Text,
+		outcome -> Text,
+		ground -> Nullable<Text>,
+		reason -> Text,
+		model -> Text,
+		created_at -> Timestamptz,
 	}
 }
 
@@ -1162,6 +1277,8 @@ diesel::joinable!(machine_backup_capabilities -> machines (machine_id));
 diesel::joinable!(machine_backup_schedule -> machines (machine_id));
 diesel::joinable!(machine_enrollment_challenges -> machines (machine_id));
 diesel::joinable!(machine_enrollment_tokens -> machines (machine_id));
+diesel::joinable!(machine_package_reports -> machines (machine_id));
+diesel::joinable!(machine_packages -> machine_package_reports (machine_id));
 diesel::joinable!(machine_reported_detail -> machines (machine_id));
 diesel::joinable!(machine_reported_timezone -> machines (machine_id));
 diesel::joinable!(machines -> devices (device_id));
@@ -1208,7 +1325,11 @@ diesel::joinable!(undeclared_dns_names -> machines (machine_id));
 diesel::joinable!(upgrade_plans -> server_groups (group_id));
 diesel::joinable!(upgrade_plans -> versions (target_version_id));
 diesel::joinable!(version_known_issues -> applications (application_id));
+diesel::joinable!(version_lockfiles -> versions (version_id));
+diesel::joinable!(version_packages -> versions (version_id));
 diesel::joinable!(versions -> devices (device_id));
+diesel::joinable!(vulnerability_items -> vulnerabilities (vulnerability_id));
+diesel::joinable!(vulnerability_reopenings -> vulnerability_decisions (decision_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
 	admins,
@@ -1257,6 +1378,8 @@ diesel::allow_tables_to_appear_in_same_query!(
 	machine_backup_schedule,
 	machine_enrollment_challenges,
 	machine_enrollment_tokens,
+	machine_package_reports,
+	machine_packages,
 	machine_reported_detail,
 	machine_reported_timezone,
 	machines,
@@ -1286,5 +1409,13 @@ diesel::allow_tables_to_appear_in_same_query!(
 	undeclared_dns_names,
 	upgrade_plans,
 	version_known_issues,
+	version_lockfiles,
+	version_packages,
 	versions,
+	vulnerabilities,
+	vulnerability_decisions,
+	vulnerability_items,
+	vulnerability_matches,
+	vulnerability_reopenings,
+	vulnerability_suggestions,
 );

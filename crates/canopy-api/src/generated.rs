@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "2.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "41b064431236ed28257b700bf5f547b0d27a8b0c7f47606232d7104e99d5d74b";
+pub const OPENAPI_BLAKE3: &str = "23dd7692b17b893b5229ff08755568b68f4b2dce83b948024ba9c328773a077e";
 
 /// Error types.
 pub mod error {
@@ -1690,6 +1690,87 @@ of Canopy support.*/
     #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
     #[builder(default)]
     pub semantics: ::std::vec::Vec<::std::string::String>,
+}
+///One installed package, by its source package.
+///
+/// <details><summary>JSON schema</summary>
+///
+/// ```json
+///{
+///  "description": "One installed package, by its source package.",
+///  "type": "object",
+///  "required": [
+///    "name",
+///    "version"
+///  ],
+///  "properties": {
+///    "name": {
+///      "description": "The source package's name, as `dpkg-query` gives it in `${source:Package}`.",
+///      "type": "string"
+///    },
+///    "version": {
+///      "description": "The source package's version, as `dpkg-query` gives it in `${source:Version}`.",
+///      "type": "string"
+///    }
+///  }
+///}
+/// ```
+/// </details>
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::bon::Builder)]
+#[non_exhaustive]
+pub struct MachinePackage {
+    ///The source package's name, as `dpkg-query` gives it in `${source:Package}`.
+    pub name: ::std::string::String,
+    ///The source package's version, as `dpkg-query` gives it in `${source:Version}`.
+    pub version: ::std::string::String,
+}
+///The packages installed on a machine.
+///
+/// <details><summary>JSON schema</summary>
+///
+/// ```json
+///{
+///  "description": "The packages installed on a machine.",
+///  "type": "object",
+///  "required": [
+///    "distribution",
+///    "packages",
+///    "release"
+///  ],
+///  "properties": {
+///    "distribution": {
+///      "description": "The distribution's identifier, as `/etc/os-release` gives it in `ID`\n(e.g. `ubuntu`).",
+///      "type": "string"
+///    },
+///    "packages": {
+///      "description": "Every installed package, by source package. The whole list: it replaces\nthe one before.",
+///      "type": "array",
+///      "items": {
+///        "$ref": "#/components/schemas/MachinePackage"
+///      }
+///    },
+///    "release": {
+///      "description": "The distribution's release, as `/etc/os-release` gives it in\n`VERSION_ID` (e.g. `24.04`).",
+///      "type": "string"
+///    }
+///  }
+///}
+/// ```
+/// </details>
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::bon::Builder)]
+#[non_exhaustive]
+pub struct MachinePackagesArgs {
+    /**The distribution's identifier, as `/etc/os-release` gives it in `ID`
+(e.g. `ubuntu`).*/
+    pub distribution: ::std::string::String,
+    /**Every installed package, by source package. The whole list: it replaces
+the one before.*/
+    pub packages: ::std::vec::Vec<MachinePackage>,
+    /**The distribution's release, as `/etc/os-release` gives it in
+`VERSION_ID` (e.g. `24.04`).*/
+    pub release: ::std::string::String,
 }
 ///The calling identity, the box it is enrolled as, and what runs on that box.
 ///
@@ -4690,6 +4771,27 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
         body: &IdentityTokenArgs,
     ) -> crate::Result<IdentityTokenResponse> {
         self.call_json(::http::Method::POST, "/identity-tokens", Some(body)).await
+    }
+    /// Report the packages installed on this machine.
+    ///
+    /// The machine's whole package list, replacing the one before. A report
+    /// identical to the last one changes nothing. A machine reports when its list
+    /// changes, not on every status push.
+    ///
+    /// Canopy places the report in the vulnerability database's ecosystem for the
+    /// distribution and release. A distribution or release it cannot place is kept
+    /// and matches nothing.
+    ///
+    /// Errors: 400 for a report no real system would send (an empty or malformed
+    /// name, version, distribution or release, or an implausible number of
+    /// packages); 412 when the calling device is not bound to a live machine.
+    ///
+    /// `POST /machine-packages`
+    pub async fn machine_packages(
+        &self,
+        body: &MachinePackagesArgs,
+    ) -> crate::Result<()> {
+        self.call_empty(::http::Method::POST, "/machine-packages", Some(body)).await
     }
     /// Report the calling machine's own identity.
     ///

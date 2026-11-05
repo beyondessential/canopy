@@ -93,4 +93,43 @@ test.describe("mcp tokens page", () => {
 		await page.getByRole("button", { name: "Mint token" }).click();
 		await expect(page.getByText("Token name cannot be empty")).toBeVisible();
 	});
+
+	test("mints a token with the triage grant and lists its grants", async ({
+		page,
+		request,
+	}) => {
+		const name = uniqueName("triage");
+		const plain = uniqueName("plain");
+
+		await page.goto("/settings/mcp-tokens");
+		await expect(page.getByLabel("Triage grant")).not.toBeChecked();
+
+		await page.getByLabel("Token name").fill(plain);
+		await page.getByRole("button", { name: "Mint token" }).click();
+		await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
+
+		await page.getByLabel("Token name").fill(name);
+		await page.getByLabel("Triage grant").check();
+		await page.getByRole("button", { name: "Mint token" }).click();
+		await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
+
+		await expect(page.getByLabel("Triage grant")).not.toBeChecked();
+		await expect(
+			page.getByRole("row").filter({ hasText: name }),
+		).toContainText("triage");
+		await expect(
+			page.getByRole("row").filter({ hasText: plain }),
+		).not.toContainText("triage");
+
+		const list = await request.post("/api/mcp_tokens/list", { data: {} });
+		const tokens = (await list.json()) as Array<{
+			id: string;
+			name: string;
+			grants: string[];
+		}>;
+		for (const token of tokens.filter((t) => [name, plain].includes(t.name))) {
+			expect(token.grants).toEqual(token.name === name ? ["triage"] : []);
+			await request.post("/api/mcp_tokens/revoke", { data: { id: token.id } });
+		}
+	});
 });

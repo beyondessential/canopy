@@ -22,6 +22,7 @@ test.describe("sidebar navigation", () => {
 			"Fleet",
 			"Versions",
 			"Upgrades",
+			"Vulnerabilities",
 			"Maintenance",
 			"Devices",
 			"Bestool",

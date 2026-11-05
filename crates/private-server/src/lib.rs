@@ -60,8 +60,11 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 	// non-public subtree so it inherits the tagged-device guard; gated on top
 	// by "any tailnet user" (see `mcp::require_tailnet_user`).
 	let mcp: Router<crate::state::AppState> = Router::new()
-		.fallback_service(canopy_mcp::service(state.db_read.clone()))
-		.layer(middleware::from_fn(mcp::require_tailnet_user));
+		.fallback_service(canopy_mcp::service(state.db_read.clone(), state.db.clone()))
+		.layer(middleware::from_fn_with_state(
+			state.clone(),
+			mcp::require_tailnet_user,
+		));
 
 	let non_public = Router::new()
 		.merge(api_router)

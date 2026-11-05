@@ -15,6 +15,7 @@ pub mod machines;
 pub mod mcp;
 pub mod names;
 pub mod openapi;
+pub mod packages;
 #[cfg(feature = "ui")]
 pub mod password;
 pub mod ratelimit;
@@ -70,6 +71,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.merge(backup::routes())
 		.merge(restore::routes())
 		.merge(identity::routes())
+		.merge(packages::routes())
 		.nest("/artifacts", artifacts::routes())
 		.nest("/bestool", bestool::routes())
 		.nest("/certificates", names::certificate_routes())
