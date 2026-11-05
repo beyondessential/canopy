@@ -10,6 +10,8 @@
 - [ ] A non-production or archived machine's packages expose nothing (verifies spec: VUL)
 - [x] Re-ranking an application out of production removes its exposure without a rescan (verifies spec: VUL)
 - [x] A version carrying several affected packages counts its applications once for the item (verifies spec: VUL)
+- [x] Fix versions are listed in version order and, for a Linux item, only for the releases its machines run (verifies spec: VUL)
+- [x] An item nothing counts for still names its packages (verifies spec: VUL)
 - [ ] An application on a cluster has Tamanu exposure and no Linux exposure (verifies spec: VUL)
 - [x] An item nothing counts for leaves the open list, and returns when something counts for it again (verifies spec: VUL)
 - [x] Each distinct package version is queried once however many versions or machines carry it (verifies spec: VUL)
@@ -25,6 +27,7 @@
 - [x] A device with no machine is refused (verifies spec: PKG)
 - [x] Ubuntu LTS and non-LTS releases and Debian releases are placed in the right OSV ecosystem (verifies spec: PKG)
 - [x] An Ubuntu point release (24.04.1) is placed in its release
+- [x] A malformed or implausibly large package report is refused and keeps nothing (verifies spec: PKG)
 - [x] A report from an unplaceable distribution is kept, matches nothing, and the machine flags it (verifies spec: PKG)
 - [ ] The public API change passes the semver check against the previous client crate
 
@@ -54,6 +57,8 @@
 - [x] A not-affected answer on a listed ground becomes the model's decision (verifies spec: VTR)
 - [x] A not-affected answer naming no listed ground is kept as a suggestion (verifies spec: VTR)
 - [x] An answer naming a ground outside the list is kept as a suggestion (verifies spec: VTR)
+- [x] A frontend-only ground the lockfile contradicts is kept as a suggestion (verifies spec: VTR)
+- [x] A model that refused structured output is not asked for it again, and a provider failure is not retried without it
 - [x] Any other outcome is kept as a suggestion, and the item stays open (verifies spec: VTR)
 - [x] On an item a person has decided before, the model only suggests (verifies spec: VTR)
 - [x] A person deciding while the model answers keeps their decision, and the answer is kept as a suggestion (verifies spec: VTR)
