@@ -216,10 +216,13 @@ impl Scanner {
 	pub async fn fingerprint(&self, conn: &mut AsyncPgConnection) -> Result<u64> {
 		let fleet = CountedFleet::load(conn).await?;
 		let mut hasher = DefaultHasher::new();
-		for version in &fleet.versions {
-			version.version_id.hash(&mut hasher);
-		}
-		fleet.machines.hash(&mut hasher);
+		// In an order of its own, so the value moves only when the counted set does.
+		let mut versions: Vec<_> = fleet.versions.iter().map(|v| v.version_id).collect();
+		versions.sort();
+		versions.hash(&mut hasher);
+		let mut machines = fleet.machines.clone();
+		machines.sort();
+		machines.hash(&mut hasher);
 		let packages: Vec<Counted> = fleet.packages(conn).await?;
 		packages.hash(&mut hasher);
 		Ok(hasher.finish())
@@ -265,7 +268,9 @@ pub fn spawn() -> JoinHandle<()> {
 							report.advisories_fetched,
 							report.reopened
 						);
-						last_seen = scanner.fingerprint(&mut conn).await.ok();
+						// What was seen before the scan, so a change that landed
+						// during it still makes the next look due.
+						last_seen = seen;
 						next_scan = Some(tokio::time::Instant::now() + RESCAN_EVERY);
 					}
 					Err(e) => {
