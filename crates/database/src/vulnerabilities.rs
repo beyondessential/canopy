@@ -518,13 +518,21 @@ impl CountedFleet {
 		&self,
 		conn: &mut AsyncPgConnection,
 	) -> Result<Vec<CountedVersion>> {
-		let mut unread = Vec::new();
-		for version in &self.versions {
-			if !crate::packages::VersionPackage::lockfile_read(conn, version.version_id).await? {
-				unread.push(version.clone());
-			}
-		}
-		Ok(unread)
+		use crate::schema::version_lockfiles::dsl;
+		let ids: Vec<Uuid> = self.versions.iter().map(|v| v.version_id).collect();
+		let read: HashSet<Uuid> = dsl::version_lockfiles
+			.select(dsl::version_id)
+			.filter(dsl::version_id.eq_any(&ids))
+			.load::<Uuid>(conn)
+			.await?
+			.into_iter()
+			.collect();
+		Ok(self
+			.versions
+			.iter()
+			.filter(|version| !read.contains(&version.version_id))
+			.cloned()
+			.collect())
 	}
 }
 
