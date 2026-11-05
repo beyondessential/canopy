@@ -6,7 +6,7 @@
 
 use commons_errors::{AppError, Result};
 use diesel::{prelude::*, sql_types};
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -43,7 +43,9 @@ impl VersionPackage {
 	}
 
 	/// Record a version's packages, once. Reading the lockfile again changes
-	/// nothing: a release tag does not move.
+	/// nothing: a release tag does not move. The marker and the packages are
+	/// written together, so a version is never marked read with part of its
+	/// list.
 	pub async fn store(
 		conn: &mut AsyncPgConnection,
 		version_id: Uuid,
@@ -51,37 +53,40 @@ impl VersionPackage {
 	) -> Result<()> {
 		use crate::schema::{version_lockfiles, version_packages};
 
-		let marked = diesel::insert_into(version_lockfiles::table)
-			.values(version_lockfiles::version_id.eq(version_id))
-			.on_conflict_do_nothing()
-			.execute(conn)
-			.await?;
-		if marked == 0 {
-			return Ok(());
-		}
-
-		for chunk in packages.chunks(2000) {
-			let rows: Vec<_> = chunk
-				.iter()
-				.map(|package| {
-					(
-						version_packages::version_id.eq(version_id),
-						version_packages::name.eq(&package.name),
-						version_packages::version.eq(&package.version),
-						version_packages::workspaces.eq(&package.workspaces),
-						version_packages::direct.eq(package.direct),
-						version_packages::paths
-							.eq(serde_json::to_value(&package.paths).unwrap_or_default()),
-					)
-				})
-				.collect();
-			diesel::insert_into(version_packages::table)
-				.values(&rows)
+		conn.transaction::<_, AppError, _>(async |conn| {
+			let marked = diesel::insert_into(version_lockfiles::table)
+				.values(version_lockfiles::version_id.eq(version_id))
 				.on_conflict_do_nothing()
 				.execute(conn)
 				.await?;
-		}
-		Ok(())
+			if marked == 0 {
+				return Ok(());
+			}
+
+			for chunk in packages.chunks(2000) {
+				let rows: Vec<_> = chunk
+					.iter()
+					.map(|package| {
+						(
+							version_packages::version_id.eq(version_id),
+							version_packages::name.eq(&package.name),
+							version_packages::version.eq(&package.version),
+							version_packages::workspaces.eq(&package.workspaces),
+							version_packages::direct.eq(package.direct),
+							version_packages::paths
+								.eq(serde_json::to_value(&package.paths).unwrap_or_default()),
+						)
+					})
+					.collect();
+				diesel::insert_into(version_packages::table)
+					.values(&rows)
+					.on_conflict_do_nothing()
+					.execute(conn)
+					.await?;
+			}
+			Ok(())
+		})
+		.await
 	}
 }
 
