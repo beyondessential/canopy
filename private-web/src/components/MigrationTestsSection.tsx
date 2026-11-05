@@ -18,7 +18,12 @@ import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { useApi } from "../api";
 import { errorPreview } from "../lib/errorText";
 import { formatDuration } from "../lib/migrationTests";
-import { type ApiResponse, type ServerInfo, applicationName } from "../types";
+import {
+	type ApiResponse,
+	type ServerInfo,
+	applicationName,
+	serverSortKey,
+} from "../types";
 
 type GroupVerdict = ApiResponse<"migration_tests", "for_group">[number];
 import MigrationRunDialog from "./MigrationRunDialog";
@@ -124,6 +129,8 @@ export default function MigrationTestsSection({
 					{[...verdicts.data]
 						.sort(
 							(a, b) =>
+								serverSortKey(byId.get(a.server_id) ?? {}) -
+									serverSortKey(byId.get(b.server_id) ?? {}) ||
 								VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] ||
 								nameOf(a.server_id).localeCompare(nameOf(b.server_id)),
 						)

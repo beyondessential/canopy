@@ -19,6 +19,8 @@ import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { GradedAction } from "./GradedAction";
 import ServerRankChip from "./ServerRankChip";
+import { versionCompare } from "../lib/valueOrder";
+import { serverSortKey } from "../types";
 
 type PairState = "awaiting" | "built" | "failed";
 
@@ -99,70 +101,76 @@ export default function ReportingSchemasSection({
 					</TableRow>
 				</TableHead>
 				<TableBody>
-					{pairs.data.map((pair) => (
-						<TableRow
-							key={`${pair.rank}-${pair.version_id}`}
-							data-testid="reporting-schema-row"
-						>
-							<TableCell>
-								<ServerRankChip rank={pair.rank} />
-							</TableCell>
-							<TableCell sx={{ fontFamily: "monospace" }}>
-								{pair.version}
-							</TableCell>
-							<TableCell>
-								<StateChip state={pair.state as PairState} error={pair.error} />
-							</TableCell>
-							<TableCell>
-								<Running applications={pair.applications} />
-							</TableCell>
-							<TableCell align="right">
-								<Stack
-									direction="row"
-									spacing={0.5}
-									sx={{ justifyContent: "flex-end", alignItems: "center" }}
-								>
-									{/* The endpoint is admin-gated, so a reader who
-									    cannot call it is not shown a control that
-									    answers 403. */}
-									{isAdmin && pair.artifact_id && (
-										<Tooltip title="Download the SQL this environment is offered">
-											<Button
-												size="small"
-												startIcon={<DownloadIcon />}
-												href={`/api/versions/download_artifact?artifact_id=${pair.artifact_id}`}
-												download
-											>
-												SQL
-											</Button>
-										</Tooltip>
-									)}
-									{pair.requested ? (
-										<Typography variant="body2" color="text.secondary">
-											Build asked for
-										</Typography>
-									) : (
-										// An awaiting pair is already on the worklist, so asking adds nothing.
-										isAdmin &&
-										pair.state !== "awaiting" && (
-											<GradedAction
-												calls="reporting_schemas/build"
-												action={`Build reporting schema for ${pair.rank} on version ${pair.version}`}
-											>
+					{[...pairs.data]
+						.sort(
+							(a, b) =>
+								serverSortKey(a) - serverSortKey(b) ||
+								versionCompare(a.version, b.version),
+						)
+						.map((pair) => (
+							<TableRow
+								key={`${pair.rank}-${pair.version_id}`}
+								data-testid="reporting-schema-row"
+							>
+								<TableCell>
+									<ServerRankChip rank={pair.rank} />
+								</TableCell>
+								<TableCell sx={{ fontFamily: "monospace" }}>
+									{pair.version}
+								</TableCell>
+								<TableCell>
+									<StateChip state={pair.state as PairState} error={pair.error} />
+								</TableCell>
+								<TableCell>
+									<Running applications={pair.applications} />
+								</TableCell>
+								<TableCell align="right">
+									<Stack
+										direction="row"
+										spacing={0.5}
+										sx={{ justifyContent: "flex-end", alignItems: "center" }}
+									>
+										{/* The endpoint is admin-gated, so a reader who
+										    cannot call it is not shown a control that
+										    answers 403. */}
+										{isAdmin && pair.artifact_id && (
+											<Tooltip title="Download the SQL this environment is offered">
 												<Button
 													size="small"
-													onClick={() => ask(pair.rank, pair.version_id)}
-													disabled={build.pending}
+													startIcon={<DownloadIcon />}
+													href={`/api/versions/download_artifact?artifact_id=${pair.artifact_id}`}
+													download
 												>
-													Build again
+													SQL
 												</Button>
-											</GradedAction>
-										)
-									)}
-								</Stack>
-							</TableCell>
-						</TableRow>
-					))}
+											</Tooltip>
+										)}
+										{pair.requested ? (
+											<Typography variant="body2" color="text.secondary">
+												Build asked for
+											</Typography>
+										) : (
+											// An awaiting pair is already on the worklist, so asking adds nothing.
+											isAdmin &&
+											pair.state !== "awaiting" && (
+												<GradedAction
+													calls="reporting_schemas/build"
+													action={`Build reporting schema for ${pair.rank} on version ${pair.version}`}
+												>
+													<Button
+														size="small"
+														onClick={() => ask(pair.rank, pair.version_id)}
+														disabled={build.pending}
+													>
+														Build again
+													</Button>
+												</GradedAction>
+											)
+										)}
+									</Stack>
+								</TableCell>
+							</TableRow>
+						))}
 				</TableBody>
 			</Table>
 		</Paper>
