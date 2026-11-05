@@ -58,6 +58,11 @@ struct Fake {
 	decided_while_answering: Option<String>,
 	/// Every prompt the model was given.
 	prompts: Vec<String>,
+	/// What the provider answers a request for structured output with, in
+	/// order, until it runs out and answers normally.
+	structured_refusals: Vec<u16>,
+	/// Whether each request asked for structured output.
+	structured: Vec<bool>,
 }
 
 type Shared = Arc<Mutex<Fake>>;
@@ -125,11 +130,20 @@ async fn lockfile(State(fake): State<Shared>, Path(version): Path<String>) -> St
 	LOCKFILE.to_owned()
 }
 
-async fn completion(State(fake): State<Shared>, Json(body): Json<Value>) -> Json<Value> {
+async fn completion(
+	State(fake): State<Shared>,
+	Json(body): Json<Value>,
+) -> Result<Json<Value>, axum::http::StatusCode> {
 	let (reply, decided_in) = {
 		let mut fake = fake.lock().unwrap();
 		if let Some(prompt) = body["messages"][1]["content"].as_str() {
 			fake.prompts.push(prompt.to_owned());
+		}
+		let structured = body.get("response_format").is_some();
+		fake.structured.push(structured);
+		if structured && !fake.structured_refusals.is_empty() {
+			let status = fake.structured_refusals.remove(0);
+			return Err(axum::http::StatusCode::from_u16(status).unwrap());
 		}
 		let reply = if fake.replies.is_empty() {
 			String::new()
@@ -158,7 +172,9 @@ async fn completion(State(fake): State<Shared>, Json(body): Json<Value>) -> Json
 		.await
 		.unwrap();
 	}
-	Json(json!({ "choices": [{ "message": { "content": reply } }] }))
+	Ok(Json(
+		json!({ "choices": [{ "message": { "content": reply } }] }),
+	))
 }
 
 async fn serve(fake: Shared) -> String {
@@ -617,6 +633,41 @@ async fn the_prompt_sets_the_advisory_apart_and_quotes_what_was_reported() {
 		let (advisory, rest) = prompt.split_once("</advisory>").unwrap();
 		assert!(advisory.contains("Fixed in left-pad: 2.0.0"));
 		assert!(rest.contains(r#"- "left-pad" "1.0.0""#), "{rest}");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_model_refusing_structured_output_is_asked_for_json_in_the_reply() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let (fake, base) = scanned(&mut conn).await;
+		{
+			let mut f = fake.lock().unwrap();
+			f.structured_refusals.push(400);
+			f.replies.push(
+				json!({"outcome": "will_fix", "ground": "none", "reason": "Reachable."})
+					.to_string(),
+			);
+		}
+
+		ai::pass(&mut conn, &model(&base), 10).await.unwrap();
+
+		assert_eq!(fake.lock().unwrap().structured, [true, false]);
+		assert!(item(&mut conn).await.item.suggestion.is_some());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_provider_failure_is_not_retried_without_structured_output() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let (fake, base) = scanned(&mut conn).await;
+		fake.lock().unwrap().structured_refusals.push(503);
+
+		ai::pass(&mut conn, &model(&base), 10).await.unwrap();
+
+		assert_eq!(fake.lock().unwrap().structured, [true]);
+		assert!(item(&mut conn).await.item.suggestion.is_none());
 	})
 	.await;
 }

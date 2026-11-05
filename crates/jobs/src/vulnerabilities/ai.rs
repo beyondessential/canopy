@@ -20,6 +20,7 @@ use database::{
 };
 use diesel_async::{AsyncConnection, AsyncPgConnection};
 use jiff::{SignedDuration, Timestamp, tz::TimeZone};
+use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{debug, warn};
@@ -272,7 +273,12 @@ impl Model {
 		&self.config.model
 	}
 
-	async fn complete(&self, prompt: &str, structured: bool) -> Result<String> {
+	/// The model's reply, or the status the provider refused the request with.
+	async fn complete(
+		&self,
+		prompt: &str,
+		structured: bool,
+	) -> Result<std::result::Result<String, StatusCode>> {
 		let mut body = json!({
 			"model": self.config.model,
 			"temperature": 0,
@@ -300,7 +306,7 @@ impl Model {
 			.map_err(|e| AppError::Upstream(format!("OpenRouter: {e}")))?;
 		let status = response.status();
 		if !status.is_success() {
-			return Err(AppError::Upstream(format!("OpenRouter answered {status}")));
+			return Ok(Err(status));
 		}
 		let completion: Completion = response
 			.json()
@@ -311,22 +317,36 @@ impl Model {
 			.into_iter()
 			.next()
 			.and_then(|c| c.message.content)
+			.map(Ok)
 			.ok_or_else(|| AppError::Upstream("OpenRouter gave no reply".into()))
 	}
 
 	/// Ask for an answer to the prompt, as structured output where the model
-	/// takes it and as JSON in the reply otherwise. A reply that is not a valid
-	/// answer is no answer.
+	/// takes it and as JSON in the reply where the provider refuses structured
+	/// output for it. A reply that is not a valid answer is no answer. Any other
+	/// failure is an error, and the item is asked about again later.
 	pub async fn ask(&self, prompt: &str) -> Result<Option<Answer>> {
-		match self.complete(prompt, true).await {
-			Ok(reply) => Ok(Answer::parse(&reply)),
-			Err(e) => {
-				debug!("structured output refused ({e}); asking for JSON in the reply");
-				let reply = self.complete(prompt, false).await?;
-				Ok(Answer::parse(&reply))
+		let refused =
+			|status: StatusCode| AppError::Upstream(format!("OpenRouter answered {status}"));
+		let reply = match self.complete(prompt, true).await? {
+			Ok(reply) => reply,
+			Err(status) if refuses_structured_output(status) => {
+				debug!("structured output refused ({status}); asking for JSON in the reply");
+				self.complete(prompt, false).await?.map_err(refused)?
 			}
-		}
+			Err(status) => return Err(refused(status)),
+		};
+		Ok(Answer::parse(&reply))
 	}
+}
+
+/// Whether a provider's refusal could be of structured output, which it
+/// answers as a bad request, or as no endpoint for the model taking it.
+fn refuses_structured_output(status: StatusCode) -> bool {
+	matches!(
+		status,
+		StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND | StatusCode::UNPROCESSABLE_ENTITY
+	)
 }
 
 /// What looking at an item came to.
