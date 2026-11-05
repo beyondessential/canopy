@@ -269,47 +269,54 @@ impl MachinePackageReport {
 		let count = i32::try_from(distinct.len())
 			.map_err(|_| AppError::BadRequest("too many packages".into()))?;
 
-		diesel::insert_into(reports::table)
-			.values((
-				reports::machine_id.eq(machine_id),
-				reports::distribution.eq(&report.distribution),
-				reports::release.eq(&report.release),
-				reports::ecosystem.eq(&ecosystem),
-				reports::digest.eq(&digest),
-				reports::package_count.eq(count),
-			))
-			.on_conflict(reports::machine_id)
-			.do_update()
-			.set((
-				reports::distribution.eq(&report.distribution),
-				reports::release.eq(&report.release),
-				reports::ecosystem.eq(&ecosystem),
-				reports::digest.eq(&digest),
-				reports::package_count.eq(count),
-				reports::reported_at.eq(diesel::dsl::now),
-			))
-			.execute(conn)
-			.await?;
-
-		diesel::delete(packages::table.filter(packages::machine_id.eq(machine_id)))
-			.execute(conn)
-			.await?;
-		for chunk in distinct.chunks(2000) {
-			let rows: Vec<_> = chunk
-				.iter()
-				.map(|package| {
-					(
-						packages::machine_id.eq(machine_id),
-						packages::name.eq(&package.name),
-						packages::version.eq(&package.version),
-					)
-				})
-				.collect();
-			diesel::insert_into(packages::table)
-				.values(&rows)
+		// The report row, which holds the digest, and the list it digests change
+		// together, so an identical report is never taken for a list that failed
+		// to land.
+		conn.transaction::<_, AppError, _>(async |conn| {
+			diesel::insert_into(reports::table)
+				.values((
+					reports::machine_id.eq(machine_id),
+					reports::distribution.eq(&report.distribution),
+					reports::release.eq(&report.release),
+					reports::ecosystem.eq(&ecosystem),
+					reports::digest.eq(&digest),
+					reports::package_count.eq(count),
+				))
+				.on_conflict(reports::machine_id)
+				.do_update()
+				.set((
+					reports::distribution.eq(&report.distribution),
+					reports::release.eq(&report.release),
+					reports::ecosystem.eq(&ecosystem),
+					reports::digest.eq(&digest),
+					reports::package_count.eq(count),
+					reports::reported_at.eq(diesel::dsl::now),
+				))
 				.execute(conn)
 				.await?;
-		}
+
+			diesel::delete(packages::table.filter(packages::machine_id.eq(machine_id)))
+				.execute(conn)
+				.await?;
+			for chunk in distinct.chunks(2000) {
+				let rows: Vec<_> = chunk
+					.iter()
+					.map(|package| {
+						(
+							packages::machine_id.eq(machine_id),
+							packages::name.eq(&package.name),
+							packages::version.eq(&package.version),
+						)
+					})
+					.collect();
+				diesel::insert_into(packages::table)
+					.values(&rows)
+					.execute(conn)
+					.await?;
+			}
+			Ok(())
+		})
+		.await?;
 
 		Ok(Reported::Changed {
 			package_count: i64::from(count),
