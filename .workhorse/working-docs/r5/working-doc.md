@@ -1,5 +1,5 @@
 ---
-status: draft
+status: complete
 ---
 
 # OSV vulnerability data and triage
@@ -150,4 +150,4 @@ An item's status (open, decided, or reopened) is derived, not stored: open when 
 - [x] May an MCP write replace an operator's decision? Yes, history kept.
 - [x] Which Tamanu versions get scanned? Those running at production rank, plus the newest published release.
 - [x] What reopens a decided item when OSV revises it? Rising severity, or an affected range that reaches a package version the decision didn't cover.
-- [ ] Follow-up cards: SBOM ingestion, *will fix* to Workhorse card, and bestool's package reporting (in bestool's repo).
+- [x] Follow-up cards: SBOM ingestion, *will fix* to Workhorse card, and bestool's package reporting (in bestool's repo). In the card breakdown.
