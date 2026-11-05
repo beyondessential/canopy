@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use commons_errors::{AppError, Result};
 use database::{
-	audit::{self, Action, Actor, Record, RecordKind},
+	audit::{self, Actor},
 	vulnerabilities::{
 		Decision, Ground, ItemDetail, NewDecision, Outcome, Source, Suggestion, Via,
 		claim_for_model,
@@ -363,20 +363,7 @@ pub async fn look_at(
 						today,
 					)
 					.await?;
-					audit::record(
-						conn,
-						&Actor::canopy(JOB),
-						&Action::VulnerabilityDecided {
-							advisory: Record::new(RecordKind::Advisory, id, id),
-							source: source.as_str().to_owned(),
-							outcome: decision.outcome.as_str().to_owned(),
-							reason: decision.reason.clone(),
-							review_by: None,
-							issue_url: None,
-							via: Via::Model.as_str().to_owned(),
-						},
-					)
-					.await?;
+					audit::record(conn, &Actor::canopy(JOB), &decision.audited()).await?;
 					Ok(Looked::Decided)
 				}
 				Plan::Suggest => {

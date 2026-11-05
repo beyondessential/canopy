@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-	audit::Actor,
+	audit::{self, Action, Actor, RecordKind},
 	osv::{self, Affected, Counted, Held, Record, Reopening, Severity},
 	packages::NPM,
 };
@@ -964,6 +964,23 @@ impl Decision {
 		.get_result(conn)
 		.await?;
 		Ok(row.into())
+	}
+
+	/// The audit entry for having recorded this decision.
+	pub fn audited(&self) -> Action {
+		Action::VulnerabilityDecided {
+			advisory: audit::Record::new(
+				RecordKind::Advisory,
+				&self.vulnerability_id,
+				&self.vulnerability_id,
+			),
+			source: self.source.as_str().to_owned(),
+			outcome: self.outcome.as_str().to_owned(),
+			reason: self.reason.clone(),
+			review_by: self.review_by.clone(),
+			issue_url: self.issue_url.clone(),
+			via: self.via.as_str().to_owned(),
+		}
 	}
 
 	/// Hold the item until the transaction ends, so decisions on it are

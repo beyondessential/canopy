@@ -3,7 +3,7 @@
 //! Spec: `.workhorse/specs/private-server/mcp.md` (id `MCP`), "Vulnerabilities".
 
 use database::{
-	audit::{self, Action, Record, RecordKind},
+	audit,
 	diesel_async::AsyncConnection,
 	osv::Severity,
 	vulnerabilities::{
@@ -209,24 +209,7 @@ impl CanopyMcp {
 					today(),
 				)
 				.await?;
-				audit::record(
-					conn,
-					&actor,
-					&Action::VulnerabilityDecided {
-						advisory: Record::new(
-							RecordKind::Advisory,
-							&decision.vulnerability_id,
-							&decision.vulnerability_id,
-						),
-						source: decision.source.as_str().to_owned(),
-						outcome: decision.outcome.as_str().to_owned(),
-						reason: decision.reason.clone(),
-						review_by: decision.review_by.clone(),
-						issue_url: decision.issue_url.clone(),
-						via: decision.via.as_str().to_owned(),
-					},
-				)
-				.await?;
+				audit::record(conn, &actor, &decision.audited()).await?;
 				Ok(decision)
 			})
 			.await;

@@ -12,7 +12,7 @@ use commons_servers::{
 	tailscale_auth::{TailscaleAdmin, TailscaleUser},
 };
 use database::{
-	audit::{Action, Actor, Record, RecordKind},
+	audit::Actor,
 	osv::Severity,
 	packages::MachinePackageReport,
 	vulnerabilities::{
@@ -191,20 +191,7 @@ pub async fn decide(
 		today(),
 	)
 	.await?;
-	conn.record(Action::VulnerabilityDecided {
-		advisory: Record::new(
-			RecordKind::Advisory,
-			&decision.vulnerability_id,
-			&decision.vulnerability_id,
-		),
-		source: decision.source.as_str().to_owned(),
-		outcome: decision.outcome.as_str().to_owned(),
-		reason: decision.reason.clone(),
-		review_by: decision.review_by.clone(),
-		issue_url: decision.issue_url.clone(),
-		via: decision.via.as_str().to_owned(),
-	})
-	.await?;
+	conn.record(decision.audited()).await?;
 	Ok(Json(decision))
 }
 
