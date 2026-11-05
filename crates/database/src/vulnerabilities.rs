@@ -888,10 +888,18 @@ pub struct NewDecision {
 
 impl NewDecision {
 	/// What the outcome requires: a reason for not affected and accepted risk,
-	/// and a review date in the future for accepted risk.
+	/// a review date in the future for accepted risk, and for will fix an issue
+	/// link that is a web address, since it is presented as a link.
 	pub fn validate(&self, today: Date) -> Result<()> {
 		let reason = self.reason.as_deref().map(str::trim).unwrap_or_default();
+		let issue_url = self.issue_url.as_deref().map(str::trim).unwrap_or_default();
 		match self.outcome {
+			Outcome::WillFix if !issue_url.is_empty() => match url::Url::parse(issue_url) {
+				Ok(url) if matches!(url.scheme(), "http" | "https") => Ok(()),
+				_ => Err(AppError::BadRequest(
+					"the issue link must be an http or https address".into(),
+				)),
+			},
 			Outcome::NotAffected if reason.is_empty() => Err(AppError::BadRequest(
 				"a not affected decision needs a reason".into(),
 			)),
@@ -927,7 +935,10 @@ impl Decision {
 			Outcome::WillFix => (None, new.reason.filter(|r| !r.trim().is_empty())),
 		};
 		let issue_url = match new.outcome {
-			Outcome::WillFix => new.issue_url.filter(|u| !u.trim().is_empty()),
+			Outcome::WillFix => new
+				.issue_url
+				.map(|u| u.trim().to_owned())
+				.filter(|u| !u.is_empty()),
 			_ => None,
 		};
 
@@ -1771,5 +1782,16 @@ mod tests {
 	#[test]
 	fn will_fix_needs_nothing() {
 		assert!(new_decision(Outcome::WillFix).validate(today()).is_ok());
+	}
+
+	#[test]
+	fn an_issue_link_must_be_a_web_address() {
+		let mut fix = new_decision(Outcome::WillFix);
+		fix.issue_url = Some("https://github.com/beyondessential/tamanu/issues/1".into());
+		assert!(fix.validate(today()).is_ok());
+		for bad in ["javascript:alert(1)", "data:text/html,x", "not a link"] {
+			fix.issue_url = Some(bad.into());
+			assert!(fix.validate(today()).is_err(), "{bad}");
+		}
 	}
 }
