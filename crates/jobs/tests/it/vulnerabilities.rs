@@ -56,6 +56,8 @@ struct Fake {
 	replies: Vec<String>,
 	/// A database a person records a decision in while the model answers.
 	decided_while_answering: Option<String>,
+	/// Every prompt the model was given.
+	prompts: Vec<String>,
 }
 
 type Shared = Arc<Mutex<Fake>>;
@@ -123,9 +125,12 @@ async fn lockfile(State(fake): State<Shared>, Path(version): Path<String>) -> St
 	LOCKFILE.to_owned()
 }
 
-async fn completion(State(fake): State<Shared>) -> Json<Value> {
+async fn completion(State(fake): State<Shared>, Json(body): Json<Value>) -> Json<Value> {
 	let (reply, decided_in) = {
 		let mut fake = fake.lock().unwrap();
+		if let Some(prompt) = body["messages"][1]["content"].as_str() {
+			fake.prompts.push(prompt.to_owned());
+		}
 		let reply = if fake.replies.is_empty() {
 			String::new()
 		} else {
@@ -594,6 +599,24 @@ async fn a_person_deciding_while_the_model_answers_keeps_their_decision() {
 				.unwrap()
 				.is_some()
 		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_prompt_sets_the_advisory_apart_and_quotes_what_was_reported() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let (fake, base) = scanned(&mut conn).await;
+		fake.lock().unwrap().replies.push(
+			json!({"outcome": "will_fix", "ground": "none", "reason": "Reachable."}).to_string(),
+		);
+
+		ai::pass(&mut conn, &model(&base), 10).await.unwrap();
+
+		let prompt = fake.lock().unwrap().prompts.remove(0);
+		let (advisory, rest) = prompt.split_once("</advisory>").unwrap();
+		assert!(advisory.contains("Fixed in left-pad: 2.0.0"));
+		assert!(rest.contains(r#"- "left-pad" "1.0.0""#), "{rest}");
 	})
 	.await;
 }
