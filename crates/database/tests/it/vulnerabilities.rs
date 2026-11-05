@@ -334,6 +334,45 @@ async fn a_report_from_an_unplaced_distribution_is_kept_and_counts_for_nothing()
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_version_carrying_two_affected_packages_counts_its_applications_once() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let tamanu = version(&mut conn, 2, 3, 4).await;
+		tamanu_on_production(&mut conn, "2.3.4").await;
+		VersionPackage::store(
+			&mut conn,
+			tamanu.id,
+			&[
+				package("axios", "1.0.0", &["server"], true),
+				package("follow-redirects", "1.0.0", &["server"], false),
+			],
+		)
+		.await
+		.unwrap();
+		Advisory::upsert(
+			&mut conn,
+			&record(
+				"GHSA-2",
+				"HIGH",
+				vec![
+					range(NPM, "axios", "SEMVER", &[("introduced", "0")]),
+					range(NPM, "follow-redirects", "SEMVER", &[("introduced", "0")]),
+				],
+			),
+		)
+		.await
+		.unwrap();
+		scan_npm(&mut conn, "axios", "1.0.0", &["GHSA-2"]).await;
+		scan_npm(&mut conn, "follow-redirects", "1.0.0", &["GHSA-2"]).await;
+
+		let listing = list_open(&mut conn).await;
+		assert_eq!(listing.len(), 1);
+		assert_eq!(listing[0].exposed, 1);
+		assert_eq!(listing[0].packages, ["axios", "follow-redirects"]);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn only_production_exposes_and_a_rerank_changes_it_without_a_rescan() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let tamanu = version(&mut conn, 2, 3, 4).await;

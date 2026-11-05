@@ -745,12 +745,16 @@ impl Exposure {
 
 	/// How much each item exposes, and which items anything counts for. For a
 	/// Tamanu item the figure is the applications on the exposed versions; for a
-	/// Linux item, the exposed machines.
+	/// Linux item, the exposed machines. A version or machine carrying several
+	/// affected packages counts once.
 	fn tallies(&self) -> HashMap<(String, Source), (i64, bool)> {
 		let mut tallies: HashMap<(String, Source), (i64, bool)> = HashMap::new();
+		let mut seen: HashSet<(&str, Uuid)> = HashSet::new();
 		for (id, version) in &self.versions {
 			let entry = tallies.entry((id.clone(), Source::Tamanu)).or_default();
-			entry.0 += version.applications;
+			if seen.insert((id, version.version_id)) {
+				entry.0 += version.applications;
+			}
 			entry.1 = true;
 		}
 		let mut seen: HashSet<(&str, Uuid)> = HashSet::new();
