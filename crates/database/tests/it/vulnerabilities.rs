@@ -1021,3 +1021,35 @@ async fn an_advisory_with_malformed_times_is_still_stored() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_item_nothing_counts_for_still_names_its_packages() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		Advisory::upsert(
+			&mut conn,
+			&record(
+				"GHSA-1",
+				"HIGH",
+				vec![range(NPM, "left-pad", "SEMVER", &[("introduced", "0")])],
+			),
+		)
+		.await
+		.unwrap();
+		scan_npm(&mut conn, "left-pad", "1.0.0", &["GHSA-1"]).await;
+
+		let listing = ItemSummary::list(
+			&mut conn,
+			&ListFilter {
+				include_uncounted: true,
+				..Default::default()
+			},
+			today(),
+		)
+		.await
+		.unwrap();
+		assert_eq!(listing.items.len(), 1);
+		assert!(!listing.items[0].counts);
+		assert_eq!(listing.items[0].packages, ["left-pad"]);
+	})
+	.await;
+}

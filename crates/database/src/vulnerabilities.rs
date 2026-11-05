@@ -1471,6 +1471,21 @@ struct ItemRow {
 	first_seen_at: Timestamp,
 }
 
+/// The packages an advisory names for a source, for an item nothing counts for,
+/// where there is no exposure to take them from.
+fn named_packages(advisory: &Advisory, source: Source) -> Vec<String> {
+	let mut names: Vec<String> = advisory
+		.affected
+		.iter()
+		.filter_map(|affected| affected.package.as_ref())
+		.filter(|package| Source::of_ecosystem(&package.ecosystem) == source)
+		.map(|package| package.name.clone())
+		.collect();
+	names.sort();
+	names.dedup();
+	names
+}
+
 impl ItemSummary {
 	/// The current standing of an item, from its newest decision and whether it
 	/// reopened or its review date has passed.
@@ -1641,7 +1656,10 @@ impl ItemSummary {
 				aliases: advisory.aliases.clone(),
 				summary: advisory.summary.clone(),
 				severity: advisory.severity,
-				packages: packages.get(&key).cloned().unwrap_or_default(),
+				packages: packages
+					.get(&key)
+					.cloned()
+					.unwrap_or_else(|| named_packages(advisory, source)),
 				exposed,
 				counts,
 				status,
