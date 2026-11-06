@@ -6,8 +6,10 @@
 //! tagged-device guard and an "any tailnet user" gate (private-server's
 //! `mcp::require_tailnet_user`), and at `/mcp` on the internet-facing
 //! surface behind the bearer-token gate (public-server's `mcp` module).
-//! Every tool reads, except the one that records a vulnerability triage
-//! decision; it is held to the caller's standing (see [`Caller`]).
+//! Every tool reads, except the three that record, withdraw and edit
+//! vulnerability triage decisions; they are held to the caller's standing (see
+//! [`Caller`]). The interface also offers one prompt,
+//! `triage_vulnerabilities`, in the `vulnerabilities` module.
 //!
 //! Tools call the existing `database` read functions directly and shape lean,
 //! agent-legible JSON. The one piece of logic that must NOT be reimplemented is
@@ -41,26 +43,31 @@ pub use caller::{AdminCheck, Caller};
 use database::diesel_async::AsyncPgConnection;
 use rmcp::{
 	ServerHandler,
-	handler::server::router::tool::ToolRouter,
+	handler::server::router::{prompt::PromptRouter, tool::ToolRouter},
 	model::{ErrorData as McpError, ServerCapabilities, ServerInfo},
-	tool_handler,
+	prompt_handler, tool_handler,
 	transport::streamable_http_server::{
 		StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 	},
 };
 
-/// The tools that are audited, as against silent. Every tool but one reads, and
-/// a read is audited only where its spec names the action (see the AUD spec).
-/// A tool that changes something is listed here and records through the audit
-/// log; the test below holds every other tool to being a read.
-pub const AUDITED_TOOLS: &[&str] = &["record_vulnerability_decision"];
+/// The tools that are audited, as against silent. Every tool but these reads,
+/// and a read is audited only where its spec names the action (see the AUD
+/// spec). A tool that changes something is listed here and records through the
+/// audit log; the test below holds every other tool to being a read.
+pub const AUDITED_TOOLS: &[&str] = &[
+	"record_vulnerability_decisions",
+	"withdraw_vulnerability_decisions",
+	"edit_vulnerability_decision",
+];
 
 #[derive(Clone)]
 pub struct CanopyMcp {
 	db: database::Db,
-	/// The primary, for the one tool that writes. Reads may come from a replica.
+	/// The primary, for the tools that write. Reads may come from a replica.
 	db_write: database::Db,
 	tool_router: ToolRouter<CanopyMcp>,
+	prompt_router: PromptRouter<CanopyMcp>,
 }
 
 impl CanopyMcp {
@@ -79,6 +86,7 @@ impl CanopyMcp {
 				+ Self::incidents_router()
 				+ Self::upgrade_plans_router()
 				+ Self::vulnerabilities_router(),
+			prompt_router: Self::vulnerabilities_prompts(),
 		}
 	}
 
@@ -88,13 +96,15 @@ impl CanopyMcp {
 }
 
 #[tool_handler(router = self.tool_router.clone())]
+#[prompt_handler(router = self.prompt_router.clone())]
 impl ServerHandler for CanopyMcp {
 	fn get_info(&self) -> ServerInfo {
 		let mut info = ServerInfo::default();
 		info.instructions = Some(
 			"Access to the Canopy fleet: machines, applications, groups, health/status, \
 			 Tamanu versions, planned upgrades, backups, incidents/issues, and vulnerabilities. \
-			 All data is live; every tool reads except record_vulnerability_decision. \
+			 All data is live; every tool reads except the three that change vulnerability triage \
+			 decisions (record_, withdraw_ and edit_). \
 			 Use find_* to locate entities and get_* for detail; fleet_summary and \
 			 find_backup_problems for triage.\n\n\
 			 Machines and applications are different things and both are queryable. A machine is \
@@ -124,16 +134,25 @@ impl ServerHandler for CanopyMcp {
 			 published only if it outlived the group's grace window (~3 min default) or escalated. \
 			 A count dominated by unpublished short-lived incidents usually means a twitchy \
 			 threshold rather than a real outage.\n\n\
-			 Vulnerabilities: an item is an OSV advisory within a source, `tamanu` (the \
-			 dependencies of Tamanu versions) or `linux` (packages installed on machines). Only \
-			 production counts as exposure. find_vulnerabilities lists them, get_vulnerability \
-			 gives one in full, and record_vulnerability_decision, which only an administrator or \
-			 a token with the triage grant may call, records how it is to be treated. A \
-			 decision covers its whole source, so it is a statement about Tamanu or about the \
-			 fleet's Linux packages, not about one application or machine."
+			 Vulnerabilities: an item is an OSV advisory within a source, which is a tracked \
+			 repository (`tamanu`, `canopy`, and so on: the dependencies on its default branch) \
+			 or `linux` (packages installed on machines). Only production counts as exposure. \
+			 find_vulnerabilities pages through them, with filters, a search, `fields` to keep \
+			 the result small and `group_by` to count instead of list; an item with status \
+			 `open` needs triage. get_vulnerability gives one in full. The model's suggestions \
+			 on items were made without access to source code: they are inferences to check, \
+			 not findings. A decision is whole, or split into entries per workspace package. \
+			 record_vulnerability_decisions takes a batch, each item judged on its own, \
+			 withdraw_vulnerability_decisions takes decisions back, and \
+			 edit_vulnerability_decision corrects a reason or issue link; only an administrator \
+			 or a token with the triage grant may call them. To triage a repository you have \
+			 checked out, use the `triage_vulnerabilities` prompt, which takes the repository."
 				.into(),
 		);
-		info.capabilities = ServerCapabilities::builder().enable_tools().build();
+		info.capabilities = ServerCapabilities::builder()
+			.enable_tools()
+			.enable_prompts()
+			.build();
 		info
 	}
 }

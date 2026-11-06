@@ -315,6 +315,92 @@ pub async fn sweep_ansible_catalogue(
 	.map(Some)
 }
 
+/// One or more tracked repositories' dependencies have not been read for a day,
+/// because the repository cannot be fetched or a lockfile in it cannot be
+/// parsed. Recovers once each is read again.
+// spec: VUL#exposure-and-closing
+pub const VULNERABILITY_REPOSITORIES_REF: &str = "vulnerability-repositories";
+
+pub const VULNERABILITY_REPOSITORIES_DOC: &str = "## Description
+
+Canopy reads the lockfiles on the default branch of each repository it tracks, to know which dependencies to check for published vulnerabilities. This alert means at least one repository has not been read for a day, so its vulnerabilities are being worked out from an older copy of its dependencies.
+
+Nothing is closed or lost meanwhile: a repository that cannot be read keeps its items exactly as they were. What stops is anything newer on the default branch reaching them, including a fix landing.
+
+## Results
+
+- **warn** — one or more repositories have gone a day without a successful read. The message names each and why the last attempt failed. Recovers once each is read again.
+
+## Solve
+
+For a repository that cannot be reached, check Canopy's egress to GitHub, and whether GitHub's unauthenticated limits are being hit. For a lockfile that does not parse, the message names the lockfile and what is wrong with it: fix it on the repository's default branch, and Canopy reads the fix within minutes.";
+
+/// How long a repository may go unread before the alert warns of it.
+pub const VULNERABILITY_REPOSITORIES_STALE_AFTER: jiff::SignedDuration =
+	jiff::SignedDuration::from_hours(24);
+
+/// Raise or recover the [`VULNERABILITY_REPOSITORIES_REF`] self-alert from what
+/// Canopy holds of each repository's last read and attempt.
+// spec: VUL#exposure-and-closing
+pub async fn sweep_vulnerability_repositories(
+	conn: &mut AsyncPgConnection,
+) -> Result<Option<Issue>> {
+	use crate::packages::RepositoryRead;
+
+	let stale = RepositoryRead::stale(conn, VULNERABILITY_REPOSITORIES_STALE_AFTER).await?;
+	if stale.is_empty() {
+		return recover(
+			conn,
+			VULNERABILITY_REPOSITORIES_REF,
+			"every tracked repository was read",
+		)
+		.await;
+	}
+
+	let describe = |read: &RepositoryRead| {
+		let since = match read.read_at {
+			Some(at) => format!("not read since {at}"),
+			None => "never read".to_owned(),
+		};
+		match read.failure.as_deref() {
+			Some(why) => format!("{} ({since}): {why}", read.repository),
+			None => format!("{} ({since})", read.repository),
+		}
+	};
+	let message = format!(
+		"{} tracked repositor{} not read for a day: {}",
+		stale.len(),
+		if stale.len() == 1 { "y is" } else { "ies are" },
+		stale.iter().map(describe).collect::<Vec<_>>().join("; ")
+	);
+	let detail = crate::check_detail! {
+		"repositories": stale
+			.iter()
+			.map(|read| {
+				serde_json::json!({
+					"repository": read.repository,
+					"read_at": read.read_at,
+					"last_attempt_at": read.last_attempt_at,
+					"failure": read.failure,
+				})
+			})
+			.collect::<Vec<_>>(),
+	};
+	raise_with_detail(
+		conn,
+		VULNERABILITY_REPOSITORIES_REF,
+		CheckResult::Warning,
+		CheckResult::Warning,
+		false,
+		Some(VULNERABILITY_REPOSITORIES_DOC),
+		"Repositories not read",
+		&message,
+		Some(detail),
+	)
+	.await
+	.map(Some)
+}
+
 /// A server has been paused long enough that a certificate has gone stale
 /// underneath the pause. Coalescing: one alert lists every server and name.
 /// Recovers when every paused server's certificates are current again — which in

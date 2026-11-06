@@ -6,4 +6,5 @@
 pub mod ai;
 pub mod lockfile;
 pub mod osv_client;
+pub mod repository;
 pub mod scan;

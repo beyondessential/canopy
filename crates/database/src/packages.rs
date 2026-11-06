@@ -12,81 +12,281 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-/// The OSV ecosystem Tamanu's dependencies are matched in.
+/// The OSV ecosystem of npm packages.
 pub const NPM: &str = "npm";
 
-/// A package of a Tamanu version's lockfile, and where it sits in the tree.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct VersionPackage {
-	pub name: String,
-	pub version: String,
-	/// The workspaces that reach the package.
-	pub workspaces: Vec<String>,
-	/// Whether any workspace depends on it directly.
-	pub direct: bool,
-	/// How each workspace reaches it: workspace name to the chain of packages
-	/// from the workspace's own dependency down to this one.
-	pub paths: std::collections::BTreeMap<String, Vec<String>>,
+/// The OSV ecosystem of Cargo crates.
+pub const CARGO: &str = "crates.io";
+
+/// The OSV ecosystem of Python packages.
+pub const PYPI: &str = "PyPI";
+
+/// The ecosystems whose packages come from a repository's lockfiles.
+pub const REPOSITORY_ECOSYSTEMS: [&str; 3] = [NPM, CARGO, PYPI];
+
+/// When a package is used, in the terms SPDX gives a dependency's lifecycle.
+#[derive(
+	Clone,
+	Copy,
+	Debug,
+	PartialEq,
+	Eq,
+	PartialOrd,
+	Ord,
+	Hash,
+	Serialize,
+	Deserialize,
+	utoipa::ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = VulnerabilityScope)]
+pub enum Scope {
+	Runtime,
+	Build,
+	Development,
+	Test,
+	Design,
+	Other,
 }
 
-impl VersionPackage {
-	/// Whether a version's lockfile has been read.
-	pub async fn lockfile_read(conn: &mut AsyncPgConnection, version_id: Uuid) -> Result<bool> {
-		use crate::schema::version_lockfiles::dsl;
-		let read: Option<Uuid> = dsl::version_lockfiles
-			.select(dsl::version_id)
-			.filter(dsl::version_id.eq(version_id))
-			.first(conn)
-			.await
-			.optional()?;
-		Ok(read.is_some())
+impl Scope {
+	pub const ALL: [Self; 6] = [
+		Self::Runtime,
+		Self::Build,
+		Self::Development,
+		Self::Test,
+		Self::Design,
+		Self::Other,
+	];
+
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Runtime => "runtime",
+			Self::Build => "build",
+			Self::Development => "development",
+			Self::Test => "test",
+			Self::Design => "design",
+			Self::Other => "other",
+		}
 	}
 
-	/// Record a version's packages, once. Reading the lockfile again changes
-	/// nothing: a release tag does not move. The marker and the packages are
-	/// written together, so a version is never marked read with part of its
-	/// list.
+	pub fn parse(s: &str) -> Option<Self> {
+		Self::ALL.into_iter().find(|scope| scope.as_str() == s)
+	}
+}
+
+/// How a workspace package reaches a package by paths of one scope.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = VulnerabilityPackagePath)]
+pub struct PackagePath {
+	/// The workspace package that reaches it.
+	pub workspace_package: String,
+	/// The scope of the paths it takes.
+	pub scope: Scope,
+	/// Whether the package may not be installed.
+	pub optional: bool,
+	/// Whether the workspace package depends on it directly.
+	pub direct: bool,
+	/// The shortest chain of packages along such a path, from the workspace
+	/// package's own dependency down to this package.
+	pub chain: Vec<String>,
+}
+
+/// A package a repository's default branch carries, and where it sits.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepositoryPackage {
+	pub ecosystem: String,
+	pub name: String,
+	pub version: String,
+	pub paths: Vec<PackagePath>,
+}
+
+/// The last read of a repository's default branch.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, QueryableByName)]
+pub struct RepositoryRead {
+	#[diesel(sql_type = sql_types::Text)]
+	pub repository: String,
+	/// The commit the default branch was at, `None` before it was first read.
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+	pub commit_sha: Option<String>,
+	/// When it was last read, or its head last found unchanged.
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Timestamptz>, deserialize_as = jiff_diesel::NullableTimestamp)]
+	pub read_at: Option<Timestamp>,
+	#[diesel(sql_type = sql_types::Timestamptz, deserialize_as = jiff_diesel::Timestamp)]
+	pub last_attempt_at: Timestamp,
+	/// Why the last attempt failed, `None` when it did not.
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+	pub failure: Option<String>,
+}
+
+impl RepositoryRead {
+	pub async fn get(conn: &mut AsyncPgConnection, repository: &str) -> Result<Option<Self>> {
+		diesel::sql_query(
+			"SELECT repository, commit_sha, read_at, last_attempt_at, failure \
+			 FROM repository_reads WHERE repository = $1",
+		)
+		.bind::<sql_types::Text, _>(repository)
+		.get_result(conn)
+		.await
+		.optional()
+		.map_err(AppError::from)
+	}
+
+	/// Replace what is held for a repository with what its default branch
+	/// carried at `commit`, in one transaction, so a repository is never held
+	/// with part of a read. A package reached from two lockfiles is held once,
+	/// with the shortest chain of each of its paths.
 	pub async fn store(
 		conn: &mut AsyncPgConnection,
-		version_id: Uuid,
-		packages: &[Self],
+		repository: &str,
+		commit: &str,
+		packages: &[RepositoryPackage],
 	) -> Result<()> {
-		use crate::schema::{version_lockfiles, version_packages};
+		use crate::schema::{repository_package_paths as paths, repository_packages as held};
+
+		let mut merged: std::collections::BTreeMap<
+			(&str, &str, &str),
+			std::collections::BTreeMap<(&str, Scope, bool), (bool, &[String])>,
+		> = Default::default();
+		for package in packages {
+			let by_path = merged
+				.entry((&package.ecosystem, &package.name, &package.version))
+				.or_default();
+			for path in &package.paths {
+				let entry = by_path
+					.entry((path.workspace_package.as_str(), path.scope, path.optional))
+					.or_insert((path.direct, path.chain.as_slice()));
+				entry.0 |= path.direct;
+				if path.chain.len() < entry.1.len() {
+					entry.1 = path.chain.as_slice();
+				}
+			}
+		}
 
 		conn.transaction::<_, AppError, _>(async |conn| {
-			let marked = diesel::insert_into(version_lockfiles::table)
-				.values(version_lockfiles::version_id.eq(version_id))
-				.on_conflict_do_nothing()
+			diesel::delete(held::table.filter(held::repository.eq(repository)))
 				.execute(conn)
 				.await?;
-			if marked == 0 {
-				return Ok(());
-			}
-
-			for chunk in packages.chunks(2000) {
+			let keys: Vec<_> = merged.keys().collect();
+			for chunk in keys.chunks(2000) {
 				let rows: Vec<_> = chunk
 					.iter()
-					.map(|package| {
+					.map(|(ecosystem, name, version)| {
 						(
-							version_packages::version_id.eq(version_id),
-							version_packages::name.eq(&package.name),
-							version_packages::version.eq(&package.version),
-							version_packages::workspaces.eq(&package.workspaces),
-							version_packages::direct.eq(package.direct),
-							version_packages::paths
-								.eq(serde_json::to_value(&package.paths).unwrap_or_default()),
+							held::repository.eq(repository),
+							held::ecosystem.eq(*ecosystem),
+							held::name.eq(*name),
+							held::version.eq(*version),
 						)
 					})
 					.collect();
-				diesel::insert_into(version_packages::table)
+				diesel::insert_into(held::table)
 					.values(&rows)
-					.on_conflict_do_nothing()
 					.execute(conn)
 					.await?;
 			}
+			let path_rows: Vec<_> = merged
+				.iter()
+				.flat_map(|((ecosystem, name, version), by_path)| {
+					by_path.iter().map(
+						move |((workspace_package, scope, optional), (direct, chain))| {
+							(
+								paths::repository.eq(repository),
+								paths::ecosystem.eq(*ecosystem),
+								paths::name.eq(*name),
+								paths::version.eq(*version),
+								paths::workspace_package.eq(*workspace_package),
+								paths::scope.eq(scope.as_str()),
+								paths::optional.eq(*optional),
+								paths::direct.eq(*direct),
+								paths::chain.eq(*chain),
+							)
+						},
+					)
+				})
+				.collect();
+			for chunk in path_rows.chunks(1000) {
+				diesel::insert_into(paths::table)
+					.values(chunk)
+					.execute(conn)
+					.await?;
+			}
+			diesel::sql_query(
+				"INSERT INTO repository_reads (repository, commit_sha, read_at, last_attempt_at, failure) \
+				 VALUES ($1, $2, now(), now(), NULL) \
+				 ON CONFLICT (repository) DO UPDATE SET commit_sha = EXCLUDED.commit_sha, \
+				 read_at = now(), last_attempt_at = now(), failure = NULL",
+			)
+			.bind::<sql_types::Text, _>(repository)
+			.bind::<sql_types::Text, _>(commit)
+			.execute(conn)
+			.await?;
 			Ok(())
 		})
 		.await
+	}
+
+	/// The default branch's head was checked and has not moved.
+	pub async fn unchanged(conn: &mut AsyncPgConnection, repository: &str) -> Result<()> {
+		diesel::sql_query(
+			"UPDATE repository_reads SET read_at = now(), last_attempt_at = now(), failure = NULL \
+			 WHERE repository = $1 AND commit_sha IS NOT NULL",
+		)
+		.bind::<sql_types::Text, _>(repository)
+		.execute(conn)
+		.await?;
+		Ok(())
+	}
+
+	/// An attempt to read a repository failed. What is held stays as it was.
+	pub async fn note_failure(
+		conn: &mut AsyncPgConnection,
+		repository: &str,
+		failure: &str,
+	) -> Result<()> {
+		diesel::sql_query(
+			"INSERT INTO repository_reads (repository, last_attempt_at, failure) \
+			 VALUES ($1, now(), $2) \
+			 ON CONFLICT (repository) DO UPDATE SET last_attempt_at = now(), failure = EXCLUDED.failure",
+		)
+		.bind::<sql_types::Text, _>(repository)
+		.bind::<sql_types::Text, _>(failure)
+		.execute(conn)
+		.await?;
+		Ok(())
+	}
+
+	/// Drop what is held for repositories no longer tracked.
+	pub async fn forget_others(conn: &mut AsyncPgConnection, tracked: &[&str]) -> Result<()> {
+		diesel::sql_query("DELETE FROM repository_packages WHERE repository <> ALL($1)")
+			.bind::<sql_types::Array<sql_types::Text>, _>(tracked)
+			.execute(conn)
+			.await?;
+		diesel::sql_query("DELETE FROM repository_reads WHERE repository <> ALL($1)")
+			.bind::<sql_types::Array<sql_types::Text>, _>(tracked)
+			.execute(conn)
+			.await?;
+		Ok(())
+	}
+
+	/// The tracked repositories not read for `after`, with why the last attempt
+	/// failed, where it did. A repository nothing has tried to read yet is not
+	/// stale.
+	pub async fn stale(
+		conn: &mut AsyncPgConnection,
+		after: jiff::SignedDuration,
+	) -> Result<Vec<Self>> {
+		diesel::sql_query(
+			"SELECT repository, commit_sha, read_at, last_attempt_at, failure \
+			 FROM repository_reads \
+			 WHERE read_at < now() - make_interval(secs => $1) \
+			 OR (read_at IS NULL AND failure IS NOT NULL) \
+			 ORDER BY repository",
+		)
+		.bind::<sql_types::Double, _>(after.as_secs_f64())
+		.load(conn)
+		.await
+		.map_err(AppError::from)
 	}
 }
 

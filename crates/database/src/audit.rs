@@ -716,21 +716,43 @@ actions! {
 	}
 
 	/// A vulnerability triage decision was recorded for an advisory within a
-	/// source, by an operator, a fleet query access token, or Canopy's AI worker.
+	/// source, by an operator or a fleet query access token. The detail holds
+	/// the decision's entries.
 	// spec: VTR#audit
 	VulnerabilityDecided = "vulnerability_decided", "Record vulnerability decision" {
 		records { advisory: Record }
 		detail {
-			source: String, outcome: String, reason: Option<String>,
-			review_by: Option<String>, issue_url: Option<String>, via: String,
+			source: String, entries: serde_json::Value, via: String,
 		}
 	}
 
-	/// A decided vulnerability opened again, because an accepted risk's review
-	/// date passed or OSV revised the advisory so the decision no longer covers
-	/// what the fleet runs.
-	// spec: VTR#reopening
-	VulnerabilityReopened = "vulnerability_reopened", "Reopen vulnerability" {
+	/// An item's current triage decision was withdrawn, leaving it needing
+	/// triage.
+	// spec: VTR#audit
+	VulnerabilityDecisionWithdrawn = "vulnerability_decision_withdrawn", "Withdraw vulnerability decision" {
+		records { advisory: Record }
+		detail {
+			source: String, decision_id: String, reason: String, via: String,
+		}
+	}
+
+	/// The reason or issue link of an entry of a triage decision was edited.
+	/// The detail holds the text the edit replaced.
+	// spec: VTR#audit
+	VulnerabilityDecisionEdited = "vulnerability_decision_edited", "Edit vulnerability decision" {
+		records { advisory: Record }
+		detail {
+			source: String, decision_id: String, entry: serde_json::Value,
+			reason: Option<String>, issue_url: Option<String>,
+			earlier_reason: Option<String>, earlier_issue_url: Option<String>, via: String,
+		}
+	}
+
+	/// A decision on a vulnerability stopped standing, because OSV revised the
+	/// advisory or a workspace package came to reach it that the decision does
+	/// not cover.
+	// spec: VTR#lapse
+	VulnerabilityReopened = "vulnerability_reopened", "Vulnerability decision lapsed" {
 		records { advisory: Record }
 		detail { source: String, why: String }
 	}

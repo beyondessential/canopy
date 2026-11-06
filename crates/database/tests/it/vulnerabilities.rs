@@ -3,34 +3,33 @@
 //!
 //! spec: VUL, VTR, PKG
 
-use commons_types::{
-	server::{RESERVED_TAG_PREFIX, TagMap, app_type::ApplicationType, rank::ServerRank},
-	version::VersionStatus,
-};
+use commons_errors::AppError;
+use commons_types::server::rank::ServerRank;
 use database::{
-	applications::Application,
 	audit::Actor,
 	machines::{Machine, NewMachine},
-	osv::{Affected, Counted, Event, Package, Range, Record, Reopening, Severity},
-	packages::{MachinePackageReport, PackageReport, Reported, ReportedPackage, VersionPackage},
-	pg_duration::PgDuration,
-	reported_detail::ReportedDetail,
-	url_field::UrlField,
-	versions::{NewVersion, Version},
+	osv::{Affected, Counted, Event, LapseReason, Package, Range, Record, Severity},
+	packages::{
+		MachinePackageReport, PackagePath, PackageReport, Reported, ReportedPackage,
+		RepositoryPackage, RepositoryRead, Scope,
+	},
 	vulnerabilities::{
-		Advisory, CountedFleet, Decision, ItemDetail, ItemSummary, ListFilter, NewDecision,
-		Outcome, Reopened, Source, Status, Suggestion, Via, claim_for_model, prune_matches,
-		refresh_counts, replace_matches,
+		Advisory, Basis, Decision, Edit, Entry, GroupBy, ItemDetail, ItemSummary, Lapse, ListQuery,
+		NewDecision, Outcome, Sort, SortColumn, Source, Status, Suggestion, Via, Withdrawal,
+		claim_for_model, counted_packages, prune_matches, refresh_items, replace_matches,
 	},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::{SignedDuration, civil::date};
-use uuid::Uuid;
+use jiff::SignedDuration;
 
 const NPM: &str = "npm";
 
-fn today() -> jiff::civil::Date {
-	date(2026, 11, 5)
+fn tamanu() -> Source {
+	Source::Repository("tamanu".into())
+}
+
+fn canopy() -> Source {
+	Source::Repository("canopy".into())
 }
 
 fn range(ecosystem: &str, name: &str, kind: &str, events: &[(&str, &str)]) -> Affected {
@@ -70,96 +69,62 @@ fn record(id: &str, severity: &str, affected: Vec<Affected>) -> Record {
 	}
 }
 
-async fn version(conn: &mut AsyncPgConnection, major: i32, minor: i32, patch: i32) -> Version {
-	diesel::insert_into(database::schema::versions::table)
-		.values(NewVersion {
-			major,
-			minor,
-			patch,
-			status: VersionStatus::Published,
-			changelog: String::new(),
-			device_id: None,
-		})
-		.returning(<Version as diesel::SelectableHelper<_>>::as_select())
-		.get_result(conn)
-		.await
-		.unwrap()
+fn fixed_before_2(name: &str) -> Vec<Affected> {
+	vec![range(
+		NPM,
+		name,
+		"SEMVER",
+		&[("introduced", "0"), ("fixed", "2.0.0")],
+	)]
 }
 
-fn package(name: &str, version: &str, workspaces: &[&str], direct: bool) -> VersionPackage {
-	VersionPackage {
+/// A path of a workspace package to a package.
+fn path(workspace: &str, scope: Scope, optional: bool, direct: bool) -> PackagePath {
+	PackagePath {
+		workspace_package: workspace.into(),
+		scope,
+		optional,
+		direct,
+		chain: vec![
+			if direct { "pkg".into() } else { "via".into() },
+			"pkg".into(),
+		],
+	}
+}
+
+fn npm_package(name: &str, version: &str, paths: Vec<PackagePath>) -> RepositoryPackage {
+	RepositoryPackage {
+		ecosystem: NPM.into(),
 		name: name.into(),
 		version: version.into(),
-		workspaces: workspaces.iter().map(|w| (*w).to_owned()).collect(),
-		direct,
-		paths: Default::default(),
+		paths,
 	}
 }
 
-fn application(machine_id: Uuid, rank: Option<ServerRank>) -> Application {
-	Application {
-		id: Uuid::new_v4(),
-		name: Some("central".into()),
-		host: Some(UrlField(
-			format!("https://central-{}.example/", Uuid::new_v4())
-				.parse()
-				.unwrap(),
-		)),
-		r#type: ApplicationType::TamanuCentral,
-		rank,
-		machine_id: Some(machine_id),
-		kubernetes_cluster_id: None,
-		reported_key: None,
-		group_id: None,
-		public_name: None,
-		cloud: None,
-		geolocation: None,
-		is_monitored: true,
-		alert_when_down_for: PgDuration(SignedDuration::from_secs(600)),
-		notes: String::new(),
-		tags: TagMap::default(),
-		deleted_at: None,
-		registered_at: None,
-		may_manage_dns: false,
-		may_manage_tls: false,
-		certificate_profile: None,
-		name_management_paused_at: None,
-		name_management_paused_by: None,
-		name_management_pause_reason: None,
-	}
-}
-
-/// A box ranked production, with a Tamanu central on it running `version`.
-async fn tamanu_on_production(
+async fn read_repository(
 	conn: &mut AsyncPgConnection,
-	version: &str,
-) -> (Machine, Application) {
-	let machine = Machine::create(
-		conn,
-		NewMachine {
-			rank: Some(ServerRank::Production),
-			..NewMachine::named("central-box")
-		},
-	)
-	.await
-	.unwrap();
-	let app = Application::create(conn, application(machine.id, Some(ServerRank::Production)))
+	repository: &str,
+	commit: &str,
+	packages: &[RepositoryPackage],
+) {
+	RepositoryRead::store(conn, repository, commit, packages)
 		.await
 		.unwrap();
-	ReportedDetail::record(
-		conn,
-		Some(app.id),
-		machine.id,
-		"alertd",
-		&serde_json::json!({}),
-		Some(&version.parse().unwrap()),
-	)
-	.await
-	.unwrap();
-	(machine, app)
 }
 
-async fn scan_npm(conn: &mut AsyncPgConnection, name: &str, version: &str, ids: &[&str]) {
+/// Store an advisory, say that it matches a package version, and make its items.
+async fn scan_npm(
+	conn: &mut AsyncPgConnection,
+	name: &str,
+	version: &str,
+	ids: &[&str],
+	affected: Vec<Affected>,
+) {
+	for id in ids {
+		Advisory::upsert(conn, &record(id, "MODERATE", affected.clone()))
+			.await
+			.unwrap();
+	}
 	replace_matches(
 		conn,
 		&[(
@@ -173,82 +138,155 @@ async fn scan_npm(conn: &mut AsyncPgConnection, name: &str, version: &str, ids: 
 	)
 	.await
 	.unwrap();
+	refresh_items(conn).await.unwrap();
 }
 
 fn operator() -> Actor {
 	Actor::operator("admin@example.org", Some("Admin".into()))
 }
 
-fn decision(id: &str, source: Source, outcome: Outcome, via: Via) -> NewDecision {
-	NewDecision {
-		vulnerability_id: id.into(),
-		source,
+fn entry(packages: Option<&[&str]>, outcome: Outcome) -> Entry {
+	Entry {
+		workspace_packages: packages.map(|p| p.iter().map(|s| (*s).to_owned()).collect()),
 		outcome,
-		reason: Some("because".into()),
-		review_by: (outcome == Outcome::AcceptedRisk).then(|| date(2027, 1, 1)),
+		reason: (outcome != Outcome::WillFix).then(|| "because".into()),
 		issue_url: None,
-		ground: None,
-		actor: if via == Via::Model {
-			Actor::canopy("ai-worker")
-		} else {
-			operator()
-		},
-		via,
 	}
 }
 
-async fn list_open(conn: &mut AsyncPgConnection) -> Vec<ItemSummary> {
-	ItemSummary::list(
-		conn,
-		&ListFilter {
-			status: Some(Status::Open),
-			..Default::default()
-		},
-		today(),
-	)
-	.await
-	.unwrap()
-	.items
+fn whole(id: &str, source: Source, outcome: Outcome) -> NewDecision {
+	NewDecision {
+		vulnerability_id: id.into(),
+		source,
+		entries: vec![entry(None, outcome)],
+		actor: operator(),
+		via: Via::Ui,
+	}
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_lockfile_is_stored_once() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let v = version(&mut conn, 2, 3, 4).await;
-		assert!(
-			!VersionPackage::lockfile_read(&mut conn, v.id)
-				.await
-				.unwrap()
-		);
-		VersionPackage::store(
-			&mut conn,
-			v.id,
-			&[package("left-pad", "1.0.0", &["server"], true)],
-		)
-		.await
-		.unwrap();
-		assert!(
-			VersionPackage::lockfile_read(&mut conn, v.id)
-				.await
-				.unwrap()
-		);
+fn split(id: &str, source: Source, entries: Vec<Entry>) -> NewDecision {
+	NewDecision {
+		vulnerability_id: id.into(),
+		source,
+		entries,
+		actor: operator(),
+		via: Via::Ui,
+	}
+}
 
-		VersionPackage::store(&mut conn, v.id, &[package("other", "2.0.0", &[], false)])
-			.await
-			.unwrap();
-		let held: i64 = {
-			use diesel::{ExpressionMethods, QueryDsl};
-			database::schema::version_packages::table
-				.filter(database::schema::version_packages::version_id.eq(v.id))
-				.count()
-				.get_result(&mut conn)
-				.await
-				.unwrap()
-		};
-		assert_eq!(held, 1, "a second read does not replace the first");
-	})
+async fn list(conn: &mut AsyncPgConnection, query: &ListQuery) -> Vec<ItemSummary> {
+	ItemSummary::list(conn, query).await.unwrap().items
+}
+
+fn open() -> ListQuery {
+	ListQuery {
+		status: Some(Status::Open),
+		..Default::default()
+	}
+}
+
+fn ids(items: &[ItemSummary]) -> Vec<(&str, &str)> {
+	items
+		.iter()
+		.map(|item| (item.id.as_str(), item.source.as_str()))
+		.collect()
+}
+
+/// Tamanu reading `left-pad` 1.5.0 reached by three workspace packages, and an
+/// advisory matching it.
+async fn tamanu_item(conn: &mut AsyncPgConnection) {
+	read_repository(
+		conn,
+		"tamanu",
+		"abc123",
+		&[npm_package(
+			"left-pad",
+			"1.5.0",
+			vec![
+				path("server", Scope::Runtime, false, true),
+				path("web", Scope::Runtime, false, false),
+				path("mobile", Scope::Runtime, false, false),
+			],
+		)],
+	)
+	.await;
+	scan_npm(
+		conn,
+		"left-pad",
+		"1.5.0",
+		&["GHSA-1"],
+		fixed_before_2("left-pad"),
+	)
 	.await;
 }
+
+fn linux_report(version: &str) -> PackageReport {
+	PackageReport {
+		distribution: "ubuntu".into(),
+		release: "24.04".into(),
+		packages: vec![ReportedPackage {
+			name: "openssl".into(),
+			version: version.into(),
+		}],
+	}
+}
+
+async fn production_machine(conn: &mut AsyncPgConnection, name: &str, version: &str) -> Machine {
+	let machine = Machine::create(
+		conn,
+		NewMachine {
+			rank: Some(ServerRank::Production),
+			..NewMachine::named(name)
+		},
+	)
+	.await
+	.unwrap();
+	MachinePackageReport::store(conn, machine.id, &linux_report(version))
+		.await
+		.unwrap();
+	machine
+}
+
+async fn openssl_advisory(conn: &mut AsyncPgConnection, version: &str) {
+	Advisory::upsert(
+		conn,
+		&record(
+			"UBUNTU-1",
+			"high",
+			vec![range(
+				"Ubuntu:24.04:LTS",
+				"openssl",
+				"ECOSYSTEM",
+				&[("introduced", "0"), ("fixed", "3.0.13-0ubuntu3.5")],
+			)],
+		),
+	)
+	.await
+	.unwrap();
+	replace_matches(
+		conn,
+		&[(
+			Counted {
+				ecosystem: "Ubuntu:24.04:LTS".into(),
+				name: "openssl".into(),
+				version: version.into(),
+			},
+			vec!["UBUNTU-1".into()],
+		)],
+	)
+	.await
+	.unwrap();
+	refresh_items(conn).await.unwrap();
+}
+
+fn refused(result: Result<impl std::fmt::Debug, AppError>) -> String {
+	match result {
+		Err(AppError::BadRequest(message)) => message,
+		other => panic!("expected a refusal, got {other:?}"),
+	}
+}
+
+// ── Reports and what counts ─────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_report_replaces_the_list_and_an_identical_one_changes_nothing() {
@@ -256,16 +294,7 @@ async fn a_report_replaces_the_list_and_an_identical_one_changes_nothing() {
 		let machine = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
-		let report = |version: &str| PackageReport {
-			distribution: "ubuntu".into(),
-			release: "24.04".into(),
-			packages: vec![ReportedPackage {
-				name: "openssl".into(),
-				version: version.into(),
-			}],
-		};
-
-		let first = MachinePackageReport::store(&mut conn, machine.id, &report("3.0.13"))
+		let first = MachinePackageReport::store(&mut conn, machine.id, &linux_report("3.0.13"))
 			.await
 			.unwrap();
 		assert_eq!(
@@ -276,22 +305,17 @@ async fn a_report_replaces_the_list_and_an_identical_one_changes_nothing() {
 			}
 		);
 		assert_eq!(
-			MachinePackageReport::store(&mut conn, machine.id, &report("3.0.13"))
+			MachinePackageReport::store(&mut conn, machine.id, &linux_report("3.0.13"))
 				.await
 				.unwrap(),
 			Reported::Unchanged
 		);
 		assert!(matches!(
-			MachinePackageReport::store(&mut conn, machine.id, &report("3.0.14"))
+			MachinePackageReport::store(&mut conn, machine.id, &linux_report("3.0.14"))
 				.await
 				.unwrap(),
 			Reported::Changed { .. }
 		));
-		let held = MachinePackageReport::get(&mut conn, machine.id)
-			.await
-			.unwrap()
-			.unwrap();
-		assert_eq!(held.package_count, 1);
 	})
 	.await;
 }
@@ -322,325 +346,305 @@ async fn a_report_from_an_unplaced_distribution_is_kept_and_counts_for_nothing()
 		)
 		.await
 		.unwrap();
-		assert_eq!(
+		assert!(matches!(
 			stored,
 			Reported::Changed {
-				package_count: 1,
-				ecosystem: None
+				ecosystem: None,
+				..
 			}
-		);
-		let fleet = CountedFleet::load(&mut conn).await.unwrap();
-		assert!(fleet.packages(&mut conn).await.unwrap().is_empty());
+		));
+		assert!(counted_packages(&mut conn).await.unwrap().is_empty());
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_version_carrying_two_affected_packages_counts_its_applications_once() {
+async fn each_distinct_package_version_is_queried_once_however_many_sources_carry_it() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let tamanu = version(&mut conn, 2, 3, 4).await;
-		tamanu_on_production(&mut conn, "2.3.4").await;
-		VersionPackage::store(
-			&mut conn,
-			tamanu.id,
-			&[
-				package("axios", "1.0.0", &["server"], true),
-				package("follow-redirects", "1.0.0", &["server"], false),
-			],
-		)
-		.await
-		.unwrap();
-		Advisory::upsert(
-			&mut conn,
-			&record(
-				"GHSA-2",
-				"HIGH",
-				vec![
-					range(NPM, "axios", "SEMVER", &[("introduced", "0")]),
-					range(NPM, "follow-redirects", "SEMVER", &[("introduced", "0")]),
-				],
-			),
-		)
-		.await
-		.unwrap();
-		scan_npm(&mut conn, "axios", "1.0.0", &["GHSA-2"]).await;
-		scan_npm(&mut conn, "follow-redirects", "1.0.0", &["GHSA-2"]).await;
-
-		let listing = list_open(&mut conn).await;
-		assert_eq!(listing.len(), 1);
-		assert_eq!(listing[0].exposed, 1);
-		assert_eq!(listing[0].packages, ["axios", "follow-redirects"]);
+		for repository in ["tamanu", "canopy"] {
+			read_repository(
+				&mut conn,
+				repository,
+				"abc",
+				&[npm_package("left-pad", "1.0.0", vec![])],
+			)
+			.await;
+		}
+		assert_eq!(counted_packages(&mut conn).await.unwrap().len(), 1);
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn only_production_exposes_and_a_rerank_changes_it_without_a_rescan() {
+async fn a_repository_read_replaces_what_was_held() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let tamanu = version(&mut conn, 2, 3, 4).await;
-		let other = version(&mut conn, 2, 3, 5).await;
-		let (_, app) = tamanu_on_production(&mut conn, "2.3.4").await;
-		VersionPackage::store(
+		read_repository(
 			&mut conn,
-			tamanu.id,
-			&[package("left-pad", "1.0.0", &["server"], true)],
-		)
-		.await
-		.unwrap();
-		VersionPackage::store(
-			&mut conn,
-			other.id,
-			&[package("left-pad", "1.0.0", &["server"], true)],
-		)
-		.await
-		.unwrap();
-
-		Advisory::upsert(
-			&mut conn,
-			&record(
-				"GHSA-1",
-				"HIGH",
-				vec![range(NPM, "left-pad", "SEMVER", &[("introduced", "0")])],
-			),
-		)
-		.await
-		.unwrap();
-		scan_npm(&mut conn, "left-pad", "1.0.0", &["GHSA-1"]).await;
-
-		// 2.3.5 is the newest published: counted although nothing runs it.
-		let listing = list_open(&mut conn).await;
-		assert_eq!(listing.len(), 1);
-		assert_eq!(listing[0].exposed, 1, "the one application on 2.3.4");
-
-		let detail = ItemDetail::load(&mut conn, "GHSA-1", Source::Tamanu, today())
-			.await
-			.unwrap();
-		let newest = detail.versions.iter().find(|v| v.newest_published).unwrap();
-		assert_eq!(newest.version, "2.3.5");
-		assert_eq!(
-			newest.applications, 0,
-			"nothing runs the newest published version"
-		);
-		assert_eq!(detail.versions.len(), 2);
-
-		let machine_id = app.machine_id.unwrap();
-		Machine::set_rank(&mut conn, machine_id, ServerRank::Test, None)
-			.await
-			.unwrap();
-		let after = list_open(&mut conn).await;
-		assert_eq!(after.len(), 1, "the newest published version still counts");
-		assert_eq!(
-			after[0].exposed, 0,
-			"nothing in production runs it any more"
-		);
-		let _ = RESERVED_TAG_PREFIX;
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_production_machine_exposes_and_an_archived_one_does_not() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let machine = Machine::create(
-			&mut conn,
-			NewMachine {
-				rank: Some(ServerRank::Production),
-				..NewMachine::named("box")
-			},
-		)
-		.await
-		.unwrap();
-		MachinePackageReport::store(
-			&mut conn,
-			machine.id,
-			&PackageReport {
-				distribution: "ubuntu".into(),
-				release: "24.04".into(),
-				packages: vec![ReportedPackage {
-					name: "openssl".into(),
-					version: "3.0.13-0ubuntu3.4".into(),
-				}],
-			},
-		)
-		.await
-		.unwrap();
-		Advisory::upsert(
-			&mut conn,
-			&record(
-				"UBUNTU-1",
-				"high",
-				vec![range(
-					"Ubuntu:24.04:LTS",
-					"openssl",
-					"ECOSYSTEM",
-					&[("introduced", "0"), ("fixed", "3.0.13-0ubuntu3.5")],
-				)],
-			),
-		)
-		.await
-		.unwrap();
-		replace_matches(
-			&mut conn,
-			&[(
-				Counted {
-					ecosystem: "Ubuntu:24.04:LTS".into(),
-					name: "openssl".into(),
-					version: "3.0.13-0ubuntu3.4".into(),
-				},
-				vec!["UBUNTU-1".into()],
+			"tamanu",
+			"one",
+			&[npm_package(
+				"a",
+				"1.0.0",
+				vec![path("w", Scope::Runtime, false, true)],
 			)],
 		)
-		.await
-		.unwrap();
-
-		let listing = list_open(&mut conn).await;
-		assert_eq!(listing.len(), 1);
-		assert_eq!(listing[0].source, Source::Linux);
-		assert_eq!(listing[0].exposed, 1);
-
-		Machine::archive(&mut conn, machine.id).await.unwrap();
-		assert!(
-			list_open(&mut conn).await.is_empty(),
-			"an item nothing counts for leaves the open list"
-		);
-		let all = ItemSummary::list(
+		.await;
+		read_repository(
 			&mut conn,
-			&ListFilter {
-				include_uncounted: true,
+			"tamanu",
+			"two",
+			&[npm_package(
+				"b",
+				"1.0.0",
+				vec![path("w", Scope::Runtime, false, true)],
+			)],
+		)
+		.await;
+		let held = counted_packages(&mut conn).await.unwrap();
+		assert_eq!(held.len(), 1);
+		assert_eq!(held[0].name, "b");
+		let read = RepositoryRead::get(&mut conn, "tamanu")
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(read.commit_sha.as_deref(), Some("two"));
+	})
+	.await;
+}
+
+// ── Items ───────────────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_same_npm_version_in_two_repositories_makes_two_items() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		for repository in ["tamanu", "canopy"] {
+			read_repository(
+				&mut conn,
+				repository,
+				"abc",
+				&[npm_package(
+					"left-pad",
+					"1.5.0",
+					vec![path("app", Scope::Runtime, false, true)],
+				)],
+			)
+			.await;
+		}
+		scan_npm(
+			&mut conn,
+			"left-pad",
+			"1.5.0",
+			&["GHSA-1"],
+			fixed_before_2("left-pad"),
+		)
+		.await;
+
+		let items = list(&mut conn, &open()).await;
+		let mut found = ids(&items);
+		found.sort();
+		assert_eq!(found, [("GHSA-1", "canopy"), ("GHSA-1", "tamanu")]);
+
+		Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::NotAffected))
+			.await
+			.unwrap();
+		assert_eq!(
+			ids(&list(&mut conn, &open()).await),
+			[("GHSA-1", "canopy")],
+			"a decision for one repository leaves the other needing triage"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fix_landing_closes_an_item_and_keeps_its_status() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::WillFix))
+			.await
+			.unwrap();
+
+		read_repository(
+			&mut conn,
+			"tamanu",
+			"fixed",
+			&[npm_package(
+				"left-pad",
+				"2.0.0",
+				vec![path("server", Scope::Runtime, false, true)],
+			)],
+		)
+		.await;
+
+		assert!(list(&mut conn, &ListQuery::default()).await.is_empty());
+		let closed = list(
+			&mut conn,
+			&ListQuery {
+				include_closed: true,
 				..Default::default()
 			},
-			today(),
 		)
+		.await;
+		assert_eq!(closed.len(), 1);
+		assert!(closed[0].closed);
+		assert_eq!(closed[0].status, Status::WillFix);
+		assert!(closed[0].decision.is_some());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_repository_keeps_its_items() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		RepositoryRead::note_failure(&mut conn, "tamanu", "unreachable")
+			.await
+			.unwrap();
+		assert_eq!(list(&mut conn, &open()).await.len(), 1);
+		let read = RepositoryRead::get(&mut conn, "tamanu")
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(read.failure.as_deref(), Some("unreachable"));
+		assert_eq!(read.commit_sha.as_deref(), Some("abc123"));
+
+		RepositoryRead::unchanged(&mut conn, "tamanu")
+			.await
+			.unwrap();
+		let read = RepositoryRead::get(&mut conn, "tamanu")
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(read.failure, None);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repository_is_stale_when_it_has_not_been_read_for_the_period() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		read_repository(&mut conn, "tamanu", "abc", &[]).await;
+		RepositoryRead::note_failure(&mut conn, "canopy", "unreachable")
+			.await
+			.unwrap();
+		diesel::sql_query(
+			"UPDATE repository_reads SET read_at = now() - interval '2 days' WHERE repository = 'tamanu'",
+		)
+		.execute(&mut conn)
 		.await
 		.unwrap();
+		let stale = RepositoryRead::stale(&mut conn, SignedDuration::from_hours(24))
+			.await
+			.unwrap();
+		let names: Vec<&str> = stale.iter().map(|r| r.repository.as_str()).collect();
+		assert_eq!(names, ["canopy", "tamanu"]);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_item_carries_its_packages_scopes_and_minimum_fix() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		read_repository(
+			&mut conn,
+			"tamanu",
+			"abc",
+			&[npm_package(
+				"left-pad",
+				"1.5.0",
+				vec![
+					path("server", Scope::Runtime, false, true),
+					path("web", Scope::Development, true, false),
+				],
+			)],
+		)
+		.await;
+		scan_npm(
+			&mut conn,
+			"left-pad",
+			"1.5.0",
+			&["GHSA-1"],
+			fixed_before_2("left-pad"),
+		)
+		.await;
+
+		let items = list(&mut conn, &open()).await;
+		let item = &items[0];
+		assert_eq!(item.packages.len(), 1);
+		assert_eq!(item.packages[0].version, "1.5.0");
+		assert_eq!(item.packages[0].min_fix_version.as_deref(), Some("2.0.0"));
+		assert_eq!(item.workspace_packages, ["server", "web"]);
+		assert_eq!(item.scopes, ["development", "runtime", "optional"]);
+
+		let detail = ItemDetail::load(&mut conn, "GHSA-1", &tamanu())
+			.await
+			.unwrap();
+		assert_eq!(detail.commit.as_deref(), Some("abc"));
+		assert_eq!(detail.packages.len(), 1);
+		assert_eq!(detail.packages[0].paths.len(), 2);
+		assert_eq!(detail.packages[0].fixed_in, ["2.0.0"]);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_production_machine_exposes_and_an_archived_one_closes_the_item_without_a_rescan() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let machine = production_machine(&mut conn, "box", "3.0.13-0ubuntu3.4").await;
+		openssl_advisory(&mut conn, "3.0.13-0ubuntu3.4").await;
+
+		let items = list(&mut conn, &open()).await;
+		assert_eq!(items.len(), 1);
+		assert_eq!(items[0].source, Source::Linux);
+		assert_eq!(items[0].machines, 1);
+
+		Machine::archive(&mut conn, machine.id).await.unwrap();
+		assert!(list(&mut conn, &open()).await.is_empty());
 		assert_eq!(
-			all.items.len(),
-			1,
-			"and returns when uncounted items are included"
+			list(
+				&mut conn,
+				&ListQuery {
+					include_closed: true,
+					..Default::default()
+				}
+			)
+			.await
+			.len(),
+			1
 		);
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_linux_item_presents_the_fixes_of_the_releases_its_machines_run() {
+async fn only_production_exposes_linux_and_a_rerank_changes_it() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let machine = Machine::create(
-			&mut conn,
-			NewMachine {
-				rank: Some(ServerRank::Production),
-				..NewMachine::named("box")
-			},
-		)
-		.await
-		.unwrap();
-		MachinePackageReport::store(
-			&mut conn,
-			machine.id,
-			&PackageReport {
-				distribution: "ubuntu".into(),
-				release: "24.04".into(),
-				packages: vec![ReportedPackage {
-					name: "openssl".into(),
-					version: "3.0.13-0ubuntu3.4".into(),
-				}],
-			},
-		)
-		.await
-		.unwrap();
-		Advisory::upsert(
-			&mut conn,
-			&record(
-				"UBUNTU-1",
-				"high",
-				vec![
-					range(
-						"Ubuntu:22.04:LTS",
-						"openssl",
-						"ECOSYSTEM",
-						&[("introduced", "0"), ("fixed", "3.0.2-0ubuntu1.18")],
-					),
-					range(
-						"Ubuntu:24.04:LTS",
-						"openssl",
-						"ECOSYSTEM",
-						&[("introduced", "0"), ("fixed", "3.0.13-0ubuntu3.5")],
-					),
-				],
-			),
-		)
-		.await
-		.unwrap();
-		replace_matches(
-			&mut conn,
-			&[(
-				Counted {
-					ecosystem: "Ubuntu:24.04:LTS".into(),
-					name: "openssl".into(),
-					version: "3.0.13-0ubuntu3.4".into(),
-				},
-				vec!["UBUNTU-1".into()],
-			)],
-		)
-		.await
-		.unwrap();
+		let machine = production_machine(&mut conn, "box", "3.0.13-0ubuntu3.4").await;
+		openssl_advisory(&mut conn, "3.0.13-0ubuntu3.4").await;
+		assert_eq!(list(&mut conn, &open()).await.len(), 1);
 
-		let detail = ItemDetail::load(&mut conn, "UBUNTU-1", Source::Linux, today())
+		Machine::set_rank(&mut conn, machine.id, ServerRank::Test, None)
 			.await
 			.unwrap();
-		assert_eq!(detail.fixed_in["openssl"], ["3.0.13-0ubuntu3.5"]);
+		assert!(list(&mut conn, &open()).await.is_empty());
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_application_on_a_non_production_box_exposes_nothing() {
+async fn a_linux_item_presents_machines_with_the_fix_of_the_release_they_run() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let v = version(&mut conn, 3, 0, 0).await;
-		// 3.0.0 is the newest published, so it counts regardless; the rank only
-		// governs the applications it exposes.
-		let machine = Machine::create(&mut conn, NewMachine::named("box"))
+		production_machine(&mut conn, "box", "3.0.13-0ubuntu3.4").await;
+		openssl_advisory(&mut conn, "3.0.13-0ubuntu3.4").await;
+		let detail = ItemDetail::load(&mut conn, "UBUNTU-1", &Source::Linux)
 			.await
 			.unwrap();
-		let app = Application::create(&mut conn, application(machine.id, Some(ServerRank::Test)))
-			.await
-			.unwrap();
-		ReportedDetail::record(
-			&mut conn,
-			Some(app.id),
-			machine.id,
-			"alertd",
-			&serde_json::json!({}),
-			Some(&"3.0.0".parse().unwrap()),
-		)
-		.await
-		.unwrap();
-		let fleet = CountedFleet::load(&mut conn).await.unwrap();
-		assert_eq!(fleet.versions.len(), 1);
-		assert_eq!(fleet.versions[0].version_id, v.id);
-		assert!(fleet.versions[0].applications.is_empty());
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn each_distinct_package_version_is_queried_once() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let a = version(&mut conn, 2, 0, 0).await;
-		let b = version(&mut conn, 2, 1, 0).await;
-		for v in [&a, &b] {
-			VersionPackage::store(
-				&mut conn,
-				v.id,
-				&[package("left-pad", "1.0.0", &["server"], true)],
-			)
-			.await
-			.unwrap();
-		}
-		tamanu_on_production(&mut conn, "2.0.0").await;
-		let fleet = CountedFleet::load(&mut conn).await.unwrap();
-		let packages = fleet.packages(&mut conn).await.unwrap();
-		assert_eq!(packages.len(), 1);
+		assert_eq!(detail.machines.len(), 1);
+		assert_eq!(
+			detail.machines[0].min_fix_version.as_deref(),
+			Some("3.0.13-0ubuntu3.5")
+		);
+		assert!(detail.packages.is_empty());
 	})
 	.await;
 }
@@ -663,61 +667,30 @@ async fn an_advisory_is_refetched_only_for_a_later_revision() {
 	.await;
 }
 
-async fn one_open_item(conn: &mut AsyncPgConnection) -> (Version, Application) {
-	let tamanu = version(conn, 2, 3, 4).await;
-	let (_, app) = tamanu_on_production(conn, "2.3.4").await;
-	VersionPackage::store(
-		conn,
-		tamanu.id,
-		&[package("left-pad", "1.5.0", &["server"], true)],
-	)
-	.await
-	.unwrap();
-	Advisory::upsert(
-		conn,
-		&record(
-			"GHSA-1",
-			"MODERATE",
-			vec![range(
-				NPM,
-				"left-pad",
-				"SEMVER",
-				&[("introduced", "0"), ("fixed", "2.0.0")],
-			)],
-		),
-	)
-	.await
-	.unwrap();
-	scan_npm(conn, "left-pad", "1.5.0", &["GHSA-1"]).await;
-	(tamanu, app)
-}
+// ── Decisions ───────────────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_decision_is_current_until_replaced_and_the_history_keeps_both() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		one_open_item(&mut conn).await;
-		assert_eq!(list_open(&mut conn).await.len(), 1);
+		tamanu_item(&mut conn).await;
+		assert_eq!(list(&mut conn, &open()).await.len(), 1);
 
-		Decision::record(
-			&mut conn,
-			decision("GHSA-1", Source::Tamanu, Outcome::AcceptedRisk, Via::Ui),
-			today(),
-		)
-		.await
-		.unwrap();
-		assert!(list_open(&mut conn).await.is_empty());
-
-		Decision::record(
-			&mut conn,
-			decision("GHSA-1", Source::Tamanu, Outcome::WillFix, Via::Mcp),
-			today(),
-		)
-		.await
-		.unwrap();
-		let detail = ItemDetail::load(&mut conn, "GHSA-1", Source::Tamanu, today())
+		Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::NotAffected))
 			.await
 			.unwrap();
-		assert_eq!(detail.item.status, Status::WillFix);
+		assert!(list(&mut conn, &open()).await.is_empty());
+		let items = list(&mut conn, &ListQuery::default()).await;
+		assert_eq!(items[0].status, Status::NotAffected);
+
+		Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::WillFix))
+			.await
+			.unwrap();
+		let items = list(&mut conn, &ListQuery::default()).await;
+		assert_eq!(items[0].status, Status::WillFix);
+
+		let detail = ItemDetail::load(&mut conn, "GHSA-1", &tamanu())
+			.await
+			.unwrap();
 		let decisions = detail
 			.history
 			.iter()
@@ -729,93 +702,430 @@ async fn a_decision_is_current_until_replaced_and_the_history_keeps_both() {
 			})
 			.count();
 		assert_eq!(decisions, 2);
-		assert!(detail.person_has_decided);
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_accepted_risk_past_its_review_date_is_open_again_and_says_why() {
+async fn a_decision_needs_an_item_that_exists() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		one_open_item(&mut conn).await;
+		let result =
+			Decision::record(&mut conn, whole("GHSA-none", tamanu(), Outcome::WillFix)).await;
+		assert!(matches!(result, Err(AppError::NotFound(_))));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_split_decision_is_checked_against_the_workspace_packages_that_reach_the_advisory() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+
+		let uncovered = split(
+			"GHSA-1",
+			tamanu(),
+			vec![entry(Some(&["server"]), Outcome::WillFix)],
+		);
+		assert!(refused(Decision::record(&mut conn, uncovered).await).contains("not covered"));
+
+		let twice = split(
+			"GHSA-1",
+			tamanu(),
+			vec![
+				entry(Some(&["server", "web"]), Outcome::WillFix),
+				entry(Some(&["web"]), Outcome::WillFix),
+				entry(None, Outcome::WillFix),
+			],
+		);
+		assert!(refused(Decision::record(&mut conn, twice).await).contains("more than one entry"));
+
+		let unreached = split(
+			"GHSA-1",
+			tamanu(),
+			vec![
+				entry(Some(&["desktop"]), Outcome::WillFix),
+				entry(None, Outcome::WillFix),
+			],
+		);
+		assert!(refused(Decision::record(&mut conn, unreached).await).contains("does not reach"));
+
+		let not_last = split(
+			"GHSA-1",
+			tamanu(),
+			vec![
+				entry(None, Outcome::WillFix),
+				entry(Some(&["web"]), Outcome::WillFix),
+			],
+		);
+		assert!(refused(Decision::record(&mut conn, not_last).await).contains("must be last"));
+
+		let two = split(
+			"GHSA-1",
+			tamanu(),
+			vec![entry(None, Outcome::WillFix), entry(None, Outcome::WillFix)],
+		);
+		assert!(refused(Decision::record(&mut conn, two).await).contains("at most one catch-all"));
+
+		assert_eq!(list(&mut conn, &open()).await.len(), 1, "none was recorded");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linux_item_takes_only_a_whole_decision() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		production_machine(&mut conn, "box", "3.0.13-0ubuntu3.4").await;
+		openssl_advisory(&mut conn, "3.0.13-0ubuntu3.4").await;
+		let result = Decision::record(
+			&mut conn,
+			split(
+				"UBUNTU-1",
+				Source::Linux,
+				vec![
+					entry(Some(&["a"]), Outcome::WillFix),
+					entry(None, Outcome::WillFix),
+				],
+			),
+		)
+		.await;
+		assert!(refused(result).contains("Linux"));
 		Decision::record(
 			&mut conn,
-			decision("GHSA-1", Source::Tamanu, Outcome::AcceptedRisk, Via::Ui),
-			today(),
+			whole("UBUNTU-1", Source::Linux, Outcome::AcceptedRisk),
+		)
+		.await
+		.unwrap();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_split_gives_a_shared_outcome_or_mixed() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		let same = split(
+			"GHSA-1",
+			tamanu(),
+			vec![
+				entry(Some(&["server"]), Outcome::WillFix),
+				entry(None, Outcome::WillFix),
+			],
+		);
+		Decision::record(&mut conn, same).await.unwrap();
+		assert_eq!(
+			list(&mut conn, &ListQuery::default()).await[0].status,
+			Status::WillFix
+		);
+
+		let different = split(
+			"GHSA-1",
+			tamanu(),
+			vec![
+				entry(Some(&["mobile"]), Outcome::WillFix),
+				entry(Some(&["server"]), Outcome::AcceptedRisk),
+				entry(None, Outcome::NotAffected),
+			],
+		);
+		Decision::record(&mut conn, different).await.unwrap();
+		let items = list(
+			&mut conn,
+			&ListQuery {
+				status: Some(Status::Mixed),
+				..Default::default()
+			},
+		)
+		.await;
+		assert_eq!(items.len(), 1);
+		assert_eq!(items[0].decision.as_ref().unwrap().entries.len(), 3);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn withdrawing_leaves_the_item_needing_triage_with_its_suggestion() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		Suggestion::record(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			vec![entry(None, Outcome::NotAffected)],
+			Basis::DependencyPathOnly,
+			"model",
+		)
+		.await
+		.unwrap();
+		assert!(
+			refused(
+				Decision::withdraw(&mut conn, "GHSA-1", &tamanu(), "why", operator(), Via::Ui)
+					.await
+			)
+			.contains("no current decision")
+		);
+
+		Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::AcceptedRisk))
+			.await
+			.unwrap();
+		assert!(
+			refused(
+				Decision::withdraw(&mut conn, "GHSA-1", &tamanu(), "  ", operator(), Via::Ui).await
+			)
+			.contains("needs a reason")
+		);
+		Decision::withdraw(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			"wrong call",
+			operator(),
+			Via::Ui,
 		)
 		.await
 		.unwrap();
 
-		let later = date(2027, 1, 2);
-		let open = ItemSummary::list(&mut conn, &ListFilter::default(), later)
-			.await
-			.unwrap()
-			.items;
-		assert_eq!(open[0].status, Status::Open);
-		assert_eq!(
-			open[0].reopened.as_ref().unwrap().reason,
-			Reopening::ReviewDue
+		let items = list(&mut conn, &open()).await;
+		assert_eq!(items.len(), 1);
+		assert!(items[0].withdrawn);
+		assert!(items[0].decision.is_none());
+		assert!(
+			items[0].suggestion.is_some(),
+			"withdrawing keeps the suggestion"
+		);
+		assert!(
+			refused(
+				Decision::withdraw(&mut conn, "GHSA-1", &tamanu(), "again", operator(), Via::Ui)
+					.await
+			)
+			.contains("no current decision")
 		);
 
-		let fleet = CountedFleet::load(&mut conn).await.unwrap();
-		let counted = fleet.packages(&mut conn).await.unwrap();
-		let reopened = Reopened::pass(&mut conn, &counted, later).await.unwrap();
-		assert_eq!(reopened.len(), 1);
-		assert!(
-			Reopened::pass(&mut conn, &counted, later)
+		let history = Withdrawal::history(&mut conn, "GHSA-1", &tamanu())
+			.await
+			.unwrap();
+		assert_eq!(history.len(), 1);
+		assert_eq!(history[0].reason, "wrong call");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn editing_one_entry_keeps_the_earlier_text() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		let mut will_fix = entry(Some(&["mobile"]), Outcome::WillFix);
+		will_fix.issue_url = Some("https://example.org/issues/1".into());
+		Decision::record(
+			&mut conn,
+			split(
+				"GHSA-1",
+				tamanu(),
+				vec![
+					will_fix,
+					entry(Some(&["server"]), Outcome::AcceptedRisk),
+					entry(None, Outcome::NotAffected),
+				],
+			),
+		)
+		.await
+		.unwrap();
+
+		let edit = Decision::edit(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			Some("server"),
+			Some("internal only, behind the VPN"),
+			None,
+			operator(),
+			Via::Ui,
+		)
+		.await
+		.unwrap();
+		assert_eq!(edit.earlier_reason.as_deref(), Some("because"));
+		assert_eq!(
+			edit.reason.as_deref(),
+			Some("internal only, behind the VPN")
+		);
+		assert_eq!(edit.workspace_packages, Some(vec!["server".to_owned()]));
+
+		let items = list(&mut conn, &ListQuery::default()).await;
+		let decision = items[0].decision.as_ref().unwrap();
+		assert!(decision.edited);
+		assert!(items[0].edited);
+		assert_eq!(
+			decision.entries[1].reason.as_deref(),
+			Some("internal only, behind the VPN")
+		);
+		assert_eq!(
+			decision.entries[0].reason, None,
+			"the other entries are untouched"
+		);
+
+		let cleared = Decision::edit(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			Some("mobile"),
+			None,
+			Some(""),
+			operator(),
+			Via::Ui,
+		)
+		.await
+		.unwrap();
+		assert_eq!(
+			cleared.earlier_issue_url.as_deref(),
+			Some("https://example.org/issues/1")
+		);
+		assert_eq!(cleared.issue_url, None);
+
+		let catch_all = Decision::edit(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			None,
+			Some("never reached"),
+			None,
+			operator(),
+			Via::Mcp,
+		)
+		.await
+		.unwrap();
+		assert_eq!(catch_all.workspace_packages, None);
+		assert_eq!(
+			Edit::history(&mut conn, "GHSA-1", &tamanu())
 				.await
 				.unwrap()
-				.is_empty(),
-			"a decision reopens once"
+				.len(),
+			3
 		);
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edit_cannot_blank_a_required_reason_or_change_nothing() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::NotAffected))
+			.await
+			.unwrap();
+		let blank = Decision::edit(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			None,
+			Some(" "),
+			None,
+			operator(),
+			Via::Ui,
+		)
+		.await;
+		assert!(refused(blank).contains("needs a reason"));
+		let same = Decision::edit(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			None,
+			Some("because"),
+			None,
+			operator(),
+			Via::Ui,
+		)
+		.await;
+		assert!(refused(same).contains("changes nothing"));
+		let nothing = Decision::edit(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			None,
+			None,
+			None,
+			operator(),
+			Via::Ui,
+		)
+		.await;
+		assert!(refused(nothing).contains("changes the reason"));
+		let link = Decision::edit(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			None,
+			None,
+			Some("https://example.org/1"),
+			operator(),
+			Via::Ui,
+		)
+		.await;
+		assert!(refused(link).contains("only a will fix"));
+		let unknown = Decision::edit(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			Some("nope"),
+			Some("x"),
+			None,
+			operator(),
+			Via::Ui,
+		)
+		.await;
+		assert!(refused(unknown).contains("no entry"));
+	})
+	.await;
+}
+
+// ── Lapses ──────────────────────────────────────────────────────────────────
 
 async fn revise(
 	conn: &mut AsyncPgConnection,
 	severity: &str,
 	affected: Vec<Affected>,
-) -> Vec<Reopened> {
+) -> Vec<Lapse> {
 	Advisory::upsert(conn, &record("GHSA-1", severity, affected))
 		.await
 		.unwrap();
-	let fleet = CountedFleet::load(conn).await.unwrap();
-	let counted = fleet.packages(conn).await.unwrap();
-	Reopened::pass(conn, &counted, today()).await.unwrap()
+	Lapse::pass(conn).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_revision_raising_severity_reopens_a_decided_item() {
+async fn a_revision_raising_severity_lapses_a_decision_and_discards_the_suggestion() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		one_open_item(&mut conn).await;
-		Decision::record(
+		tamanu_item(&mut conn).await;
+		Suggestion::record(
 			&mut conn,
-			decision("GHSA-1", Source::Tamanu, Outcome::NotAffected, Via::Ui),
-			today(),
+			"GHSA-1",
+			&tamanu(),
+			vec![entry(None, Outcome::NotAffected)],
+			Basis::AdvisoryTextOnly,
+			"model",
 		)
 		.await
 		.unwrap();
-		let reopened = revise(
-			&mut conn,
-			"CRITICAL",
-			vec![range(
-				NPM,
-				"left-pad",
-				"SEMVER",
-				&[("introduced", "0"), ("fixed", "2.0.0")],
-			)],
-		)
-		.await;
-		assert_eq!(reopened.len(), 1);
+		Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::NotAffected))
+			.await
+			.unwrap();
+
+		let lapsed = revise(&mut conn, "CRITICAL", fixed_before_2("left-pad")).await;
+		assert_eq!(lapsed.len(), 1);
 		assert!(matches!(
-			reopened[0].reason,
-			Reopening::SeverityRose {
+			lapsed[0].reason,
+			LapseReason::SeverityRose {
 				to: Severity::Critical,
 				..
 			}
 		));
-		assert_eq!(list_open(&mut conn).await.len(), 1);
+		let items = list(&mut conn, &open()).await;
+		assert_eq!(items.len(), 1);
+		assert!(items[0].lapse.is_some());
+		assert!(
+			items[0].suggestion.is_none(),
+			"a lapse discards the suggestion"
+		);
+		assert!(
+			revise(&mut conn, "CRITICAL", fixed_before_2("left-pad"))
+				.await
+				.is_empty()
+		);
 	})
 	.await;
 }
@@ -823,70 +1133,11 @@ async fn a_revision_raising_severity_reopens_a_decided_item() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_revision_that_only_adds_a_fixed_version_leaves_the_decision() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		one_open_item(&mut conn).await;
-		Decision::record(
-			&mut conn,
-			decision("GHSA-1", Source::Tamanu, Outcome::NotAffected, Via::Ui),
-			today(),
-		)
-		.await
-		.unwrap();
-		let reopened = revise(
-			&mut conn,
-			"MODERATE",
-			vec![range(
-				NPM,
-				"left-pad",
-				"SEMVER",
-				&[("introduced", "0"), ("fixed", "1.9.0")],
-			)],
-		)
-		.await;
-		assert!(reopened.is_empty());
-		assert!(list_open(&mut conn).await.is_empty());
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_revision_widening_the_range_to_reach_a_counted_version_reopens() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let tamanu = version(&mut conn, 2, 3, 4).await;
-		tamanu_on_production(&mut conn, "2.3.4").await;
-		VersionPackage::store(
-			&mut conn,
-			tamanu.id,
-			&[package("left-pad", "2.5.0", &["server"], true)],
-		)
-		.await
-		.unwrap();
-		// The advisory first matches 1.x only, and the fleet is on 2.5.0, so
-		// something else in the tree carries the match.
-		Advisory::upsert(
-			&mut conn,
-			&record(
-				"GHSA-1",
-				"MODERATE",
-				vec![range(
-					NPM,
-					"left-pad",
-					"SEMVER",
-					&[("introduced", "0"), ("fixed", "2.0.0")],
-				)],
-			),
-		)
-		.await
-		.unwrap();
-		scan_npm(&mut conn, "left-pad", "2.5.0", &["GHSA-1"]).await;
-		Decision::record(
-			&mut conn,
-			decision("GHSA-1", Source::Tamanu, Outcome::NotAffected, Via::Ui),
-			today(),
-		)
-		.await
-		.unwrap();
-
-		let reopened = revise(
+		tamanu_item(&mut conn).await;
+		Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::NotAffected))
+			.await
+			.unwrap();
+		let lapsed = revise(
 			&mut conn,
 			"MODERATE",
 			vec![range(
@@ -897,140 +1148,648 @@ async fn a_revision_widening_the_range_to_reach_a_counted_version_reopens() {
 			)],
 		)
 		.await;
-		assert_eq!(reopened.len(), 1);
-		assert!(matches!(reopened[0].reason, Reopening::RangeWidened { .. }));
+		assert!(lapsed.is_empty());
+		assert!(list(&mut conn, &open()).await.is_empty());
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_decision_covers_a_later_version_carrying_a_package_inside_its_ranges() {
+async fn a_revision_widening_the_range_to_reach_what_the_source_carries_lapses_the_decision() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		one_open_item(&mut conn).await;
-		Decision::record(
+		read_repository(
 			&mut conn,
-			decision("GHSA-1", Source::Tamanu, Outcome::NotAffected, Via::Ui),
-			today(),
-		)
-		.await
-		.unwrap();
-
-		let later = version(&mut conn, 2, 4, 0).await;
-		VersionPackage::store(
-			&mut conn,
-			later.id,
-			&[package("left-pad", "1.9.9", &["server"], true)],
-		)
-		.await
-		.unwrap();
-		scan_npm(&mut conn, "left-pad", "1.9.9", &["GHSA-1"]).await;
-		let fleet = CountedFleet::load(&mut conn).await.unwrap();
-		let counted = fleet.packages(&mut conn).await.unwrap();
-		assert!(
-			Reopened::pass(&mut conn, &counted, today())
-				.await
-				.unwrap()
-				.is_empty()
-		);
-		assert!(list_open(&mut conn).await.is_empty());
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_decision_needs_an_item_that_exists() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let result = Decision::record(
-			&mut conn,
-			decision("GHSA-none", Source::Tamanu, Outcome::NotAffected, Via::Ui),
-			today(),
+			"tamanu",
+			"abc",
+			&[npm_package(
+				"left-pad",
+				"1.8.0",
+				vec![path("server", Scope::Runtime, false, true)],
+			)],
 		)
 		.await;
-		assert!(result.is_err());
+		scan_npm(
+			&mut conn,
+			"left-pad",
+			"1.8.0",
+			&["GHSA-1"],
+			vec![range(
+				NPM,
+				"left-pad",
+				"SEMVER",
+				&[("introduced", "0"), ("fixed", "1.5.0")],
+			)],
+		)
+		.await;
+		Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::AcceptedRisk))
+			.await
+			.unwrap();
+		let lapsed = revise(&mut conn, "MODERATE", fixed_before_2("left-pad")).await;
+		assert_eq!(lapsed.len(), 1);
+		assert!(matches!(lapsed[0].reason, LapseReason::RangeWidened { .. }));
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_model_is_asked_once_for_a_new_item_and_again_when_it_reopens() {
+async fn a_new_workspace_package_lapses_a_split_without_a_catch_all_but_not_with_one() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		one_open_item(&mut conn).await;
-		let fleet = CountedFleet::load(&mut conn).await.unwrap();
-		let exposure = database::vulnerabilities::Exposure::load(&mut conn, &fleet, None)
+		read_repository(
+			&mut conn,
+			"tamanu",
+			"abc",
+			&[npm_package(
+				"left-pad",
+				"1.5.0",
+				vec![
+					path("server", Scope::Runtime, false, true),
+					path("web", Scope::Runtime, false, true),
+				],
+			)],
+		)
+		.await;
+		scan_npm(
+			&mut conn,
+			"left-pad",
+			"1.5.0",
+			&["GHSA-1"],
+			fixed_before_2("left-pad"),
+		)
+		.await;
+		read_repository(
+			&mut conn,
+			"canopy",
+			"abc",
+			&[npm_package(
+				"left-pad",
+				"1.5.0",
+				vec![
+					path("server", Scope::Runtime, false, true),
+					path("web", Scope::Runtime, false, true),
+				],
+			)],
+		)
+		.await;
+		refresh_items(&mut conn).await.unwrap();
+
+		Decision::record(
+			&mut conn,
+			split(
+				"GHSA-1",
+				tamanu(),
+				vec![
+					entry(Some(&["server"]), Outcome::WillFix),
+					entry(Some(&["web"]), Outcome::NotAffected),
+				],
+			),
+		)
+		.await
+		.unwrap();
+		Decision::record(
+			&mut conn,
+			split(
+				"GHSA-1",
+				canopy(),
+				vec![
+					entry(Some(&["server"]), Outcome::WillFix),
+					entry(None, Outcome::NotAffected),
+				],
+			),
+		)
+		.await
+		.unwrap();
+		assert!(Lapse::pass(&mut conn).await.unwrap().is_empty());
+
+		for repository in ["tamanu", "canopy"] {
+			read_repository(
+				&mut conn,
+				repository,
+				"def",
+				&[npm_package(
+					"left-pad",
+					"1.5.0",
+					vec![
+						path("server", Scope::Runtime, false, true),
+						path("web", Scope::Runtime, false, true),
+						path("mobile", Scope::Runtime, false, true),
+					],
+				)],
+			)
+			.await;
+		}
+		let lapsed = Lapse::pass(&mut conn).await.unwrap();
+		assert_eq!(lapsed.len(), 1);
+		assert_eq!(lapsed[0].source, tamanu());
+		assert!(matches!(
+			&lapsed[0].reason,
+			LapseReason::NewWorkspacePackage { name } if name == "mobile"
+		));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_decision_covers_a_later_version_inside_its_ranges() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::AcceptedRisk))
 			.await
 			.unwrap();
-		refresh_counts(&mut conn, &exposure).await.unwrap();
+		read_repository(
+			&mut conn,
+			"tamanu",
+			"next",
+			&[npm_package(
+				"left-pad",
+				"1.9.9",
+				vec![path("server", Scope::Runtime, false, true)],
+			)],
+		)
+		.await;
+		replace_matches(
+			&mut conn,
+			&[(
+				Counted {
+					ecosystem: NPM.into(),
+					name: "left-pad".into(),
+					version: "1.9.9".into(),
+				},
+				vec!["GHSA-1".into()],
+			)],
+		)
+		.await
+		.unwrap();
+		assert!(Lapse::pass(&mut conn).await.unwrap().is_empty());
+		let items = list(&mut conn, &ListQuery::default()).await;
+		assert_eq!(items[0].status, Status::AcceptedRisk);
+	})
+	.await;
+}
 
-		let retry = SignedDuration::from_hours(1);
+// ── The model's queue ───────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_model_is_asked_once_for_a_new_item_and_again_when_it_lapses() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		let retry = SignedDuration::from_secs(3600);
+
 		let first = claim_for_model(&mut conn, 10, retry).await.unwrap();
-		assert_eq!(first, vec![("GHSA-1".to_owned(), Source::Tamanu)]);
+		assert_eq!(first, [("GHSA-1".to_owned(), tamanu())]);
 		assert!(
 			claim_for_model(&mut conn, 10, retry)
 				.await
 				.unwrap()
 				.is_empty(),
-			"claimed items are not handed out again at once"
+			"not asked again within the retry period"
 		);
 
 		Suggestion::record(
 			&mut conn,
 			"GHSA-1",
-			Source::Tamanu,
-			Outcome::WillFix,
-			None,
-			"patch it",
+			&tamanu(),
+			vec![entry(None, Outcome::NotAffected)],
+			Basis::DependencyPathOnly,
 			"model",
 		)
 		.await
 		.unwrap();
+		diesel::sql_query("UPDATE vulnerability_items SET model_attempted_at = NULL")
+			.execute(&mut conn)
+			.await
+			.unwrap();
 		assert!(
-			claim_for_model(&mut conn, 10, SignedDuration::ZERO)
+			claim_for_model(&mut conn, 10, retry)
 				.await
 				.unwrap()
 				.is_empty(),
-			"an item with a suggestion is not looked at"
+			"an item with a suggestion is not asked about"
 		);
 
-		Decision::record(
-			&mut conn,
-			decision("GHSA-1", Source::Tamanu, Outcome::NotAffected, Via::Model),
-			today(),
-		)
-		.await
-		.unwrap();
+		Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::NotAffected))
+			.await
+			.unwrap();
 		assert!(
-			!Decision::person_has_decided(&mut conn, "GHSA-1", Source::Tamanu)
+			claim_for_model(&mut conn, 10, retry)
 				.await
 				.unwrap()
+				.is_empty()
 		);
-		let reopened = revise(
-			&mut conn,
-			"CRITICAL",
-			vec![range(
-				NPM,
-				"left-pad",
-				"SEMVER",
-				&[("introduced", "0"), ("fixed", "2.0.0")],
-			)],
-		)
-		.await;
-		assert_eq!(reopened.len(), 1);
+		revise(&mut conn, "CRITICAL", fixed_before_2("left-pad")).await;
 		assert_eq!(
-			claim_for_model(&mut conn, 10, SignedDuration::ZERO)
-				.await
-				.unwrap()
-				.len(),
-			1,
-			"a reopened item is looked at again"
+			claim_for_model(&mut conn, 10, retry).await.unwrap().len(),
+			1
 		);
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_model_is_not_asked_about_a_closed_item() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		read_repository(&mut conn, "tamanu", "empty", &[]).await;
+		assert!(
+			claim_for_model(&mut conn, 10, SignedDuration::from_secs(60))
+				.await
+				.unwrap()
+				.is_empty()
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_suggestion_is_held_to_the_rules_of_a_decision() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		let result = Suggestion::record(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			vec![entry(Some(&["server"]), Outcome::NotAffected)],
+			Basis::DependencyPathOnly,
+			"model",
+		)
+		.await;
+		assert!(refused(result).contains("not covered"));
+		Suggestion::record(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			vec![
+				entry(Some(&["server"]), Outcome::NotAffected),
+				entry(None, Outcome::WillFix),
+			],
+			Basis::DependencyPathAndAdvisoryText,
+			"model",
+		)
+		.await
+		.unwrap();
+		let items = list(&mut conn, &open()).await;
+		let suggestion = items[0].suggestion.as_ref().unwrap();
+		assert_eq!(suggestion.status, Status::Mixed);
+		assert_eq!(suggestion.basis, Basis::DependencyPathAndAdvisoryText);
+	})
+	.await;
+}
+
+// ── Listing ─────────────────────────────────────────────────────────────────
+
+/// Several items in two repositories, differing in severity, scope and text.
+async fn assorted(conn: &mut AsyncPgConnection) {
+	read_repository(
+		conn,
+		"tamanu",
+		"abc",
+		&[
+			npm_package(
+				"undici",
+				"6.19.8",
+				vec![path("server", Scope::Runtime, false, true)],
+			),
+			npm_package(
+				"lodash",
+				"4.0.0",
+				vec![
+					path("web", Scope::Development, false, false),
+					path("server", Scope::Runtime, true, false),
+				],
+			),
+			npm_package(
+				"semver",
+				"7.5.1",
+				vec![path("web", Scope::Development, false, false)],
+			),
+		],
+	)
+	.await;
+	read_repository(
+		conn,
+		"canopy",
+		"abc",
+		&[npm_package(
+			"undici",
+			"6.19.8",
+			vec![path("app", Scope::Development, false, true)],
+		)],
+	)
+	.await;
+
+	let mut undici = record("GHSA-undici", "HIGH", fixed_before_2("undici"));
+	undici.summary = "Denial of service in fetch decompression".into();
+	undici.details = "A crafted response exhausts memory while decompressing.".into();
+	let mut lodash = record("GHSA-lodash", "CRITICAL", fixed_before_2("lodash"));
+	lodash.summary = "Prototype pollution in merge helper".into();
+	lodash.details = "The undici client is not involved, but this text mentions it.".into();
+	let mut semver = record("GHSA-semver", "LOW", fixed_before_2("semver"));
+	semver.summary = "Regular expression denial of service".into();
+	for (record, name, version) in [
+		(undici, "undici", "6.19.8"),
+		(lodash, "lodash", "4.0.0"),
+		(semver, "semver", "7.5.1"),
+	] {
+		let id = record.id.clone();
+		Advisory::upsert(conn, &record).await.unwrap();
+		replace_matches(
+			conn,
+			&[(
+				Counted {
+					ecosystem: NPM.into(),
+					name: name.into(),
+					version: version.into(),
+				},
+				vec![id],
+			)],
+		)
+		.await
+		.unwrap();
+	}
+	refresh_items(conn).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn items_are_ordered_by_severity_by_default_and_by_any_column_when_chosen() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		assorted(&mut conn).await;
+		let default = list(&mut conn, &ListQuery::default()).await;
+		assert_eq!(
+			ids(&default),
+			[
+				("GHSA-lodash", "tamanu"),
+				("GHSA-undici", "canopy"),
+				("GHSA-undici", "tamanu"),
+				("GHSA-semver", "tamanu"),
+			]
+		);
+
+		let by_package = list(
+			&mut conn,
+			&ListQuery {
+				sort: Some(Sort {
+					column: SortColumn::Package,
+					descending: true,
+				}),
+				..Default::default()
+			},
+		)
+		.await;
+		assert_eq!(by_package[0].packages[0].name, "undici");
+		assert_eq!(by_package[3].packages[0].name, "lodash");
+
+		let by_source = list(
+			&mut conn,
+			&ListQuery {
+				sort: Some(Sort {
+					column: SortColumn::Source,
+					descending: false,
+				}),
+				..Default::default()
+			},
+		)
+		.await;
+		assert_eq!(by_source[0].source, canopy());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_search_ranks_a_summary_hit_above_a_details_only_hit_and_tolerates_a_typo() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		assorted(&mut conn).await;
+		let search = |term: &str| ListQuery {
+			search: Some(term.into()),
+			..Default::default()
+		};
+
+		let found = list(&mut conn, &search("undici")).await;
+		let order = ids(&found);
+		assert_eq!(order[0].0, "GHSA-undici");
+		assert!(
+			order.contains(&("GHSA-lodash", "tamanu")),
+			"a details-only hit still matches"
+		);
+		assert_eq!(
+			order.last().unwrap(),
+			&("GHSA-lodash", "tamanu"),
+			"and ranks below the summary and package hits"
+		);
+		assert!(!order.iter().any(|(id, _)| *id == "GHSA-semver"));
+
+		let typo = list(&mut conn, &search("undcii")).await;
+		assert!(typo.iter().any(|item| item.id == "GHSA-undici"));
+
+		let partial = list(&mut conn, &search("prototy")).await;
+		assert_eq!(ids(&partial), [("GHSA-lodash", "tamanu")]);
+
+		let by_alias = list(&mut conn, &search("tupaia")).await;
+		assert!(by_alias.is_empty());
+		let by_source = list(&mut conn, &search("canopy")).await;
+		assert_eq!(ids(&by_source), [("GHSA-undici", "canopy")]);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn filters_narrow_the_list() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		assorted(&mut conn).await;
+		let with = |edit: &dyn Fn(&mut ListQuery)| {
+			let mut query = ListQuery::default();
+			edit(&mut query);
+			query
+		};
+
+		assert_eq!(
+			list(&mut conn, &with(&|q| q.source = Some(canopy())))
+				.await
+				.len(),
+			1
+		);
+		assert_eq!(
+			ids(&list(&mut conn, &with(&|q| q.scope = Some("optional".into()))).await),
+			[("GHSA-lodash", "tamanu")]
+		);
+		assert_eq!(
+			list(&mut conn, &with(&|q| q.scope = Some("development".into())))
+				.await
+				.len(),
+			4 - 1,
+			"the runtime-only undici item of tamanu has no development path"
+		);
+		assert_eq!(
+			list(&mut conn, &with(&|q| q.min_severity = Some(Severity::High)))
+				.await
+				.len(),
+			3
+		);
+		assert_eq!(
+			list(&mut conn, &with(&|q| q.severity = Some(Severity::High)))
+				.await
+				.len(),
+			2
+		);
+		assert_eq!(
+			list(&mut conn, &with(&|q| q.package = Some("semver".into())))
+				.await
+				.len(),
+			1
+		);
+		assert_eq!(
+			list(
+				&mut conn,
+				&with(&|q| q.workspace_package = Some("app".into()))
+			)
+			.await
+			.len(),
+			1
+		);
+		assert_eq!(
+			list(&mut conn, &with(&|q| q.has_suggestion = Some(true)))
+				.await
+				.len(),
+			0
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_facet_ignores_its_own_filter() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		assorted(&mut conn).await;
+		Decision::record(
+			&mut conn,
+			whole("GHSA-semver", tamanu(), Outcome::NotAffected),
+		)
+		.await
+		.unwrap();
+
+		let query = ListQuery {
+			source: Some(tamanu()),
+			status: Some(Status::Open),
+			..Default::default()
+		};
+		let facets = ItemSummary::facets(&mut conn, &query).await.unwrap();
+		let count = |counts: &[database::vulnerabilities::FacetCount], value: &str| {
+			counts.iter().find(|c| c.value == value).unwrap().count
+		};
+
+		assert_eq!(count(&facets.source, "tamanu"), 2, "with the status filter");
+		assert_eq!(
+			count(&facets.source, "canopy"),
+			1,
+			"ignoring the source filter"
+		);
+		assert_eq!(count(&facets.status, "open"), 2, "with the source filter");
+		assert_eq!(
+			count(&facets.status, "not_affected"),
+			1,
+			"ignoring the status filter"
+		);
+		assert_eq!(count(&facets.status, "mixed"), 0);
+		assert_eq!(count(&facets.severity, "critical"), 1);
+		assert_eq!(count(&facets.suggestion, "no"), 2);
+		assert_eq!(count(&facets.scope, "optional"), 1);
+		assert_eq!(count(&facets.source, "linux"), 0, "every source is listed");
+
+		let total = ItemSummary::list(&mut conn, &query).await.unwrap().total;
+		assert_eq!(total, 2);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn group_by_scope_counts_a_multi_scope_item_in_each() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		assorted(&mut conn).await;
+		let groups = ItemSummary::group(&mut conn, &ListQuery::default(), GroupBy::Scope)
+			.await
+			.unwrap();
+		let count = |key: &str| groups.iter().find(|g| g.key == key).map(|g| g.count);
+		assert_eq!(count("runtime"), Some(2));
+		assert_eq!(count("development"), Some(4 - 1));
+		assert_eq!(count("optional"), Some(1));
+
+		let by_package = ItemSummary::group(&mut conn, &ListQuery::default(), GroupBy::Package)
+			.await
+			.unwrap();
+		assert_eq!(by_package[0].key, "undici");
+		assert_eq!(by_package[0].count, 2);
+
+		let by_status = ItemSummary::group(&mut conn, &ListQuery::default(), GroupBy::Status)
+			.await
+			.unwrap();
+		assert_eq!(by_status.len(), 1);
+		assert_eq!(by_status[0].key, "open");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cursor_pages_through_without_overlap() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		assorted(&mut conn).await;
+		let mut seen = Vec::new();
+		let mut cursor = None;
+		loop {
+			let page = ItemSummary::list(
+				&mut conn,
+				&ListQuery {
+					page_size: Some(3 - 1),
+					cursor: cursor.clone(),
+					..Default::default()
+				},
+			)
+			.await
+			.unwrap();
+			assert_eq!(page.total, 4);
+			seen.extend(page.items.iter().map(|i| (i.id.clone(), i.source.clone())));
+			match page.next_cursor {
+				Some(next) => cursor = Some(next),
+				None => break,
+			}
+		}
+		assert_eq!(seen.len(), 4);
+		let mut unique = seen.clone();
+		unique.sort();
+		unique.dedup();
+		assert_eq!(unique.len(), 4);
+
+		let bad = ItemSummary::list(
+			&mut conn,
+			&ListQuery {
+				cursor: Some("junk".into()),
+				..Default::default()
+			},
+		)
+		.await;
+		assert!(matches!(bad, Err(AppError::BadRequest(_))));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_sidebar_count_leaves_out_closed_and_decided_items() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		assorted(&mut conn).await;
+		assert_eq!(ItemSummary::needs_triage_count(&mut conn).await.unwrap(), 4);
+		Decision::record(&mut conn, whole("GHSA-semver", tamanu(), Outcome::WillFix))
+			.await
+			.unwrap();
+		assert_eq!(ItemSummary::needs_triage_count(&mut conn).await.unwrap(), 3);
+		read_repository(&mut conn, "canopy", "empty", &[]).await;
+		assert_eq!(ItemSummary::needs_triage_count(&mut conn).await.unwrap(), 2);
+	})
+	.await;
+}
+
+// ── Matches ─────────────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread")]
 async fn matches_for_package_versions_no_longer_counted_are_pruned() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		one_open_item(&mut conn).await;
+		tamanu_item(&mut conn).await;
 		let pruned = prune_matches(&mut conn, &[]).await.unwrap();
 		assert_eq!(pruned, 1);
 	})
@@ -1052,10 +1811,25 @@ async fn a_query_that_no_longer_finds_an_advisory_drops_only_its_own_match() {
 			.await
 			.unwrap();
 		}
-		scan_npm(&mut conn, "left-pad", "1.0.0", &["GHSA-1", "GHSA-2"]).await;
-		scan_npm(&mut conn, "left-pad", "2.0.0", &["GHSA-1"]).await;
-
-		scan_npm(&mut conn, "left-pad", "1.0.0", &["GHSA-2"]).await;
+		let matched = |version: &str, ids: &[&str]| {
+			(
+				Counted {
+					ecosystem: NPM.into(),
+					name: "left-pad".into(),
+					version: version.into(),
+				},
+				ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>(),
+			)
+		};
+		replace_matches(&mut conn, &[matched("1.0.0", &["GHSA-1", "GHSA-2"])])
+			.await
+			.unwrap();
+		replace_matches(&mut conn, &[matched("2.0.0", &["GHSA-1"])])
+			.await
+			.unwrap();
+		replace_matches(&mut conn, &[matched("1.0.0", &["GHSA-2"])])
+			.await
+			.unwrap();
 
 		#[derive(diesel::QueryableByName)]
 		struct Row {
@@ -1089,38 +1863,6 @@ async fn an_advisory_with_malformed_times_is_still_stored() {
 		Advisory::upsert(&mut conn, &malformed).await.unwrap();
 		let held = Advisory::get(&mut conn, "GHSA-1").await.unwrap().unwrap();
 		assert_eq!(held.published_at, None);
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn an_item_nothing_counts_for_still_names_its_packages() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		Advisory::upsert(
-			&mut conn,
-			&record(
-				"GHSA-1",
-				"HIGH",
-				vec![range(NPM, "left-pad", "SEMVER", &[("introduced", "0")])],
-			),
-		)
-		.await
-		.unwrap();
-		scan_npm(&mut conn, "left-pad", "1.0.0", &["GHSA-1"]).await;
-
-		let listing = ItemSummary::list(
-			&mut conn,
-			&ListFilter {
-				include_uncounted: true,
-				..Default::default()
-			},
-			today(),
-		)
-		.await
-		.unwrap();
-		assert_eq!(listing.items.len(), 1);
-		assert!(!listing.items[0].counts);
-		assert_eq!(listing.items[0].packages, ["left-pad"]);
 	})
 	.await;
 }

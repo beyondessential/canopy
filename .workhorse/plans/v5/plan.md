@@ -109,27 +109,27 @@
   - `VulnerabilityDecided` detail gets `entries` and drops `review_by`;
   - add `VulnerabilityDecisionWithdrawn` (`vulnerability_decision_withdrawn`) and `VulnerabilityDecisionEdited` (`vulnerability_decision_edited`), with the decision id, entry, reason and earlier text;
   - relabel `VulnerabilityReopened` to "Vulnerability decision lapsed", keeping its stable name.
-- [ ] `self_alerts.rs`: add `VULNERABILITY_REPOSITORIES_REF` (`vulnerability-repositories`) with its doc, warn-only, `STALE_AFTER` a day. Its detail names each repository and the failure. Model it on `ANSIBLE_CATALOGUE_*`.
+- [x] `self_alerts.rs`: add `VULNERABILITY_REPOSITORIES_REF` (`vulnerability-repositories`) with its doc, warn-only, `STALE_AFTER` a day. Its detail names each repository and the failure. Model it on `ANSIBLE_CATALOGUE_*`.
 
 ### Jobs (`crates/jobs/src/vulnerabilities`)
-- [ ] New `repository.rs`:
+- [x] New `repository.rs`:
   - a head watch via smart HTTP `info/refs`;
   - a tree listing at the sha;
   - a raw fetch of each lockfile and the manifests it needs;
   - a `Failure::{Unreachable, Unparseable { lockfile }}` result.
-- [ ] `lockfile.rs` becomes `lockfile/npm.rs`, keeping dev entries and tagging each edge runtime, development or optional (the old `development_only_packages_are_left_out` test is turned around). Add `lockfile/cargo.rs` (`Cargo.lock` plus member `Cargo.toml`, using the `toml` and `cargo-lock` crates, added with `cargo add`) and `lockfile/uv.rs`. Each returns `Vec<RepositoryPackage>` with the shortest chain per workspace package and scope.
-- [ ] `scan.rs`:
+- [x] `lockfile.rs` becomes `lockfile/npm.rs`, keeping dev entries and tagging each edge runtime, development or optional (the old `development_only_packages_are_left_out` test is turned around). Add `lockfile/cargo.rs` (`Cargo.lock` plus member `Cargo.toml`, using the `toml` and `cargo-lock` crates, added with `cargo add`) and `lockfile/uv.rs`. Each returns `Vec<RepositoryPackage>` with the shortest chain per workspace package and scope.
+- [x] `scan.rs`:
   - add a repository loop: check each head every 5 minutes, re-read on change, retry failures, store or note the failure;
   - drop the `CountedFleet` fingerprint for the `Counted` set, so a stored change rescans within a minute;
   - one bad lockfile leaves the repository's stored packages untouched;
   - raise or clear the self-alert each pass;
   - on start, withdraw standing `via = model` decisions as `canopy("vulnerability-migration")`, audited, and give each a suggestion with basis insufficient information.
-- [ ] `ai.rs`:
+- [x] `ai.rs`:
   - remove `Ground`, `Plan::Decide`, `ground_holds`, `FRONTEND_WORKSPACE` and the decision branch of `look_at`;
   - rewrite `INSTRUCTIONS`: no source access, infer only from structure and advisory text, never claim reachable or unreachable, basis required, may split per workspace package;
   - rewrite `prompt`: advisory; per affected package the workspace packages with scopes, direct flag, shortest chain and minimum fix; Linux gets package and advisory only;
   - schema `{ basis, entries: [{ workspace_packages, outcome, reason }] }`, with an answer that has no basis or fails validation counting as no answer.
-- [ ] Remove the Tamanu-version lockfile fetch and `versions_unread` uses from `scan.rs`, and `CountedVersion` references in `monitor.rs`.
+- [x] Remove the Tamanu-version lockfile fetch and `versions_unread` uses from `scan.rs`, and `CountedVersion` references in `monitor.rs`.
 
 ### Private API (`crates/private-server/src/fns/vulnerabilities.rs`)
 - [ ] `list` takes `ListQuery`-shaped args and returns items, total, next cursor and facets. `count` (read_only, silent) feeds the sidebar badge.
@@ -137,20 +137,20 @@
 - [ ] `just gen-openapi`. Add the new endpoints to `private-web/src/safety-modes.ts` (withdraw and edit as write, count as read-only).
 
 ### MCP (`crates/canopy-mcp`)
-- [ ] `find_vulnerabilities`:
+- [x] `find_vulnerabilities`:
   - takes the filters, `search`, `cursor`, `page_size`, `fields`, `group_by` and `include_details`;
   - identifier and source are always returned;
   - `details` is returned only when named;
   - `group_by` returns groups with counts and no items;
   - the description states that suggestions are made without source.
-- [ ] `get_vulnerability` returns the new `ItemDetail`, with basis and the no-source note on the suggestion.
-- [ ] Replace `record_vulnerability_decision` with:
+- [x] `get_vulnerability` returns the new `ItemDetail`, with basis and the no-source note on the suggestion.
+- [x] Replace `record_vulnerability_decision` with:
   - `record_vulnerability_decisions` (a batch, each item judged and audited on its own, a result per item in order);
   - `withdraw_vulnerability_decisions`;
   - `edit_vulnerability_decision`.
 
   All three are triage-grant gated, and `AUDITED_TOOLS` is updated.
-- [ ] Turn on rmcp prompts. Add a `triage_vulnerabilities` prompt taking `repository` that:
+- [x] Turn on rmcp prompts. Add a `triage_vulnerabilities` prompt taking `repository` that:
   - lists the items needing triage;
   - groups and orders them for review;
   - reads the code for each vulnerable package;
@@ -189,7 +189,7 @@
 - [ ] `VulnerabilityChips.tsx`: "Untriaged" for needs triage, and a mixed status.
 
 ### Tests
-- [ ] `crates/jobs` unit tests:
+- [x] `crates/jobs` unit tests:
   - npm: a dev-only path is development, an optional dependency is optional, a package reached by two scopes carries both, and the shortest chain is kept;
   - Cargo: build and dev kinds, target-specific tables, transitive inheritance;
   - uv: groups are development, extras are optional, members are found.
@@ -207,7 +207,7 @@
   - facets each ignore their own filter;
   - `group_by` scope counts a multi-scope item in each;
   - the cursor pages through without overlap.
-- [ ] `crates/jobs/tests/it/vulnerabilities.rs` (fake GitHub with `info/refs`, tree and raw routes):
+- [x] `crates/jobs/tests/it/vulnerabilities.rs` (fake GitHub with `info/refs`, tree and raw routes):
   - reads on a head change only;
   - one bad lockfile leaves the stored packages and raises the self-alert, and a good read clears it;
   - model decisions are withdrawn on start with an audit;
@@ -216,7 +216,7 @@
   - a valid split suggestion is stored;
   - a Linux prompt has no machine names.
 - [ ] `crates/private-server/tests/it/vulnerabilities.rs`: a split decision is recorded and audited with entries; withdraw and edit are audited and admin-only; a read-only session refuses all three; the list paging and search arguments round-trip.
-- [ ] `crates/public-server/tests/it/mcp.rs`:
+- [x] `crates/public-server/tests/it/mcp.rs`:
   - a batch records valid items and refuses invalid ones in order, auditing only the recorded;
   - withdraw and edit through a granted token, with a token without the grant refused;
   - `fields` limits the output;
