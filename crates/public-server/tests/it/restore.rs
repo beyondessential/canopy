@@ -1150,8 +1150,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 					data_bytes_before: 10,
 					data_bytes_after: 10,
 					timings: vec![],
-					lookup_rebuild_elapsed: None,
-					lookup_rebuild_timings: vec![],
+					lookup_rebuild: None,
 				},
 			)
 			.await
@@ -1242,8 +1241,7 @@ async fn record_migration_test(
 			data_bytes_before: 10,
 			data_bytes_after: 10,
 			timings: vec![],
-			lookup_rebuild_elapsed: None,
-			lookup_rebuild_timings: vec![],
+			lookup_rebuild: None,
 		},
 	)
 	.await
@@ -1540,6 +1538,34 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 			assert_eq!(dispatched.len(), 1, "got {dispatched:?}");
 			let entry = &dispatched[0];
 
+			// Rebuild steps belong to a rebuild total; a report with one and not
+			// the other is refused rather than half-recorded.
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": entry["replica_id"],
+					"group": group,
+					"machine_id": server,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": entry["snapshot_id"],
+					"outcome": "success",
+					"replica_healthy": true,
+					"postgres_version": "18",
+					"observed_at": "2026-07-30T00:00:00Z",
+					"migration": {
+						"target_version": entry["target_version"],
+						"total_elapsed_seconds": 900,
+						"data_bytes_before": 0,
+						"data_bytes_after": 0,
+						"timings": [],
+						"lookup_rebuild_timings": [{"name": "encounters", "elapsed_seconds": 5}],
+					},
+				}))
+				.await
+				.assert_status(http::StatusCode::BAD_REQUEST);
+
 			// Report it back the way a consumer would: naming the version by its
 			// semver, not echoing the identifier.
 			public
@@ -1693,7 +1719,6 @@ async fn a_migration_report_carries_its_error() {
 						"data_bytes_before": 10,
 						"data_bytes_after": 10,
 						"timings": [],
-						"lookup_rebuild_timings": [{"name": "encounters", "elapsed_seconds": 5}],
 					},
 				}))
 				.await
@@ -1708,15 +1733,6 @@ async fn a_migration_report_carries_its_error() {
 				Some("column \"note_type_id\" does not exist"),
 				"the reason reaches the operator alongside the file name"
 			);
-			let stored_steps: i64 = {
-				use diesel::QueryDsl;
-				database::schema::lookup_rebuild_timings::table
-					.count()
-					.get_result(&mut conn)
-					.await
-					.expect("count")
-			};
-			assert_eq!(stored_steps, 0, "steps without a total are not kept");
 		},
 	)
 	.await;

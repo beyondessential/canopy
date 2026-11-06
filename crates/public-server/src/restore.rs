@@ -31,7 +31,7 @@ use commons_types::server::rank::ServerRank;
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
-	migration_tests::{self, MigrationTest, NewMigrationTest},
+	migration_tests::{self, MigrationTest, NewLookupRebuild, NewMigrationTest},
 	pg_duration::PgDuration,
 	reporting_schemas::{NewReportingSchemaBuild, ReportingSchemaBuild},
 	restore::{
@@ -1040,8 +1040,8 @@ pub struct MigrationArgs {
 	#[serde(default)]
 	pub lookup_rebuild_elapsed_seconds: Option<i64>,
 	/// Each step of that rebuild which did work, in the order they ran. Empty
-	/// where the version records only the total, and ignored without
-	/// `lookup_rebuild_elapsed_seconds`.
+	/// where the version records only the total; a report with steps and no
+	/// `lookup_rebuild_elapsed_seconds` is refused.
 	#[serde(default)]
 	pub lookup_rebuild_timings: Vec<LookupRebuildTimingArgs>,
 }
@@ -1317,6 +1317,13 @@ async fn verification(
 			let application_id =
 				resolve_migration_application(&mut conn, &migration, machine_id, target_version_id)
 					.await?;
+			if migration.lookup_rebuild_elapsed_seconds.is_none()
+				&& !migration.lookup_rebuild_timings.is_empty()
+			{
+				return Err(AppError::BadRequest(
+					"lookup_rebuild_timings sent without lookup_rebuild_elapsed_seconds".into(),
+				));
+			}
 			MigrationTest::record(
 				&mut conn,
 				report,
@@ -1434,21 +1441,22 @@ impl MigrationArgs {
 					)
 				})
 				.collect(),
-			lookup_rebuild_elapsed: self
+			lookup_rebuild: self
 				.lookup_rebuild_elapsed_seconds
-				.map(|seconds| PgDuration(SignedDuration::from_secs(seconds))),
-			lookup_rebuild_timings: self
-				.lookup_rebuild_timings
-				.into_iter()
-				.filter(|_| self.lookup_rebuild_elapsed_seconds.is_some())
-				.map(|timing| {
-					(
-						timing.name,
-						timing.rows,
-						PgDuration(SignedDuration::from_secs(timing.elapsed_seconds)),
-					)
-				})
-				.collect(),
+				.map(|seconds| NewLookupRebuild {
+					elapsed: PgDuration(SignedDuration::from_secs(seconds)),
+					steps: self
+						.lookup_rebuild_timings
+						.into_iter()
+						.map(|timing| {
+							(
+								timing.name,
+								timing.rows,
+								PgDuration(SignedDuration::from_secs(timing.elapsed_seconds)),
+							)
+						})
+						.collect(),
+				}),
 		}
 	}
 }

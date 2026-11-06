@@ -208,10 +208,17 @@ pub struct NewMigrationTest {
 	pub data_bytes_after: i64,
 	/// One entry per migration that ran, in the order they ran.
 	pub timings: Vec<(String, PgDuration)>,
-	/// The whole lookup rebuild after the migrations, where it was reported.
-	pub lookup_rebuild_elapsed: Option<PgDuration>,
-	/// Each step of that rebuild as (name, rows, elapsed), in the order they ran.
-	pub lookup_rebuild_timings: Vec<(String, Option<i64>, PgDuration)>,
+	/// The lookup rebuild after the migrations, where it was reported.
+	pub lookup_rebuild: Option<NewLookupRebuild>,
+}
+
+/// A reported lookup rebuild. Its steps belong to its total, so there are none
+/// without one.
+#[derive(Debug, Clone)]
+pub struct NewLookupRebuild {
+	pub elapsed: PgDuration,
+	/// Each step that did work as (name, rows, elapsed), in the order they ran.
+	pub steps: Vec<(String, Option<i64>, PgDuration)>,
 }
 
 /// One joined row behind [`latest_test`].
@@ -352,7 +359,7 @@ impl MigrationTest {
 				crate::schema::migration_tests::data_bytes_before.eq(test.data_bytes_before),
 				crate::schema::migration_tests::data_bytes_after.eq(test.data_bytes_after),
 				crate::schema::migration_tests::lookup_rebuild_elapsed
-					.eq(test.lookup_rebuild_elapsed),
+					.eq(test.lookup_rebuild.as_ref().map(|rebuild| rebuild.elapsed)),
 			))
 			.execute(db)
 			.await?;
@@ -378,7 +385,9 @@ impl MigrationTest {
 		}
 
 		let lookup_rebuild_timings: Vec<_> = test
-			.lookup_rebuild_timings
+			.lookup_rebuild
+			.map(|rebuild| rebuild.steps)
+			.unwrap_or_default()
 			.into_iter()
 			.enumerate()
 			.map(|(index, (name, rows, elapsed))| {

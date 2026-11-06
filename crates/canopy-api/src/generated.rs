@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "2.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "6d61f8a4c3e79797964129ca4643111d26ed0c5cae221f6092bbba95fca00dec";
+pub const OPENAPI_BLAKE3: &str = "098143bb3017825a145a74f2bc37bf8409fd1e2dd4b1d41c76c11bf826004a25";
 
 /// Error types.
 pub mod error {
@@ -1925,7 +1925,7 @@ on the wire.*/
 ///      "format": "int64"
 ///    },
 ///    "lookup_rebuild_timings": {
-///      "description": "Each step of that rebuild which did work, in the order they ran. Empty\nwhere the version records only the total, and ignored without\n`lookup_rebuild_elapsed_seconds`.",
+///      "description": "Each step of that rebuild which did work, in the order they ran. Empty\nwhere the version records only the total; a report with steps and no\n`lookup_rebuild_elapsed_seconds` is refused.",
 ///      "type": "array",
 ///      "items": {
 ///        "$ref": "#/components/schemas/LookupRebuildTimingArgs"
@@ -1991,8 +1991,8 @@ took. Omit it where the version does not record the rebuild.*/
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub lookup_rebuild_elapsed_seconds: ::std::option::Option<i64>,
     /**Each step of that rebuild which did work, in the order they ran. Empty
-where the version records only the total, and ignored without
-`lookup_rebuild_elapsed_seconds`.*/
+where the version records only the total; a report with steps and no
+`lookup_rebuild_elapsed_seconds` is refused.*/
     #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
     #[builder(default)]
     pub lookup_rebuild_timings: ::std::vec::Vec<LookupRebuildTimingArgs>,

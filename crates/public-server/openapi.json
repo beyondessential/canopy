@@ -879,7 +879,7 @@
             ]
           },
           "lookup_rebuild_timings": {
-            "description": "Each step of that rebuild which did work, in the order they ran. Empty\nwhere the version records only the total, and ignored without\n`lookup_rebuild_elapsed_seconds`.",
+            "description": "Each step of that rebuild which did work, in the order they ran. Empty\nwhere the version records only the total; a report with steps and no\n`lookup_rebuild_elapsed_seconds` is refused.",
             "items": {
               "$ref": "#/components/schemas/LookupRebuildTimingArgs"
             },

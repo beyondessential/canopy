@@ -118,7 +118,9 @@ export default function MigrationRunDialog({
 					>
 						{latest.lookup_rebuild_elapsed == null
 							? "not recorded by this version"
-							: `${rebuildSteps.length} step${rebuildSteps.length === 1 ? "" : "s"} did work`}
+							: rebuildSteps.length === 0
+								? "steps not recorded by this version"
+								: `${rebuildSteps.length} step${rebuildSteps.length === 1 ? "" : "s"} did work`}
 					</Stat>
 					<Stat label="Tested" value={<TimeAgo timestamp={latest.reported_at} />}>
 						<Box component="span" sx={{ fontFamily: "monospace" }}>
