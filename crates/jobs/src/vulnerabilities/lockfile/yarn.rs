@@ -15,7 +15,10 @@
 //! down. A workspace another reaches passes on only its runtime dependencies. A
 //! package's own entry lists its dependencies, marking the optional ones in
 //! `dependenciesMeta`. Peer dependencies are provided by whatever depends on the
-//! package, which lists them itself.
+//! package, which lists them itself. A package a workspace depends on under
+//! another name, as `"react-router-dom-v6": "npm:react-router-dom@6.3.0"` does,
+//! is held under the name it really has, since a resolution names the package
+//! itself however the descriptor that reaches it is written.
 
 use std::{
 	cell::RefCell,
@@ -726,6 +729,44 @@ __metadata:
 			path(fsevents, "@tamanu/server", Scope::Runtime, true)
 				.unwrap()
 				.direct
+		);
+	}
+
+	#[test]
+	fn a_dependency_under_another_name_is_held_under_the_one_it_really_has() {
+		let lockfile = r#"__metadata:
+  version: 8
+
+"app@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "app@workspace:."
+  dependencies:
+    react-router-dom-v6: "npm:react-router-dom@6.3.0"
+  languageName: unknown
+  linkType: soft
+
+"react-router-dom-v6@npm:react-router-dom@6.3.0, react-router-dom@npm:6.3.0":
+  version: 6.3.0
+  resolution: "react-router-dom@npm:6.3.0"
+  languageName: node
+  linkType: hard
+"#;
+		let manifests = BTreeMap::from([(
+			String::new(),
+			r#"{"name":"app","dependencies":{"react-router-dom-v6":"npm:react-router-dom@6.3.0"}}"#
+				.to_owned(),
+		)]);
+		let packages = read(lockfile).unwrap().parse("app", &manifests).unwrap();
+		assert!(
+			!packages.iter().any(|p| p.name == "react-router-dom-v6"),
+			"the name it is asked for is not a package: {packages:#?}"
+		);
+		let real = find(&packages, "react-router-dom", "6.3.0");
+		let reached = path(real, "app", Scope::Runtime, false).unwrap();
+		assert_eq!(
+			reached.chain,
+			["react-router-dom-v6"],
+			"the chain says what the workspace calls it"
 		);
 	}
 
