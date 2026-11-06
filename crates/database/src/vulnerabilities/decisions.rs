@@ -83,6 +83,12 @@ impl Entry {
 }
 
 /// The status a decision's entries give: their shared outcome, or mixed.
+///
+/// The list's view works the same status out in SQL, in the `state` and `base`
+/// expressions of `ITEM_CTES` in `items.rs`, so that it can filter, count and
+/// sort by it; this is what a decision or a suggestion reports of itself. The
+/// two are one rule written twice, and a test holds them together
+/// (`a_split_gives_a_shared_outcome_or_mixed`): change them together.
 pub fn status_of(entries: &[Entry]) -> Status {
 	let mut outcomes = entries.iter().map(|entry| entry.outcome);
 	match outcomes.next() {
@@ -342,6 +348,52 @@ pub async fn reaching_workspace_packages(
 	.load(conn)
 	.await?;
 	Ok(rows.into_iter().map(|row| row.workspace_package).collect())
+}
+
+/// The workspace packages that reach the advisory of each of `items` now, in
+/// one evaluation of the exposure join however many items there are. An item
+/// nothing reaches is absent.
+pub async fn reaching_workspace_packages_of(
+	conn: &mut AsyncPgConnection,
+	items: &[(String, Source)],
+) -> Result<HashMap<(String, Source), Vec<String>>> {
+	#[derive(diesel::QueryableByName)]
+	struct Row {
+		#[diesel(sql_type = sql_types::Text)]
+		vulnerability_id: String,
+		#[diesel(sql_type = sql_types::Text)]
+		source: String,
+		#[diesel(sql_type = sql_types::Text)]
+		workspace_package: String,
+	}
+	if items.is_empty() {
+		return Ok(HashMap::new());
+	}
+	let ids: Vec<&str> = items.iter().map(|(id, _)| id.as_str()).collect();
+	let sources: Vec<&str> = items.iter().map(|(_, source)| source.as_str()).collect();
+	let rows: Vec<Row> = diesel::sql_query(format!(
+		"WITH {EXPOSURE_CTE} \
+		 SELECT DISTINCT e.vulnerability_id, e.source, p.workspace_package FROM exposure e \
+		 JOIN repository_package_paths p ON p.repository = e.source AND p.ecosystem = e.ecosystem \
+		   AND p.name = e.name AND p.version = e.version \
+		 WHERE (e.vulnerability_id, e.source) IN (SELECT * FROM unnest($3::text[], $4::text[])) \
+		 ORDER BY 1, 2, 3"
+	))
+	.bind::<sql_types::Nullable<sql_types::Array<sql_types::Text>>, _>(Some(&ids))
+	.bind::<sql_types::Text, _>(commons_types::server::rank::ServerRank::Production.to_string())
+	.bind::<sql_types::Array<sql_types::Text>, _>(&ids)
+	.bind::<sql_types::Array<sql_types::Text>, _>(&sources)
+	.load(conn)
+	.await?;
+	let mut out: HashMap<(String, Source), Vec<String>> = HashMap::new();
+	for row in rows {
+		if let Some(source) = Source::parse(&row.source) {
+			out.entry((row.vulnerability_id, source))
+				.or_default()
+				.push(row.workspace_package);
+		}
+	}
+	Ok(out)
 }
 
 impl Decision {
@@ -1040,11 +1092,16 @@ impl Lapse {
 			.iter()
 			.map(|decision| decision.vulnerability_id.clone())
 			.collect();
-		let advisories: HashMap<String, Advisory> = Advisory::get_many(conn, &ids)
-			.await?
-			.into_iter()
-			.map(|advisory| (advisory.id.clone(), advisory))
+		let advisories = Advisory::rated(conn, &ids).await?;
+
+		// The workspace packages that reach an advisory are looked up once, for
+		// the decisions that could lapse on them: a split with no catch-all.
+		let splits: Vec<(String, Source)> = standing
+			.iter()
+			.filter(|decision| !decision.entries.iter().any(Entry::is_catch_all))
+			.map(|decision| (decision.vulnerability_id.clone(), decision.source.clone()))
 			.collect();
+		let reaching = reaching_workspace_packages_of(conn, &splits).await?;
 
 		let mut lapsed = Vec::new();
 		for decision in standing {
@@ -1053,19 +1110,19 @@ impl Lapse {
 				.map(Vec::as_slice)
 				.unwrap_or_default();
 			let mut reason = match (&decision.held, advisories.get(&decision.vulnerability_id)) {
-				(Some(held), Some(advisory)) => {
-					held.lapsed_by(advisory.severity, &advisory.affected, counted_here)
+				(Some(held), Some((severity, affected))) => {
+					held.lapsed_by(*severity, affected, counted_here)
 				}
 				_ => None,
 			};
-			if reason.is_none() && !decision.entries.iter().any(Entry::is_catch_all) {
-				let reaching =
-					reaching_workspace_packages(conn, &decision.vulnerability_id, &decision.source)
-						.await?;
-				reason = reaching
-					.into_iter()
+			if reason.is_none()
+				&& let Some(now) =
+					reaching.get(&(decision.vulnerability_id.clone(), decision.source.clone()))
+			{
+				reason = now
+					.iter()
 					.find(|package| !decision.covered_held.contains(package))
-					.map(|name| LapseReason::NewWorkspacePackage { name });
+					.map(|name| LapseReason::NewWorkspacePackage { name: name.clone() });
 			}
 			if let Some(reason) = reason
 				&& let Some(done) = Self::record(conn, &decision, &reason).await?

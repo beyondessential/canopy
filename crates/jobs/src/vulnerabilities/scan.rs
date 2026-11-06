@@ -24,8 +24,8 @@ use database::{
 	packages::RepositoryRead,
 	self_alerts,
 	vulnerabilities::{
-		Advisory, Decision, Lapse, REPOSITORIES, Repository, Via, counted_packages,
-		production_machines, prune_matches, refresh_items, replace_matches, suggest_from_decision,
+		Advisory, Decision, Lapse, REPOSITORIES, Repository, Via, change_signal, counted_packages,
+		prune_matches, refresh_items, replace_matches, suggest_from_decision,
 	},
 };
 use diesel_async::{AsyncConnection, AsyncPgConnection};
@@ -290,13 +290,13 @@ impl Scanner {
 		Ok(report)
 	}
 
-	/// What counts, to tell when a pass is due sooner than the schedule says:
-	/// the package versions of every repository and machine, and which machines
-	/// are production ones.
+	/// What came to count, to tell when a pass is due sooner than the schedule
+	/// says: where each repository was last read to, and which production
+	/// machines have which package lists. Not the package versions themselves,
+	/// which run to many thousands and would be read and hashed every look.
 	pub async fn fingerprint(&self, conn: &mut AsyncPgConnection) -> Result<u64> {
 		let mut hasher = DefaultHasher::new();
-		counted_packages(conn).await?.hash(&mut hasher);
-		production_machines(conn).await?.hash(&mut hasher);
+		change_signal(conn).await?.hash(&mut hasher);
 		Ok(hasher.finish())
 	}
 }

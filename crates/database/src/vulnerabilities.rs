@@ -425,6 +425,42 @@ impl Advisory {
 		Ok(row.map(Self::from))
 	}
 
+	/// The severity and affected ranges of each of `ids`, which is all that
+	/// telling whether a revision lapses a decision reads of an advisory: its
+	/// long text and references are left in the database.
+	pub async fn rated(
+		conn: &mut AsyncPgConnection,
+		ids: &[String],
+	) -> Result<HashMap<String, (Severity, Vec<Affected>)>> {
+		#[derive(QueryableByName)]
+		struct Row {
+			#[diesel(sql_type = sql_types::Text)]
+			id: String,
+			#[diesel(sql_type = sql_types::Text)]
+			severity: String,
+			#[diesel(sql_type = sql_types::Jsonb)]
+			affected: serde_json::Value,
+		}
+		let rows: Vec<Row> = diesel::sql_query(
+			"SELECT id, severity, affected FROM vulnerabilities WHERE id = ANY($1)",
+		)
+		.bind::<sql_types::Array<sql_types::Text>, _>(ids)
+		.load(conn)
+		.await?;
+		Ok(rows
+			.into_iter()
+			.map(|row| {
+				(
+					row.id,
+					(
+						row.severity.parse().unwrap_or_default(),
+						serde_json::from_value(row.affected).unwrap_or_default(),
+					),
+				)
+			})
+			.collect())
+	}
+
 	pub async fn get_many(conn: &mut AsyncPgConnection, ids: &[String]) -> Result<Vec<Self>> {
 		let rows: Vec<AdvisoryRow> = diesel::sql_query(format!(
 			"SELECT {ADVISORY_COLUMNS} FROM vulnerabilities WHERE id = ANY($1)"

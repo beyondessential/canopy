@@ -64,6 +64,9 @@ const ITEM_CTES: &str = "agg AS ( \
 	  SELECT DISTINCT ON (vulnerability_id, source) id, vulnerability_id, source \
 	  FROM vulnerability_decisions \
 	  ORDER BY vulnerability_id, source, created_at DESC, id), \
+	/* An item's status: the decision that stands gives it its entries' shared \
+	   outcome, or mixed. `status_of` in decisions.rs is the same rule in Rust, \
+	   for what a decision reports of itself; change them together. */ \
 	state AS ( \
 	  SELECT n.vulnerability_id, n.source, n.id AS decision_id, \
 	    EXISTS (SELECT 1 FROM vulnerability_decision_withdrawals w WHERE w.decision_id = n.id) AS withdrawn, \

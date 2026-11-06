@@ -68,23 +68,53 @@ pub async fn counted_packages(conn: &mut AsyncPgConnection) -> Result<Vec<Counte
 	Ok(all)
 }
 
-/// The live production machines that have reported packages, which a change in
-/// makes a scan due.
-pub async fn production_machines(conn: &mut AsyncPgConnection) -> Result<Vec<Uuid>> {
+/// What a change in makes a scan due sooner than its schedule: which commit
+/// each repository was last read at, and which production machines have
+/// reported packages with the digest of each list. Small however many package
+/// versions there are, since it names where they came from and not what they
+/// are.
+pub async fn change_signal(
+	conn: &mut AsyncPgConnection,
+) -> Result<(Vec<(String, String)>, Vec<(Uuid, String)>)> {
 	#[derive(diesel::QueryableByName)]
-	struct Row {
-		#[diesel(sql_type = sql_types::Uuid)]
-		id: Uuid,
+	struct RepositoryRow {
+		#[diesel(sql_type = sql_types::Text)]
+		repository: String,
+		#[diesel(sql_type = sql_types::Text)]
+		commit_sha: String,
 	}
-	let rows: Vec<Row> = diesel::sql_query(
-		"SELECT m.id FROM machines m \
-		 JOIN machine_package_reports r ON r.machine_id = m.id \
-		 WHERE m.deleted_at IS NULL AND m.rank = $1 ORDER BY m.id",
+	#[derive(diesel::QueryableByName)]
+	struct MachineRow {
+		#[diesel(sql_type = sql_types::Uuid)]
+		machine_id: Uuid,
+		#[diesel(sql_type = sql_types::Text)]
+		digest: String,
+	}
+	let repositories: Vec<RepositoryRow> = diesel::sql_query(
+		"SELECT repository, commit_sha FROM repository_reads \
+		 WHERE commit_sha IS NOT NULL ORDER BY repository",
+	)
+	.load(conn)
+	.await?;
+	let machines: Vec<MachineRow> = diesel::sql_query(
+		"SELECT r.machine_id, r.digest FROM machine_package_reports r \
+		 JOIN machines m ON m.id = r.machine_id \
+		 WHERE m.deleted_at IS NULL AND m.rank = $1 AND r.ecosystem IS NOT NULL \
+		 ORDER BY r.machine_id",
 	)
 	.bind::<sql_types::Text, _>(ServerRank::Production.to_string())
 	.load(conn)
 	.await?;
-	Ok(rows.into_iter().map(|row| row.id).collect())
+	Ok((
+		repositories
+			.into_iter()
+			.map(|row| (row.repository, row.commit_sha))
+			.collect(),
+		machines
+			.into_iter()
+			.map(|row| (row.machine_id, row.digest))
+			.collect(),
+	))
 }
 
 /// Replace what advisories match each queried package version with what the

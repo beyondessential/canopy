@@ -837,6 +837,11 @@ async fn a_split_gives_a_shared_outcome_or_mixed() {
 		.await;
 		assert_eq!(items.len(), 1);
 		assert_eq!(items[0].decision.as_ref().unwrap().entries.len(), 3);
+		assert_eq!(
+			items[0].decision.as_ref().unwrap().status,
+			items[0].status,
+			"the view's status and the decision's own are one rule"
+		);
 	})
 	.await;
 }
