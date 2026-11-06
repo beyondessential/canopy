@@ -22,8 +22,9 @@
 
 use std::{
 	cell::RefCell,
-	collections::{BTreeMap, BTreeSet},
+	collections::{BTreeMap, BTreeSet, HashMap},
 	fmt::Display,
+	rc::Rc,
 };
 
 use database::packages::{NPM, RepositoryPackage, Scope};
@@ -193,10 +194,45 @@ impl Override {
 struct Resolver<'a> {
 	lockfile: &'a Lockfile,
 	overrides: Vec<Override>,
+	/// The manifest of each workspace entry, by its index.
+	kinds: BTreeMap<usize, Manifest>,
 	unresolved: RefCell<BTreeSet<String>>,
+	/// What each entry's dependencies resolve to, worked out the first time
+	/// a walk arrives at it. Which entry a dependency resolves to is the same
+	/// whichever workspace's walk asks, so this is done once for the lockfile
+	/// rather than once for each of its workspaces.
+	resolved: RefCell<HashMap<usize, Rc<[(usize, String, bool)]>>>,
 }
 
 impl Resolver<'_> {
+	/// Where the dependencies of the entry at `index` lead, as the entry it
+	/// arrives at, the name the step is taken by, and whether it is optional.
+	/// A workspace reached as a dependency passes on only its runtime
+	/// dependencies, whoever reached it.
+	fn edges_of(&self, index: usize) -> Rc<[(usize, String, bool)]> {
+		if let Some(resolved) = self.resolved.borrow().get(&index) {
+			return resolved.clone();
+		}
+		let entry = &self.lockfile.entries[index];
+		let resolved: Rc<[(usize, String, bool)]> = entry
+			.dependencies
+			.iter()
+			.filter_map(|(dependency, descriptor)| {
+				let optional = match self.kinds.get(&index) {
+					Some(manifest) => match manifest.kind(dependency) {
+						(Scope::Development, _) => return None,
+						(_, optional) => optional,
+					},
+					None => entry.optional.contains(dependency),
+				};
+				let edge = self.edge(entry, dependency, descriptor, optional)?;
+				Some((edge.to, edge.name, edge.optional))
+			})
+			.collect();
+		self.resolved.borrow_mut().insert(index, resolved.clone());
+		resolved
+	}
+
 	fn edge(
 		&self,
 		from: &Entry,
@@ -393,7 +429,9 @@ impl Lockfile {
 				.flat_map(|manifest| &manifest.resolutions)
 				.filter_map(|(pattern, target)| Override::new(pattern, target))
 				.collect(),
+			kinds,
 			unresolved: RefCell::default(),
+			resolved: RefCell::default(),
 		};
 
 		let mut found = Found::default();
@@ -405,7 +443,7 @@ impl Lockfile {
 
 		// The root counts as a workspace package when it depends on anything of
 		// its own, as a repository that is one package does.
-		for (workspace_index, manifest) in &kinds {
+		for (workspace_index, manifest) in &resolver.kinds {
 			let workspace = &self.entries[*workspace_index];
 			if workspace.location == "." && workspace.dependencies.is_empty() {
 				continue;
@@ -431,19 +469,13 @@ impl Lockfile {
 			walk(
 				roots,
 				|index: &usize| {
-					let entry = &self.entries[*index];
-					entry
-						.dependencies
+					resolver
+						.edges_of(*index)
 						.iter()
-						.filter_map(|(dependency, descriptor)| {
-							let optional = match kinds.get(index) {
-								Some(manifest) => match manifest.kind(dependency) {
-									(Scope::Development, _) => return None,
-									(_, optional) => optional,
-								},
-								None => entry.optional.contains(dependency),
-							};
-							resolver.edge(entry, dependency, descriptor, optional)
+						.map(|(to, name, optional)| Edge {
+							to: *to,
+							name: name.clone(),
+							optional: *optional,
 						})
 						.collect()
 				},
@@ -972,35 +1004,5 @@ __metadata:
 			Some(("@scope/name", "workspace:a/b"))
 		);
 		assert_eq!(split_ident("lodash"), None);
-	}
-}
-
-#[cfg(test)]
-mod scratch_bench {
-	use super::*;
-	#[test]
-	fn time_tupaia() {
-		let root = std::path::Path::new("/home/felix/code/work/tupaia");
-		let text = std::fs::read_to_string(root.join("yarn.lock")).unwrap();
-		let t0 = std::time::Instant::now();
-		let lock = read(&text).unwrap();
-		let read_ms = t0.elapsed().as_millis();
-		let mut manifests = BTreeMap::new();
-		for ws in lock.workspaces() {
-			manifests.insert(
-				ws.to_owned(),
-				std::fs::read_to_string(root.join(ws).join("package.json"))
-					.unwrap()
-					.leak() as &str,
-			);
-		}
-		let t1 = std::time::Instant::now();
-		let pkgs = lock.parse("tupaia", &manifests).unwrap();
-		eprintln!(
-			"read {read_ms}ms  parse {}ms  packages {}  workspaces {}",
-			t1.elapsed().as_millis(),
-			pkgs.len(),
-			lock.workspaces().len()
-		);
 	}
 }
