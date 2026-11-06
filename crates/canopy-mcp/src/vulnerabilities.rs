@@ -209,33 +209,33 @@ pub struct TriageVulnerabilitiesArgs {
 /// What came of one item of a batch, as `{id, source, <flag>: bool, error?,
 /// <key>?}`: the flag says whether the item was done, and a refused item
 /// carries the reason in `error` and changed nothing.
+///
+/// Only what the caller got wrong refuses an item. Anything else is Canopy
+/// failing, not the item being invalid, so it ends the call as an error
+/// instead: an agent is told to put a refused item again once corrected, and a
+/// fault it cannot correct must not read as one of those.
 fn batch_result<T: Serialize>(
 	id: String,
 	source: String,
 	outcome: Result<T, AppError>,
 	flag: &str,
 	key: &str,
-) -> Value {
+) -> Result<Value, McpError> {
 	let mut object = Map::new();
 	object.insert("id".into(), Value::String(id));
 	object.insert("source".into(), Value::String(source));
 	match outcome {
 		Ok(result) => {
 			object.insert(flag.into(), true.into());
-			object.insert(key.into(), serde_json::to_value(result).unwrap_or_default());
+			object.insert(key.into(), serde_json::to_value(result).map_err(mcp_err)?);
 		}
-		Err(e) => {
+		Err(AppError::BadRequest(message) | AppError::NotFound(message)) => {
 			object.insert(flag.into(), false.into());
-			object.insert(
-				"error".into(),
-				Value::String(match e {
-					AppError::BadRequest(message) | AppError::NotFound(message) => message,
-					e => e.to_string(),
-				}),
-			);
+			object.insert("error".into(), Value::String(message));
 		}
+		Err(e) => return Err(mcp_err(e)),
 	}
-	Value::Object(object)
+	Ok(Value::Object(object))
 }
 
 /// A batch's results, one per item in the order given, and how many were
@@ -594,7 +594,9 @@ impl CanopyMcp {
 		               replaced. Each item is judged on its own: the valid ones are recorded and \
 		               audited, and the others refused with the reason and no effect. The result \
 		               has one entry per item in the order given, with `recorded`, and the \
-		               `decision` or the `error`, and `refused` counts the refused. Decisions are recorded as made through this \
+		               `decision` or the `error`, and `refused` counts the refused. Only an item \
+		               you got wrong is refused; if Canopy itself fails the call ends with an \
+		               error instead, and what it recorded before that stands. Decisions are recorded as made through this \
 		               interface by the caller. To correct a reason, use \
 		               edit_vulnerability_decision rather than recording again. Refused, with no \
 		               effect, unless the caller is an administrator (on the operator surface) or \
@@ -614,7 +616,7 @@ impl CanopyMcp {
 		for arg in args.decisions {
 			let (id, source) = (arg.id.clone(), arg.source.clone());
 			let outcome = record_one(&mut conn, &actor, arg).await;
-			results.push(batch_result(id, source, outcome, "recorded", "decision"));
+			results.push(batch_result(id, source, outcome, "recorded", "decision")?);
 		}
 		ok_json(&batch_results(results, "recorded"))
 	}
@@ -632,7 +634,9 @@ impl CanopyMcp {
 		               Each item is judged on its own: one with no current decision, or unknown, \
 		               is refused with the reason and no effect. The result has one entry per \
 		               item in the order given, with `withdrawn`, and the `withdrawal` or the \
-		               `error`, and `refused` counts the refused. Refused, with no effect, unless the caller is an \
+		               `error`, and `refused` counts the refused. Only an item you got wrong is \
+		               refused; if Canopy itself fails the call ends with an error instead, and \
+		               what it withdrew before that stands. Refused, with no effect, unless the caller is an \
 		               administrator (on the operator surface) or holds a token with the triage \
 		               grant."
 	)]
@@ -655,7 +659,7 @@ impl CanopyMcp {
 				outcome,
 				"withdrawn",
 				"withdrawal",
-			));
+			)?);
 		}
 		ok_json(&batch_results(results, "withdrawn"))
 	}
