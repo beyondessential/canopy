@@ -22,7 +22,7 @@ import {
 } from "@mui/material";
 import ClearIcon from "@mui/icons-material/Clear";
 import RefreshIcon from "@mui/icons-material/Refresh";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
 import { useApi } from "../api";
 import { SeverityChip, StatusChip } from "../components/VulnerabilityChips";
@@ -33,6 +33,7 @@ import {
 	VULNERABILITY_SEVERITY_LABEL,
 	VULNERABILITY_STATUS_LABEL,
 	type VulnerabilityFacetCount,
+	type VulnerabilityFacets,
 	type VulnerabilityItem,
 	type VulnerabilitySortColumn,
 	type VulnerabilityStatus,
@@ -116,10 +117,13 @@ export default function Vulnerabilities() {
 		if (debounced.trim() !== search) updateParams({ q: debounced.trim() });
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [debounced]);
+	// A term that arrives from the address, rather than from typing, is shown,
+	// and not written back over by what was typed before.
+	useEffect(() => {
+		if (search !== typed.trim() && search !== debounced.trim()) setTyped(search);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [search]);
 
-	// Pages are walked with the cursors the server gave, which are kept here.
-	const [cursors, setCursors] = useState<string[]>([]);
-	const cursor = cursors.at(-1) ?? null;
 	const queryKey = [
 		source,
 		status,
@@ -131,13 +135,15 @@ export default function Vulnerabilities() {
 		sortColumn,
 		descending,
 	].join("|");
-	const lastKey = useRef(queryKey);
-	useEffect(() => {
-		if (lastKey.current !== queryKey) {
-			lastKey.current = queryKey;
-			setCursors([]);
-		}
-	}, [queryKey]);
+	// Pages are walked with the cursors the server gave, kept with the query
+	// they belong to: a different query has no stack, in the same render that
+	// it changes in, so it is never fetched with another query's cursor.
+	const [paging, setPaging] = useState<{ key: string; stack: string[] }>({
+		key: queryKey,
+		stack: [],
+	});
+	const stack = paging.key === queryKey ? paging.stack : [];
+	const cursor = stack.at(-1) ?? null;
 
 	const list = useApi(
 		"vulnerabilities",
@@ -165,7 +171,13 @@ export default function Vulnerabilities() {
 		});
 	};
 
-	const facets = list.status === "ok" ? list.data.facets : null;
+	// Only a query's first page carries its facets, so they are kept while the
+	// later pages are walked and until the next first page replaces them.
+	const [facets, setFacets] = useState<VulnerabilityFacets | null>(null);
+	const delivered = list.status === "ok" ? list.data.facets : null;
+	useEffect(() => {
+		if (delivered) setFacets(delivered);
+	}, [delivered]);
 
 	return (
 		<Stack spacing={3}>
@@ -221,6 +233,7 @@ export default function Vulnerabilities() {
 						onChange={(value) => updateParams({ source: value })}
 						choices={facets?.source ?? []}
 						labelOf={(value) => value}
+					total={facets?.totals.source ?? null}
 					/>
 					<Facet
 						label="Status"
@@ -229,6 +242,7 @@ export default function Vulnerabilities() {
 						choices={sortedStatuses(facets?.status ?? [])}
 						labelOf={(value) => VULNERABILITY_STATUS_LABEL[value as VulnerabilityStatus] ?? value}
 						allValue="all"
+					total={facets?.totals.status ?? null}
 					/>
 					<Facet
 						label="Scope"
@@ -236,6 +250,7 @@ export default function Vulnerabilities() {
 						onChange={(value) => updateParams({ scope: value })}
 						choices={facets?.scope ?? []}
 						labelOf={(value) => VULNERABILITY_SCOPE_LABEL[value] ?? value}
+					total={facets?.totals.scope ?? null}
 					/>
 					<Facet
 						label="Severity"
@@ -246,6 +261,7 @@ export default function Vulnerabilities() {
 							VULNERABILITY_SEVERITY_LABEL[value as keyof typeof VULNERABILITY_SEVERITY_LABEL] ??
 							value
 						}
+					total={facets?.totals.severity ?? null}
 					/>
 					<Facet
 						label="Suggestion"
@@ -253,6 +269,7 @@ export default function Vulnerabilities() {
 						onChange={(value) => updateParams({ suggestion: value })}
 						choices={facets?.suggestion ?? []}
 						labelOf={(value) => SUGGESTION_LABEL[value] ?? value}
+					total={facets?.totals.suggestion ?? null}
 					/>
 					<Box sx={{ ml: "auto", display: "flex", alignItems: "center", gap: 1 }}>
 						{list.status === "ok" && (
@@ -304,7 +321,7 @@ export default function Vulnerabilities() {
 							))}
 						</TableBody>
 					</Table>
-					{(cursors.length > 0 || list.data.next_cursor) && (
+					{(stack.length > 0 || list.data.next_cursor) && (
 						<Stack
 							direction="row"
 							spacing={1}
@@ -312,8 +329,8 @@ export default function Vulnerabilities() {
 						>
 							<Button
 								size="small"
-								disabled={cursors.length === 0}
-								onClick={() => setCursors((prev) => prev.slice(0, -1))}
+								disabled={stack.length === 0}
+								onClick={() => setPaging({ key: queryKey, stack: stack.slice(0, -1) })}
 							>
 								Previous
 							</Button>
@@ -322,7 +339,7 @@ export default function Vulnerabilities() {
 								disabled={!list.data.next_cursor}
 								onClick={() => {
 									const next = list.data.next_cursor;
-									if (next) setCursors((prev) => [...prev, next]);
+									if (next) setPaging({ key: queryKey, stack: [...stack, next] });
 								}}
 							>
 								Next
@@ -359,6 +376,7 @@ function Facet({
 	choices,
 	labelOf,
 	allValue = "",
+	total,
 }: {
 	label: string;
 	value: string;
@@ -366,8 +384,10 @@ function Facet({
 	choices: VulnerabilityFacetCount[];
 	labelOf: (value: string) => string;
 	allValue?: string;
+	/** How many items the filter gives with none of its choices picked, which
+	 * is not the sum of the choices where an item falls in several. */
+	total: number | null;
 }) {
-	const total = choices.reduce((sum, choice) => sum + choice.count, 0);
 	// What is chosen stays offered while the counts are not yet in.
 	const offered = choices.some((choice) => choice.value === value) || value === allValue
 		? choices
@@ -401,7 +421,7 @@ function Facet({
 				},
 			}}
 		>
-			{option(allValue, "All", choices.length ? total : null)}
+			{option(allValue, "All", total)}
 			{offered.map((choice) => option(choice.value, labelOf(choice.value), choice.count))}
 		</TextField>
 	);
