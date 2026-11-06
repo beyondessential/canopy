@@ -524,6 +524,119 @@ async fn a_scan_lapses_a_decided_item_when_severity_rises_and_audits_it_as_canop
 	.await;
 }
 
+const YARN_LOCKFILE: &str = r#"__metadata:
+  version: 8
+  cacheKey: 10c0
+
+"app@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "app@workspace:."
+  dependencies:
+    "@app/server": "workspace:*"
+    prettier: "npm:^3"
+  languageName: unknown
+  linkType: soft
+
+"@app/server@workspace:*, @app/server@workspace:packages/server":
+  version: 0.0.0-use.local
+  resolution: "@app/server@workspace:packages/server"
+  dependencies:
+    left-pad: "npm:^1"
+  languageName: unknown
+  linkType: soft
+
+"left-pad@npm:^1":
+  version: 1.0.0
+  resolution: "left-pad@npm:1.0.0"
+  languageName: node
+  linkType: hard
+
+"prettier@npm:^3":
+  version: 3.0.0
+  resolution: "prettier@npm:3.0.0"
+  languageName: node
+  linkType: hard
+"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_yarn_lockfile_is_read_with_the_manifests_of_its_workspaces() {
+	let fake: Shared = Arc::default();
+	let base = serve(fake.clone()).await;
+	publish(
+		&fake,
+		"aaaa",
+		&[
+			("web/yarn.lock", YARN_LOCKFILE),
+			(
+				"web/package.json",
+				r#"{"devDependencies":{"prettier":"^3"}}"#,
+			),
+			(
+				"web/packages/server/package.json",
+				r#"{"name":"@app/server","dependencies":{"left-pad":"^1"}}"#,
+			),
+		],
+	);
+
+	let packages = github(&base).read(&TAMANU, "aaaa").await.unwrap();
+	let paths_of = |name: &str| -> Vec<(String, database::packages::Scope)> {
+		let package = packages.iter().find(|p| p.name == name).unwrap();
+		package
+			.paths
+			.iter()
+			.map(|path| (path.workspace_package.clone(), path.scope))
+			.collect()
+	};
+	use database::packages::Scope;
+	assert_eq!(
+		paths_of("left-pad"),
+		[
+			("@app/server".into(), Scope::Runtime),
+			("app".into(), Scope::Runtime)
+		],
+		"the root reaches it through the workspace it depends on"
+	);
+	assert_eq!(paths_of("prettier"), [("app".into(), Scope::Development)]);
+	assert!(
+		fake.lock()
+			.unwrap()
+			.raw_requests
+			.contains(&("aaaa".into(), "web/packages/server/package.json".into())),
+		"the workspace's manifest was fetched from where the lockfile says it is"
+	);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_yarn_lockfile_that_cannot_be_read_is_a_failure_not_a_skip() {
+	let fake: Shared = Arc::default();
+	let base = serve(fake.clone()).await;
+
+	publish(
+		&fake,
+		"aaaa",
+		&[
+			("yarn.lock", YARN_LOCKFILE),
+			("package.json", r#"{"name":"app"}"#),
+		],
+	);
+	let failure = github(&base).read(&TAMANU, "aaaa").await.unwrap_err();
+	assert!(
+		failure.to_string().contains("yarn.lock") && failure.to_string().contains("package.json"),
+		"a workspace with no manifest names both: {failure}"
+	);
+
+	publish(
+		&fake,
+		"bbbb",
+		&[(
+			"yarn.lock",
+			"# yarn lockfile v1\n\nleft-pad@^1:\n  version \"1.0.0\"\n",
+		)],
+	);
+	let failure = github(&base).read(&TAMANU, "bbbb").await.unwrap_err();
+	assert!(failure.to_string().contains("classic"), "{failure}");
+}
+
 async fn held(conn: &mut AsyncPgConnection) -> usize {
 	database::vulnerabilities::counted_packages(conn)
 		.await

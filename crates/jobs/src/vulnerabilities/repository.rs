@@ -12,13 +12,13 @@
 //!   every few minutes;
 //! - only when the head has moved, the repository's tree at that commit, with
 //!   one API request;
-//! - the lockfiles, and the manifests Cargo's need, from the raw file host at
-//!   that commit.
+//! - the lockfiles, and the manifests Cargo's and Yarn's need, from the raw file
+//!   host at that commit.
 //!
-//! Every `package-lock.json`, `Cargo.lock` and `uv.lock` in the tree counts,
-//! apart from those inside `node_modules`. A repository that cannot be reached,
-//! or has a lockfile that does not parse, is not read at all: what is held for
-//! it stays as it was.
+//! Every `package-lock.json`, `yarn.lock`, `Cargo.lock` and `uv.lock` in the
+//! tree counts, apart from those inside `node_modules`. A repository that cannot
+//! be reached, or has a lockfile that does not parse, is not read at all: what
+//! is held for it stays as it was.
 
 use std::{
 	collections::{BTreeMap, BTreeSet},
@@ -110,6 +110,7 @@ struct TreeEntry {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
 	Npm,
+	Yarn,
 	Cargo,
 	Uv,
 }
@@ -121,6 +122,7 @@ impl Kind {
 		}
 		match path.rsplit('/').next()? {
 			"package-lock.json" => Some(Self::Npm),
+			"yarn.lock" => Some(Self::Yarn),
 			"Cargo.lock" => Some(Self::Cargo),
 			"uv.lock" => Some(Self::Uv),
 			_ => None,
@@ -368,10 +370,27 @@ impl GitHub {
 		}
 		let mut texts = self.raw_all(slug, commit, &first).await?;
 
-		// The manifests of each workspace's members.
+		// The manifests of each Cargo workspace's members, and of each Yarn
+		// workspace, which the lockfile names.
 		let mut members: BTreeMap<String, Vec<String>> = BTreeMap::new();
+		let mut yarn: BTreeMap<String, lockfile::yarn::Lockfile> = BTreeMap::new();
 		let mut second: BTreeSet<String> = BTreeSet::new();
 		for (path, kind) in &lockfiles {
+			if *kind == Kind::Yarn {
+				let parsed =
+					lockfile::yarn::read(&texts[path]).map_err(|e| unparseable(path, e))?;
+				for workspace in parsed.workspaces() {
+					let manifest = workspace_manifest(path, workspace);
+					if !files.contains(&manifest) {
+						return Err(Failure::Unparseable {
+							lockfile: path.clone(),
+							reason: format!("the workspace {workspace:?} has no {manifest}"),
+						});
+					}
+					second.insert(manifest);
+				}
+				yarn.insert(path.clone(), parsed);
+			}
 			if *kind != Kind::Cargo {
 				continue;
 			}
@@ -391,6 +410,17 @@ impl GitHub {
 			let text = &texts[path];
 			let packages = match kind {
 				Kind::Npm => lockfile::npm::parse(text, repository.name),
+				Kind::Yarn => {
+					let manifests = yarn[path]
+						.workspaces()
+						.into_iter()
+						.map(|workspace| {
+							let manifest = workspace_manifest(path, workspace);
+							(workspace.to_owned(), texts[&manifest].clone())
+						})
+						.collect();
+					yarn[path].parse(repository.name, &manifests)
+				}
 				Kind::Uv => lockfile::uv::parse(text),
 				Kind::Cargo => {
 					let manifests: Vec<&str> = members[path]
@@ -405,6 +435,18 @@ impl GitHub {
 		}
 		Ok(qualified(read))
 	}
+}
+
+/// The `package.json` of the Yarn workspace at `workspace`, the root being the
+/// empty string, of the lockfile at `lockfile`.
+fn workspace_manifest(lockfile: &str, workspace: &str) -> String {
+	let dir = join(directory(lockfile), workspace);
+	let dir = if workspace.is_empty() {
+		directory(lockfile)
+	} else {
+		&dir
+	};
+	join(dir, "package.json")
 }
 
 fn unparseable(lockfile: &str, e: ParseError) -> Failure {
@@ -546,7 +588,8 @@ mod tests {
 		assert_eq!(Kind::of("ansible/uv.lock"), Some(Kind::Uv));
 		assert_eq!(Kind::of("node_modules/x/package-lock.json"), None);
 		assert_eq!(Kind::of("web/node_modules/x/package-lock.json"), None);
-		assert_eq!(Kind::of("yarn.lock"), None);
+		assert_eq!(Kind::of("yarn.lock"), Some(Kind::Yarn));
+		assert_eq!(Kind::of("web/node_modules/x/yarn.lock"), None);
 	}
 
 	#[test]

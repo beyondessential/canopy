@@ -19,6 +19,7 @@ use database::packages::{PackagePath, RepositoryPackage, Scope};
 pub mod cargo;
 pub mod npm;
 pub mod uv;
+pub mod yarn;
 
 /// Why a lockfile, or a manifest it needs, could not be read.
 #[derive(Debug, thiserror::Error)]
