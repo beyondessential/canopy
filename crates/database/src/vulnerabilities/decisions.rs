@@ -231,17 +231,35 @@ struct EntryRow {
 	issue_url: Option<String>,
 }
 
+/// What to do with a stored value that no longer parses, one policy for every
+/// decision, withdrawal and edit read back. A row of a source that is no longer
+/// tracked is left out, as its items are everywhere else. Any other value
+/// this version does not know is an error that surfaces, never one quietly
+/// read as something else.
+fn stored<T>(what: &str, value: &str, parsed: Option<T>) -> Result<T> {
+	parsed.ok_or_else(|| {
+		AppError::Custom(format!(
+			"a stored {what}, {value:?}, is not one this version knows"
+		))
+	})
+}
+
+fn stored_actor(value: serde_json::Value) -> Result<Actor> {
+	serde_json::from_value(value)
+		.map_err(|e| AppError::Custom(format!("a stored actor does not read: {e}")))
+}
+
 impl EntryRow {
-	fn entry(self) -> (Uuid, Entry) {
-		(
+	fn entry(self) -> Result<(Uuid, Entry)> {
+		Ok((
 			self.decision_id,
 			Entry {
 				workspace_packages: self.workspace_packages.map(strings),
-				outcome: Outcome::parse(&self.outcome).unwrap_or(Outcome::WillFix),
+				outcome: stored("outcome", &self.outcome, Outcome::parse(&self.outcome))?,
 				reason: self.reason,
 				issue_url: self.issue_url,
 			},
-		)
+		))
 	}
 }
 
@@ -268,34 +286,36 @@ async fn hydrate(conn: &mut AsyncPgConnection, rows: Vec<DecisionRow>) -> Result
 	.load(conn)
 	.await?;
 	let mut entries: HashMap<Uuid, Vec<Entry>> = HashMap::new();
-	for (decision, entry) in entry_rows.into_iter().map(EntryRow::entry) {
+	for row in entry_rows {
+		let (decision, entry) = row.entry()?;
 		entries.entry(decision).or_default().push(entry);
 	}
 	let mut withdrawals = Withdrawal::for_decisions(conn, &ids).await?;
-	Ok(rows
-		.into_iter()
-		.filter_map(|row| {
-			let entries = entries.remove(&row.id).unwrap_or_default();
-			Some(Decision {
-				id: row.id,
-				vulnerability_id: row.vulnerability_id,
-				source: Source::parse(&row.source)?,
-				status: status_of(&entries),
-				entries,
-				actor: serde_json::from_value(row.actor)
-					.unwrap_or_else(|_| Actor::canopy("unknown")),
-				via: Via::parse(&row.via).unwrap_or(Via::Ui),
-				created_at: row.created_at,
-				covered_held: strings(row.covered_held),
-				edited: row.edited,
-				withdrawal: withdrawals.remove(&row.id),
-				held: Some(Held {
-					severity: row.severity_held.parse().unwrap_or_default(),
-					affected: serde_json::from_value(row.affected_held).unwrap_or_default(),
-				}),
-			})
-		})
-		.collect())
+	let mut decisions = Vec::with_capacity(rows.len());
+	for row in rows {
+		let Some(source) = Source::parse(&row.source) else {
+			continue;
+		};
+		let entries = entries.remove(&row.id).unwrap_or_default();
+		decisions.push(Decision {
+			id: row.id,
+			vulnerability_id: row.vulnerability_id,
+			source,
+			status: status_of(&entries),
+			entries,
+			actor: stored_actor(row.actor)?,
+			via: stored("via", &row.via, Via::parse(&row.via))?,
+			created_at: row.created_at,
+			covered_held: strings(row.covered_held),
+			edited: row.edited,
+			withdrawal: withdrawals.remove(&row.id),
+			held: Some(Held {
+				severity: row.severity_held.parse().unwrap_or_default(),
+				affected: serde_json::from_value(row.affected_held).unwrap_or_default(),
+			}),
+		});
+	}
+	Ok(decisions)
 }
 
 /// The workspace packages that reach an item's advisory now.
@@ -604,82 +624,63 @@ fn advisory_record(id: &str) -> audit::Record {
 // ── Withdrawals ─────────────────────────────────────────────────────────────
 
 /// The current decision taken away.
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema, diesel::QueryableByName)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityWithdrawal)]
 pub struct Withdrawal {
 	/// The withdrawal's identifier.
-	#[diesel(sql_type = sql_types::Uuid)]
 	pub id: Uuid,
 	/// The decision withdrawn.
-	#[diesel(sql_type = sql_types::Uuid)]
 	pub decision_id: Uuid,
 	/// Why.
-	#[diesel(sql_type = sql_types::Text)]
 	pub reason: String,
 	/// Who withdrew it.
-	#[diesel(sql_type = sql_types::Jsonb, deserialize_as = ActorColumn)]
 	pub actor: Actor,
 	/// How it was withdrawn.
-	#[diesel(sql_type = sql_types::Text, deserialize_as = ViaColumn)]
 	pub via: Via,
 	/// When.
-	#[diesel(sql_type = sql_types::Timestamptz, deserialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
 	/// The advisory's OSV identifier.
-	#[diesel(sql_type = sql_types::Text)]
 	pub vulnerability_id: String,
 	/// The source of the item.
-	#[diesel(sql_type = sql_types::Text, deserialize_as = SourceColumn)]
 	pub source: Source,
 }
 
-/// Row decoders for the columns every history record shares.
-pub struct ActorColumn(Actor);
-pub struct ViaColumn(Via);
-pub struct SourceColumn(Source);
+#[derive(diesel::QueryableByName)]
+struct WithdrawalRow {
+	#[diesel(sql_type = sql_types::Uuid)]
+	id: Uuid,
+	#[diesel(sql_type = sql_types::Uuid)]
+	decision_id: Uuid,
+	#[diesel(sql_type = sql_types::Text)]
+	reason: String,
+	#[diesel(sql_type = sql_types::Jsonb)]
+	actor: serde_json::Value,
+	#[diesel(sql_type = sql_types::Text)]
+	via: String,
+	#[diesel(sql_type = sql_types::Timestamptz, deserialize_as = jiff_diesel::Timestamp)]
+	created_at: Timestamp,
+	#[diesel(sql_type = sql_types::Text)]
+	vulnerability_id: String,
+	#[diesel(sql_type = sql_types::Text)]
+	source: String,
+}
 
-impl diesel::deserialize::FromSql<sql_types::Jsonb, diesel::pg::Pg> for ActorColumn {
-	fn from_sql(bytes: diesel::pg::PgValue<'_>) -> diesel::deserialize::Result<Self> {
-		let value = <serde_json::Value as diesel::deserialize::FromSql<
-			sql_types::Jsonb,
-			diesel::pg::Pg,
-		>>::from_sql(bytes)?;
-		Ok(Self(
-			serde_json::from_value(value).unwrap_or_else(|_| Actor::canopy("unknown")),
-		))
-	}
-}
-impl From<ActorColumn> for Actor {
-	fn from(column: ActorColumn) -> Self {
-		column.0
-	}
-}
-impl diesel::deserialize::FromSql<sql_types::Text, diesel::pg::Pg> for ViaColumn {
-	fn from_sql(bytes: diesel::pg::PgValue<'_>) -> diesel::deserialize::Result<Self> {
-		let text =
-			<String as diesel::deserialize::FromSql<sql_types::Text, diesel::pg::Pg>>::from_sql(
-				bytes,
-			)?;
-		Ok(Self(Via::parse(&text).unwrap_or(Via::Ui)))
-	}
-}
-impl From<ViaColumn> for Via {
-	fn from(column: ViaColumn) -> Self {
-		column.0
-	}
-}
-impl diesel::deserialize::FromSql<sql_types::Text, diesel::pg::Pg> for SourceColumn {
-	fn from_sql(bytes: diesel::pg::PgValue<'_>) -> diesel::deserialize::Result<Self> {
-		let text =
-			<String as diesel::deserialize::FromSql<sql_types::Text, diesel::pg::Pg>>::from_sql(
-				bytes,
-			)?;
-		Ok(Self(Source::parse(&text).unwrap_or(Source::Linux)))
-	}
-}
-impl From<SourceColumn> for Source {
-	fn from(column: SourceColumn) -> Self {
-		column.0
+impl WithdrawalRow {
+	/// `None` for a source that is no longer tracked.
+	fn withdrawal(self) -> Result<Option<Withdrawal>> {
+		let Some(source) = Source::parse(&self.source) else {
+			return Ok(None);
+		};
+		Ok(Some(Withdrawal {
+			id: self.id,
+			decision_id: self.decision_id,
+			reason: self.reason,
+			actor: stored_actor(self.actor)?,
+			via: stored("via", &self.via, Via::parse(&self.via))?,
+			created_at: self.created_at,
+			vulnerability_id: self.vulnerability_id,
+			source,
+		}))
 	}
 }
 
@@ -694,7 +695,7 @@ impl Withdrawal {
 		actor: &Actor,
 		via: Via,
 	) -> Result<Self> {
-		let row: Self = diesel::sql_query(format!(
+		let row: WithdrawalRow = diesel::sql_query(format!(
 			"WITH w AS ( \
 			   INSERT INTO vulnerability_decision_withdrawals (decision_id, reason, actor, via) \
 			   VALUES ($1, $2, $3, $4) RETURNING *) \
@@ -706,21 +707,29 @@ impl Withdrawal {
 		.bind::<sql_types::Text, _>(via.as_str())
 		.get_result(conn)
 		.await?;
-		Ok(row)
+		row.withdrawal()?.ok_or_else(|| {
+			AppError::Custom("a withdrawal was recorded for an untracked source".into())
+		})
 	}
 
 	async fn for_decisions(
 		conn: &mut AsyncPgConnection,
 		decisions: &[Uuid],
 	) -> Result<HashMap<Uuid, Self>> {
-		let rows: Vec<Self> = diesel::sql_query(format!(
+		let rows: Vec<WithdrawalRow> = diesel::sql_query(format!(
 			"SELECT {WITHDRAWAL_COLUMNS} FROM vulnerability_decision_withdrawals w \
 			 JOIN vulnerability_decisions d ON d.id = w.decision_id WHERE w.decision_id = ANY($1)"
 		))
 		.bind::<sql_types::Array<sql_types::Uuid>, _>(decisions)
 		.load(conn)
 		.await?;
-		Ok(rows.into_iter().map(|row| (row.decision_id, row)).collect())
+		let mut out = HashMap::new();
+		for row in rows {
+			if let Some(withdrawal) = row.withdrawal()? {
+				out.insert(withdrawal.decision_id, withdrawal);
+			}
+		}
+		Ok(out)
 	}
 
 	/// An item's withdrawals, newest first.
@@ -729,7 +738,7 @@ impl Withdrawal {
 		vulnerability_id: &str,
 		source: &Source,
 	) -> Result<Vec<Self>> {
-		diesel::sql_query(format!(
+		let rows: Vec<WithdrawalRow> = diesel::sql_query(format!(
 			"SELECT {WITHDRAWAL_COLUMNS} FROM vulnerability_decision_withdrawals w \
 			 JOIN vulnerability_decisions d ON d.id = w.decision_id \
 			 WHERE d.vulnerability_id = $1 AND d.source = $2 ORDER BY w.created_at DESC"
@@ -737,8 +746,10 @@ impl Withdrawal {
 		.bind::<sql_types::Text, _>(vulnerability_id)
 		.bind::<sql_types::Text, _>(source.as_str())
 		.load(conn)
-		.await
-		.map_err(AppError::from)
+		.await?;
+		rows.into_iter()
+			.filter_map(|row| row.withdrawal().transpose())
+			.collect()
 	}
 
 	/// The audit entry for having withdrawn the decision.
@@ -756,75 +767,83 @@ impl Withdrawal {
 // ── Edits ───────────────────────────────────────────────────────────────────
 
 /// A correction to an entry's reason or issue link.
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema, diesel::QueryableByName)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityDecisionEdit)]
 pub struct Edit {
 	/// The edit's identifier.
-	#[diesel(sql_type = sql_types::Uuid)]
 	pub id: Uuid,
 	/// The decision edited.
-	#[diesel(sql_type = sql_types::Uuid)]
 	pub decision_id: Uuid,
 	/// The workspace packages of the entry edited, `None` for the catch-all.
-	#[diesel(sql_type = sql_types::Nullable<sql_types::Array<sql_types::Nullable<sql_types::Text>>>, deserialize_as = OptionalStrings)]
 	pub workspace_packages: Option<Vec<String>>,
 	/// The reason after the edit.
-	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
 	pub reason: Option<String>,
 	/// The issue link after the edit.
-	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
 	pub issue_url: Option<String>,
 	/// The reason before it.
-	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
 	pub earlier_reason: Option<String>,
 	/// The issue link before it.
-	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
 	pub earlier_issue_url: Option<String>,
 	/// Who edited it.
-	#[diesel(sql_type = sql_types::Jsonb, deserialize_as = ActorColumn)]
 	pub actor: Actor,
 	/// How it was edited.
-	#[diesel(sql_type = sql_types::Text, deserialize_as = ViaColumn)]
 	pub via: Via,
 	/// When.
-	#[diesel(sql_type = sql_types::Timestamptz, deserialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
 	/// The advisory's OSV identifier.
-	#[diesel(sql_type = sql_types::Text)]
 	pub vulnerability_id: String,
 	/// The source of the item.
-	#[diesel(sql_type = sql_types::Text, deserialize_as = SourceColumn)]
 	pub source: Source,
 }
 
-/// A nullable text array read as strings.
-pub struct OptionalStrings(Option<Vec<String>>);
-impl
-	diesel::deserialize::FromSql<
-		sql_types::Nullable<sql_types::Array<sql_types::Nullable<sql_types::Text>>>,
-		diesel::pg::Pg,
-	> for OptionalStrings
-{
-	fn from_sql(bytes: diesel::pg::PgValue<'_>) -> diesel::deserialize::Result<Self> {
-		let array = <Vec<Option<String>> as diesel::deserialize::FromSql<
-			sql_types::Array<sql_types::Nullable<sql_types::Text>>,
-			diesel::pg::Pg,
-		>>::from_sql(bytes)?;
-		Ok(Self(Some(strings(array))))
-	}
-
-	fn from_nullable_sql(
-		bytes: Option<diesel::pg::PgValue<'_>>,
-	) -> diesel::deserialize::Result<Self> {
-		match bytes {
-			Some(bytes) => Self::from_sql(bytes),
-			None => Ok(Self(None)),
-		}
-	}
+#[derive(diesel::QueryableByName)]
+struct EditRow {
+	#[diesel(sql_type = sql_types::Uuid)]
+	id: Uuid,
+	#[diesel(sql_type = sql_types::Uuid)]
+	decision_id: Uuid,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Array<sql_types::Nullable<sql_types::Text>>>)]
+	workspace_packages: Option<Vec<Option<String>>>,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+	reason: Option<String>,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+	issue_url: Option<String>,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+	earlier_reason: Option<String>,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+	earlier_issue_url: Option<String>,
+	#[diesel(sql_type = sql_types::Jsonb)]
+	actor: serde_json::Value,
+	#[diesel(sql_type = sql_types::Text)]
+	via: String,
+	#[diesel(sql_type = sql_types::Timestamptz, deserialize_as = jiff_diesel::Timestamp)]
+	created_at: Timestamp,
+	#[diesel(sql_type = sql_types::Text)]
+	vulnerability_id: String,
+	#[diesel(sql_type = sql_types::Text)]
+	source: String,
 }
-impl From<OptionalStrings> for Option<Vec<String>> {
-	fn from(column: OptionalStrings) -> Self {
-		column.0
+
+impl EditRow {
+	/// `None` for a source that is no longer tracked.
+	fn edit(self) -> Result<Option<Edit>> {
+		let Some(source) = Source::parse(&self.source) else {
+			return Ok(None);
+		};
+		Ok(Some(Edit {
+			id: self.id,
+			decision_id: self.decision_id,
+			workspace_packages: self.workspace_packages.map(strings),
+			reason: self.reason,
+			issue_url: self.issue_url,
+			earlier_reason: self.earlier_reason,
+			earlier_issue_url: self.earlier_issue_url,
+			actor: stored_actor(self.actor)?,
+			via: stored("via", &self.via, Via::parse(&self.via))?,
+			created_at: self.created_at,
+			vulnerability_id: self.vulnerability_id,
+			source,
+		}))
 	}
 }
 
@@ -841,7 +860,7 @@ impl Edit {
 		actor: &Actor,
 		via: Via,
 	) -> Result<Self> {
-		let row: Self = diesel::sql_query(format!(
+		let row: EditRow = diesel::sql_query(format!(
 			"WITH e AS ( \
 			   INSERT INTO vulnerability_decision_edits \
 			   (decision_id, position, reason, issue_url, earlier_reason, earlier_issue_url, actor, via) \
@@ -860,7 +879,8 @@ impl Edit {
 		.bind::<sql_types::Text, _>(via.as_str())
 		.get_result(conn)
 		.await?;
-		Ok(row)
+		row.edit()?
+			.ok_or_else(|| AppError::Custom("an edit was recorded for an untracked source".into()))
 	}
 
 	/// An item's edits, newest first.
@@ -869,7 +889,7 @@ impl Edit {
 		vulnerability_id: &str,
 		source: &Source,
 	) -> Result<Vec<Self>> {
-		diesel::sql_query(format!(
+		let rows: Vec<EditRow> = diesel::sql_query(format!(
 			"SELECT {EDIT_COLUMNS} FROM vulnerability_decision_edits e \
 			 JOIN vulnerability_decisions d ON d.id = e.decision_id \
 			 JOIN vulnerability_decision_entries n ON n.decision_id = e.decision_id AND n.position = e.position \
@@ -878,8 +898,10 @@ impl Edit {
 		.bind::<sql_types::Text, _>(vulnerability_id)
 		.bind::<sql_types::Text, _>(source.as_str())
 		.load(conn)
-		.await
-		.map_err(AppError::from)
+		.await?;
+		rows.into_iter()
+			.filter_map(|row| row.edit().transpose())
+			.collect()
 	}
 
 	/// The audit entry for having made the edit.
@@ -940,18 +962,22 @@ struct LapseRow {
 }
 
 impl LapseRow {
-	fn lapse(self) -> Option<Lapse> {
-		let reason: LapseReason =
-			serde_json::from_value(self.reason).unwrap_or(LapseReason::ReviewDue);
-		Some(Lapse {
+	/// `None` for a source that is no longer tracked.
+	fn lapse(self) -> Result<Option<Lapse>> {
+		let Some(source) = Source::parse(&self.source) else {
+			return Ok(None);
+		};
+		let reason: LapseReason = serde_json::from_value(self.reason)
+			.map_err(|e| AppError::Custom(format!("a stored lapse reason does not read: {e}")))?;
+		Ok(Some(Lapse {
 			id: self.id,
 			vulnerability_id: self.vulnerability_id,
-			source: Source::parse(&self.source)?,
+			source,
 			decision_id: self.decision_id,
 			why: reason.describe(),
 			reason,
 			created_at: self.created_at,
-		})
+		}))
 	}
 }
 
@@ -994,7 +1020,7 @@ impl Lapse {
 		.bind::<sql_types::Text, _>(decision.source.as_str())
 		.execute(conn)
 		.await?;
-		Ok(row.lapse())
+		row.lapse()
 	}
 
 	/// Look at every standing decision, and let lapse each whose advisory has
@@ -1069,16 +1095,16 @@ impl Lapse {
 		.bind::<sql_types::Array<sql_types::Text>, _>(&sources)
 		.load(conn)
 		.await?;
-		Ok(rows
-			.into_iter()
-			.filter_map(LapseRow::lapse)
-			.map(|lapse| {
-				(
+		let mut out = HashMap::new();
+		for row in rows {
+			if let Some(lapse) = row.lapse()? {
+				out.insert(
 					(lapse.vulnerability_id.clone(), lapse.source.clone()),
 					lapse,
-				)
-			})
-			.collect())
+				);
+			}
+		}
+		Ok(out)
 	}
 
 	/// An item's lapses, newest first.
@@ -1095,7 +1121,9 @@ impl Lapse {
 		.bind::<sql_types::Text, _>(source.as_str())
 		.load(conn)
 		.await?;
-		Ok(rows.into_iter().filter_map(LapseRow::lapse).collect())
+		rows.into_iter()
+			.filter_map(|row| row.lapse().transpose())
+			.collect()
 	}
 
 	/// The audit entry for the lapse, taken by Canopy.

@@ -979,6 +979,53 @@ async fn a_withdrawal_naming_a_decision_is_refused_when_another_stands() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn what_a_source_no_longer_tracked_holds_is_left_out_not_read_as_linux() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::WillFix))
+			.await
+			.unwrap();
+		diesel::sql_query(
+			"INSERT INTO vulnerability_items (vulnerability_id, source) VALUES ('GHSA-1', 'dropped')",
+		)
+		.execute(&mut conn)
+		.await
+		.unwrap();
+		diesel::sql_query(
+			"WITH d AS (INSERT INTO vulnerability_decisions \
+			   (vulnerability_id, source, actor, via, severity_held, affected_held) \
+			   VALUES ('GHSA-1', 'dropped', '{\"kind\":\"canopy\",\"job\":\"x\"}', 'ui', 'low', '[]') \
+			   RETURNING id) \
+			 INSERT INTO vulnerability_decision_withdrawals (decision_id, reason, actor, via) \
+			   SELECT id, 'gone', '{\"kind\":\"canopy\",\"job\":\"x\"}', 'ui' FROM d",
+		)
+		.execute(&mut conn)
+		.await
+		.unwrap();
+
+		assert_eq!(list(&mut conn, &ListQuery::default()).await.len(), 1);
+		assert!(Lapse::pass(&mut conn).await.unwrap().is_empty());
+		let detail = ItemDetail::load(&mut conn, "GHSA-1", &tamanu())
+			.await
+			.unwrap();
+		assert!(
+			detail.history.iter().all(|entry| !matches!(
+				entry,
+				database::vulnerabilities::HistoryEntry::Withdrawal { .. }
+			)),
+			"another source's withdrawal is not in this item's history"
+		);
+		assert!(
+			Withdrawal::history(&mut conn, "GHSA-1", &Source::Linux)
+				.await
+				.unwrap()
+				.is_empty()
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn editing_one_entry_keeps_the_earlier_text() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		tamanu_item(&mut conn).await;
