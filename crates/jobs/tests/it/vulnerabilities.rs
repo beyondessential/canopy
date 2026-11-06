@@ -607,6 +607,26 @@ async fn a_yarn_lockfile_is_read_with_the_manifests_of_its_workspaces() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_lockfile_too_large_to_read_is_refused_rather_than_parsed() {
+	let fake: Shared = Arc::default();
+	let base = serve(fake.clone()).await;
+	publish(&fake, "aaaa", &[("package-lock.json", LOCKFILE)]);
+
+	let failure = github(&base)
+		.with_max_file_bytes(16)
+		.read(&TAMANU, "aaaa")
+		.await
+		.unwrap_err();
+	assert!(failure.to_string().contains("larger than"), "{failure}");
+
+	github(&base)
+		.with_max_file_bytes(LOCKFILE.len())
+		.read(&TAMANU, "aaaa")
+		.await
+		.expect("a file at the limit is read");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_yarn_lockfile_that_cannot_be_read_is_a_failure_not_a_skip() {
 	let fake: Shared = Arc::default();
 	let base = serve(fake.clone()).await;

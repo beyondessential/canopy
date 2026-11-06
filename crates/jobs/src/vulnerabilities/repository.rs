@@ -79,6 +79,11 @@ impl std::error::Error for Failure {}
 /// How many files are fetched at once.
 const FETCH_CONCURRENCY: usize = 8;
 
+/// The most a lockfile, or a manifest beside one, may be. Tupaia's lockfile is
+/// about a megabyte, the largest the fleet has, so this leaves room to grow and
+/// still bounds what one scan reads and hands to a parser.
+const MAX_FILE_BYTES: usize = 16 * 1024 * 1024;
+
 /// The most API requests walking a tree directory by directory may take, for
 /// the rare repository whose whole tree is too big for one listing.
 const MAX_DIRECTORY_LISTINGS: usize = 60;
@@ -87,6 +92,7 @@ const MAX_DIRECTORY_LISTINGS: usize = 60;
 pub struct GitHub {
 	http: reqwest::Client,
 	endpoints: Endpoints,
+	max_file_bytes: usize,
 }
 
 #[derive(Deserialize)]
@@ -181,7 +187,15 @@ impl GitHub {
 				.build()
 				.unwrap_or_default(),
 			endpoints,
+			max_file_bytes: MAX_FILE_BYTES,
 		}
+	}
+
+	/// Read files no larger than this, for a test that would rather not serve
+	/// sixteen megabytes to prove the limit holds.
+	pub fn with_max_file_bytes(mut self, bytes: usize) -> Self {
+		self.max_file_bytes = bytes;
+		self
 	}
 
 	fn url(base: &str, segments: &[&str]) -> Result<reqwest::Url, Failure> {
@@ -305,11 +319,32 @@ impl GitHub {
 		segments.extend(path.split('/'));
 		let url = Self::url(&self.endpoints.raw, &segments)?;
 		let what = format!("reading {path} of {slug}");
-		self.get(&what, url)
-			.await?
-			.text()
+		let too_big = || Failure::Unparseable {
+			lockfile: path.to_owned(),
+			reason: format!("it is larger than {} bytes", self.max_file_bytes),
+		};
+
+		// Read the body a piece at a time, so a pathological file is refused
+		// rather than held whole and handed to a parser.
+		let mut response = self.get(&what, url).await?;
+		if response
+			.content_length()
+			.is_some_and(|length| length > self.max_file_bytes as u64)
+		{
+			return Err(too_big());
+		}
+		let mut body: Vec<u8> = Vec::new();
+		while let Some(piece) = response
+			.chunk()
 			.await
-			.map_err(|e| Failure::Unreachable(format!("{what}: {e}")))
+			.map_err(|e| Failure::Unreachable(format!("{what}: {e}")))?
+		{
+			if body.len() + piece.len() > self.max_file_bytes {
+				return Err(too_big());
+			}
+			body.extend_from_slice(&piece);
+		}
+		Ok(String::from_utf8_lossy(&body).into_owned())
 	}
 
 	async fn raw_all(
