@@ -1565,6 +1565,11 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 							{"name": "addIndexToFhirJobs", "elapsed_seconds": 12},
 							{"name": "backfillNoteTypeIds", "elapsed_seconds": 880},
 						],
+						"lookup_rebuild_elapsed_seconds": 1860,
+						"lookup_rebuild_timings": [
+							{"name": "encounters", "rows": 341_744, "elapsed_seconds": 298},
+							{"name": "self-heal", "elapsed_seconds": 840},
+						],
 					},
 				}))
 				.await
@@ -1585,6 +1590,18 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 				latest.error, None,
 				"a consumer that sends no error leaves it unset"
 			);
+			assert_eq!(
+				latest.lookup_rebuild_elapsed,
+				Some(database::pg_duration::PgDuration(
+					jiff::SignedDuration::from_secs(1860)
+				))
+			);
+			let steps: Vec<(&str, Option<i64>)> = latest
+				.lookup_rebuild_timings
+				.iter()
+				.map(|t| (t.name.as_str(), t.rows))
+				.collect();
+			assert_eq!(steps, [("encounters", Some(341_744)), ("self-heal", None)]);
 
 			// And the pair is settled, so it is not dispatched again.
 			let after: Vec<serde_json::Value> = public
