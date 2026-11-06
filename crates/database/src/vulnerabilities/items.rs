@@ -98,18 +98,59 @@ const ITEM_CTES: &str = "agg AS ( \
 	  LEFT JOIN paths p ON p.vulnerability_id = i.vulnerability_id AND p.source = i.source \
 	  LEFT JOIN state s ON s.vulnerability_id = i.vulnerability_id AND s.source = i.source)";
 
-/// The conditions of a [`ListQuery`], over `base`, bound from `$3` (and the identifiers of `$1`).
-const FILTERS: &str = "($1::text[] IS NULL OR base.id = ANY($1)) \
-	AND ($3::text IS NULL OR base.source = $3) \
-	AND ($4::text IS NULL OR base.status = $4) \
-	AND ($5::text IS NULL OR $5 = ANY(base.scopes)) \
-	AND ($6::int IS NULL OR base.sev >= $6) \
-	AND ($7::int IS NULL OR base.sev = $7) \
-	AND ($8::bool IS NULL OR base.has_suggestion = $8) \
-	AND ($9::bool OR NOT base.closed) \
-	AND ($10::text IS NULL OR $10 = ANY(base.packages)) \
-	AND ($11::text IS NULL OR $11 = ANY(base.workspace_packages)) \
-	AND ($12::text IS NULL OR $12 <% base.search_text OR $12 <% base.details)";
+/// The conditions of a [`ListQuery`] over `base`, bound from `$3` (and the
+/// identifiers of `$1`), each named so that the facet counts, which drop one
+/// condition each, are built from the very same text as the list.
+macro_rules! f_common {
+	() => {
+		concat!(
+			"($1::text[] IS NULL OR base.id = ANY($1)) ",
+			"AND ($9::bool OR NOT base.closed) ",
+			"AND ($10::text IS NULL OR $10 = ANY(base.packages)) ",
+			"AND ($11::text IS NULL OR $11 = ANY(base.workspace_packages)) ",
+			"AND ($12::text IS NULL OR $12 <% base.search_text OR $12 <% base.details)"
+		)
+	};
+}
+macro_rules! f_source {
+	() => {
+		"($3::text IS NULL OR base.source = $3)"
+	};
+}
+macro_rules! f_status {
+	() => {
+		"($4::text IS NULL OR base.status = $4)"
+	};
+}
+macro_rules! f_scope {
+	() => {
+		"($5::text IS NULL OR $5 = ANY(base.scopes))"
+	};
+}
+macro_rules! f_severity {
+	() => {
+		"(($6::int IS NULL OR base.sev >= $6) AND ($7::int IS NULL OR base.sev = $7))"
+	};
+}
+macro_rules! f_suggestion {
+	() => {
+		"($8::bool IS NULL OR base.has_suggestion = $8)"
+	};
+}
+
+const FILTERS: &str = concat!(
+	f_common!(),
+	" AND ",
+	f_source!(),
+	" AND ",
+	f_status!(),
+	" AND ",
+	f_scope!(),
+	" AND ",
+	f_severity!(),
+	" AND ",
+	f_suggestion!()
+);
 
 /// How closely an item matches the search, the main fields counting in full
 /// and the advisory's details for half.
@@ -322,6 +363,35 @@ pub struct Facets {
 	pub severity: Vec<FacetCount>,
 	/// `yes` and `no`: whether the item has a suggestion.
 	pub suggestion: Vec<FacetCount>,
+	/// How many items each filter's "all" would give, which is not the sum of
+	/// its choices where an item falls in several, as a scope can.
+	pub totals: FacetTotals,
+}
+
+/// How many items each filter gives when none of its choices is picked.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
+#[schema(as = VulnerabilityFacetTotals)]
+pub struct FacetTotals {
+	/// With every filter but the source's.
+	pub source: i64,
+	/// With every filter but the status's.
+	pub status: i64,
+	/// With every filter but the scope's.
+	pub scope: i64,
+	/// With every filter but the severity's.
+	pub severity: i64,
+	/// With every filter but the suggestion's.
+	pub suggestion: i64,
+}
+
+#[derive(diesel::QueryableByName)]
+struct FacetRow {
+	#[diesel(sql_type = sql_types::Text)]
+	facet: String,
+	#[diesel(sql_type = sql_types::Text)]
+	value: String,
+	#[diesel(sql_type = sql_types::BigInt)]
+	count: i64,
 }
 
 /// What a result is grouped by.
@@ -481,6 +551,8 @@ struct ItemRow {
 	withdrawn: bool,
 	#[diesel(sql_type = sql_types::Bool)]
 	edited: bool,
+	#[diesel(sql_type = sql_types::BigInt)]
+	total: i64,
 }
 
 #[derive(diesel::QueryableByName)]
@@ -523,23 +595,12 @@ impl ItemSummary {
 		let offset = query.offset()?;
 		let size = query.page_size();
 		searching!(conn, {
-			let total: Vec<CountRow> = bind_list!(
-				view(&format!(
-					"SELECT 'all' AS value, count(*) AS count FROM base WHERE {FILTERS}"
-				)),
-				ids.clone(),
-				query
-			)
-			.load(conn)
-			.await?;
-			let total = total.iter().next().map_or(0, |row| row.count);
-
 			let rows: Vec<ItemRow> = bind_list!(
 				view(&format!(
 					"SELECT base.id, base.source, base.first_seen_at, base.summary, base.aliases, \
 					        base.severity, base.published_at, base.machines, base.scopes, \
 					        base.workspace_packages, base.closed, base.status, base.withdrawn, \
-					        base.edited, {RANK} AS rank \
+					        base.edited, {RANK} AS rank, count(*) OVER () AS total \
 					 FROM base WHERE {FILTERS} ORDER BY {} LIMIT {size} OFFSET {offset}",
 					query.order_by()
 				)),
@@ -548,6 +609,13 @@ impl ItemSummary {
 			)
 			.load(conn)
 			.await?;
+			// The total rides on every row of a page. A page past the end has none
+			// to carry it, and is counted instead.
+			let total = match rows.iter().next() {
+				Some(row) => row.total,
+				None if offset > 0 => Self::count_among(conn, ids, query).await?,
+				None => 0,
+			};
 			let next_cursor = (offset + (rows.len() as i64) < total && !rows.is_empty())
 				.then(|| format!("o{}", offset + rows.len() as i64));
 			let items = Self::hydrate(conn, rows).await?;
@@ -557,6 +625,28 @@ impl ItemSummary {
 				next_cursor,
 			})
 		})
+	}
+
+	async fn count_among(
+		conn: &mut AsyncPgConnection,
+		ids: Option<Vec<String>>,
+		query: &ListQuery,
+	) -> Result<i64> {
+		let rows: Vec<CountRow> = bind_list!(
+			view(&format!(
+				"SELECT 'all' AS value, count(*) AS count FROM base WHERE {FILTERS}"
+			)),
+			ids,
+			query
+		)
+		.load(conn)
+		.await?;
+		Ok(rows.iter().next().map_or(0, |row| row.count))
+	}
+
+	/// How many items match `query`, without fetching a page of them.
+	pub async fn count(conn: &mut AsyncPgConnection, query: &ListQuery) -> Result<i64> {
+		searching!(conn, { Self::count_among(conn, None, query).await })
 	}
 
 	/// One item, closed or not.
@@ -687,119 +777,121 @@ impl ItemSummary {
 			status: Some(Status::Open),
 			..Default::default()
 		};
-		let rows: Vec<CountRow> = bind_list!(
-			view(&format!(
-				"SELECT 'all' AS value, count(*) AS count FROM base WHERE {FILTERS}"
-			)),
-			None::<Vec<String>>,
-			&query
-		)
-		.load(conn)
-		.await?;
-		Ok(rows.iter().next().map_or(0, |row| row.count))
+		Self::count_among(conn, None, &query).await
 	}
 
 	/// How many items each choice of each filter would give, with every other
-	/// filter, the closed switch and the search applied but not its own.
+	/// filter, the closed switch and the search applied but not its own, and
+	/// how many items that is in all. One evaluation of the item view serves
+	/// all five: each row is flagged for each filter it passes, and a facet
+	/// counts the rows that pass every filter but its own.
 	pub async fn facets(conn: &mut AsyncPgConnection, query: &ListQuery) -> Result<Facets> {
-		searching!(conn, {
-			let count = async |conn: &mut AsyncPgConnection,
-			                   query: &ListQuery,
-			                   from: &str,
-			                   value: &str|
-			       -> Result<HashMap<String, i64>> {
-				let rows: Vec<CountRow> = bind_list!(
-					view(&format!(
-						"SELECT {value} AS value, count(*) AS count FROM {from} \
-						 WHERE {FILTERS} GROUP BY 1"
-					)),
-					None::<Vec<String>>,
-					query
-				)
+		let sql = view(&format!(
+			", flags AS ( \
+			   SELECT base.source, base.status, base.severity, base.scopes, base.has_suggestion, \
+			          {} AS f_source, {} AS f_status, {} AS f_scope, {} AS f_severity, \
+			          {} AS f_suggestion \
+			   FROM base WHERE {}) \
+			 SELECT 'source' AS facet, source AS value, count(*) AS count FROM flags \
+			   WHERE f_status AND f_scope AND f_severity AND f_suggestion GROUP BY 2 \
+			 UNION ALL SELECT 'status', status, count(*) FROM flags \
+			   WHERE f_source AND f_scope AND f_severity AND f_suggestion GROUP BY 2 \
+			 UNION ALL SELECT 'scope', scope, count(*) FROM flags, unnest(scopes) AS scope \
+			   WHERE f_source AND f_status AND f_severity AND f_suggestion GROUP BY 2 \
+			 UNION ALL SELECT 'severity', severity, count(*) FROM flags \
+			   WHERE f_source AND f_status AND f_scope AND f_suggestion GROUP BY 2 \
+			 UNION ALL SELECT 'suggestion', CASE WHEN has_suggestion THEN 'yes' ELSE 'no' END, count(*) \
+			   FROM flags WHERE f_source AND f_status AND f_scope AND f_severity GROUP BY 2 \
+			 UNION ALL SELECT 'total:source', '', count(*) FROM flags \
+			   WHERE f_status AND f_scope AND f_severity AND f_suggestion \
+			 UNION ALL SELECT 'total:status', '', count(*) FROM flags \
+			   WHERE f_source AND f_scope AND f_severity AND f_suggestion \
+			 UNION ALL SELECT 'total:scope', '', count(*) FROM flags \
+			   WHERE f_source AND f_status AND f_severity AND f_suggestion \
+			 UNION ALL SELECT 'total:severity', '', count(*) FROM flags \
+			   WHERE f_source AND f_status AND f_scope AND f_suggestion \
+			 UNION ALL SELECT 'total:suggestion', '', count(*) FROM flags \
+			   WHERE f_source AND f_status AND f_scope AND f_severity",
+			f_source!(),
+			f_status!(),
+			f_scope!(),
+			f_severity!(),
+			f_suggestion!(),
+			f_common!(),
+		));
+		let rows: Vec<FacetRow> = searching!(conn, {
+			Ok(bind_list!(sql, None::<Vec<String>>, query)
 				.load(conn)
-				.await?;
-				Ok(rows.into_iter().map(|row| (row.value, row.count)).collect())
-			};
-			let choices =
-				|mut counts: HashMap<String, i64>, values: Vec<String>| -> Vec<FacetCount> {
-					values
-						.into_iter()
-						.map(|value| FacetCount {
-							count: counts.remove(&value).unwrap_or(0),
-							value,
-						})
-						.collect()
-				};
+				.await?)
+		})?;
 
-			let without = |edit: &dyn Fn(&mut ListQuery)| {
-				let mut query = query.clone();
-				edit(&mut query);
-				query
-			};
+		let mut counts: HashMap<(String, String), i64> = HashMap::new();
+		for row in rows {
+			counts.insert((row.facet, row.value), row.count);
+		}
+		let choices = |facet: &str, values: Vec<String>| -> Vec<FacetCount> {
+			values
+				.into_iter()
+				.map(|value| FacetCount {
+					count: counts
+						.get(&(facet.to_owned(), value.clone()))
+						.copied()
+						.unwrap_or(0),
+					value,
+				})
+				.collect()
+		};
+		let total = |facet: &str| {
+			counts
+				.get(&(format!("total:{facet}"), String::new()))
+				.copied()
+				.unwrap_or(0)
+		};
 
-			let source = count(conn, &without(&|q| q.source = None), "base", "base.source").await?;
-			let status = count(conn, &without(&|q| q.status = None), "base", "base.status").await?;
-			let scope = count(
-				conn,
-				&without(&|q| q.scope = None),
-				"base, unnest(base.scopes) AS scope",
-				"scope",
-			)
-			.await?;
-			let severity = count(
-				conn,
-				&without(&|q| {
-					q.severity = None;
-					q.min_severity = None;
-				}),
-				"base",
-				"base.severity",
-			)
-			.await?;
-			let suggestion = count(
-				conn,
-				&without(&|q| q.has_suggestion = None),
-				"base",
-				"CASE WHEN base.has_suggestion THEN 'yes' ELSE 'no' END",
-			)
-			.await?;
-
-			let sources = REPOSITORIES
+		Ok(Facets {
+			source: choices(
+				"source",
+				REPOSITORIES
+					.iter()
+					.map(|repository| repository.name.to_owned())
+					.chain([LINUX.to_owned()])
+					.collect(),
+			),
+			status: choices(
+				"status",
+				[
+					Status::Open,
+					Status::NotAffected,
+					Status::AcceptedRisk,
+					Status::WillFix,
+					Status::Mixed,
+				]
 				.iter()
-				.map(|repository| repository.name.to_owned())
-				.chain([LINUX.to_owned()])
-				.collect();
-			Ok(Facets {
-				source: choices(source, sources),
-				status: choices(
-					status,
-					[
-						Status::Open,
-						Status::NotAffected,
-						Status::AcceptedRisk,
-						Status::WillFix,
-						Status::Mixed,
-					]
+				.map(|s| s.as_str().to_owned())
+				.collect(),
+			),
+			scope: choices(
+				"scope",
+				Scope::ALL
 					.iter()
 					.map(|s| s.as_str().to_owned())
+					.chain(["optional".to_owned()])
 					.collect(),
-				),
-				scope: choices(
-					scope,
-					Scope::ALL
-						.iter()
-						.map(|s| s.as_str().to_owned())
-						.chain(["optional".to_owned()])
-						.collect(),
-				),
-				severity: choices(
-					severity,
-					["critical", "high", "medium", "low", "unrated"]
-						.map(String::from)
-						.to_vec(),
-				),
-				suggestion: choices(suggestion, vec!["yes".into(), "no".into()]),
-			})
+			),
+			severity: choices(
+				"severity",
+				["critical", "high", "medium", "low", "unrated"]
+					.map(String::from)
+					.to_vec(),
+			),
+			suggestion: choices("suggestion", vec!["yes".into(), "no".into()]),
+			totals: FacetTotals {
+				source: total("source"),
+				status: total("status"),
+				scope: total("scope"),
+				severity: total("severity"),
+				suggestion: total("suggestion"),
+			},
 		})
 	}
 

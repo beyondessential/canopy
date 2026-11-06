@@ -15003,6 +15003,34 @@ export interface components {
             /** @description The choice, as the filter takes it. */
             value: string;
         };
+        /** @description How many items each filter gives when none of its choices is picked. */
+        VulnerabilityFacetTotals: {
+            /**
+             * Format: int64
+             * @description With every filter but the scope's.
+             */
+            scope: number;
+            /**
+             * Format: int64
+             * @description With every filter but the severity's.
+             */
+            severity: number;
+            /**
+             * Format: int64
+             * @description With every filter but the source's.
+             */
+            source: number;
+            /**
+             * Format: int64
+             * @description With every filter but the status's.
+             */
+            status: number;
+            /**
+             * Format: int64
+             * @description With every filter but the suggestion's.
+             */
+            suggestion: number;
+        };
         /**
          * @description The choices of each filter, with how many items each would give with every
          *     other filter, the closed switch and the search applied.
@@ -15018,6 +15046,11 @@ export interface components {
             status: components["schemas"]["VulnerabilityFacetCount"][];
             /** @description `yes` and `no`: whether the item has a suggestion. */
             suggestion: components["schemas"]["VulnerabilityFacetCount"][];
+            /**
+             * @description How many items each filter's "all" would give, which is not the sum of
+             *     its choices where an item falls in several, as a scope can.
+             */
+            totals: components["schemas"]["VulnerabilityFacetTotals"];
         };
         /** @description One entry of an item's history. */
         VulnerabilityHistoryEntry: {
@@ -15169,8 +15202,7 @@ export interface components {
          *     would give.
          */
         VulnerabilityListResponse: {
-            /** @description The choices of each filter, each counted without its own filter. */
-            facets: components["schemas"]["VulnerabilityFacets"];
+            facets?: null | components["schemas"]["VulnerabilityFacets"];
             /** @description The items of the page, in order. */
             items: components["schemas"]["VulnerabilityItem"][];
             /** @description The cursor of the next page, absent on the last. */

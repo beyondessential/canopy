@@ -1812,6 +1812,20 @@ async fn each_facet_ignores_its_own_filter() {
 
 		let total = ItemSummary::list(&mut conn, &query).await.unwrap().total;
 		assert_eq!(total, 2);
+
+		assert_eq!(facets.totals.source, 3, "every filter but the source's");
+		assert_eq!(
+			facets.totals.scope, 2,
+			"an item is one item however many scopes it has"
+		);
+		let summed: i64 = facets.scope.iter().map(|c| c.count).sum();
+		assert!(
+			summed > facets.totals.scope,
+			"the choices of a scope add up to more than the items"
+		);
+
+		let counted = ItemSummary::count(&mut conn, &query).await.unwrap();
+		assert_eq!(counted, total, "counting matches the page's total");
 	})
 	.await;
 }

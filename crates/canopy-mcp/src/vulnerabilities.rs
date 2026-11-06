@@ -499,17 +499,9 @@ impl CanopyMcp {
 			let groups = ItemSummary::group(&mut conn, &query, by)
 				.await
 				.map_err(app_err)?;
-			let total = ItemSummary::list(
-				&mut conn,
-				&ListQuery {
-					page_size: Some(1),
-					cursor: None,
-					..query
-				},
-			)
-			.await
-			.map_err(app_err)?
-			.total;
+			let total = ItemSummary::count(&mut conn, &query)
+				.await
+				.map_err(app_err)?;
 			return ok_json(&Grouping { groups, total });
 		}
 

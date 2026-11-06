@@ -409,6 +409,18 @@ async fn the_list_pages_searches_and_counts_its_facets() {
 		};
 		assert_eq!(count("source", "tamanu"), 1);
 		assert_eq!(count("scope", "runtime"), 1);
+		assert_eq!(facets["totals"]["scope"], 1);
+
+		let later = read(
+			&private,
+			"/api/vulnerabilities/list",
+			&json!({"cursor": "o0", "status": "open"}),
+		)
+		.await;
+		assert!(
+			later["facets"].is_null(),
+			"a later page leaves the facets to the first"
+		);
 
 		let none = read(
 			&private,

@@ -46,8 +46,10 @@ pub struct VulnerabilityListResponse {
 	pub total: i64,
 	/// The cursor of the next page, absent on the last.
 	pub next_cursor: Option<String>,
-	/// The choices of each filter, each counted without its own filter.
-	pub facets: Facets,
+	/// The choices of each filter, each counted without its own filter. Only
+	/// the first page carries them, since they do not change from one page of
+	/// a query to the next; a later page leaves them for the caller to keep.
+	pub facets: Option<Facets>,
 }
 
 /// List vulnerabilities.
@@ -74,7 +76,11 @@ pub async fn list(
 ) -> Result<Json<VulnerabilityListResponse>> {
 	let mut conn = state.db.get().await?;
 	let listing = ItemSummary::list(&mut conn, &query).await?;
-	let facets = ItemSummary::facets(&mut conn, &query).await?;
+	let facets = if query.cursor.is_none() {
+		Some(ItemSummary::facets(&mut conn, &query).await?)
+	} else {
+		None
+	};
 	Ok(Json(VulnerabilityListResponse {
 		items: listing.items,
 		total: listing.total,
