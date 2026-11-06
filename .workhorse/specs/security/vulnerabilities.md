@@ -65,25 +65,25 @@ A Linux item counts while a live production machine has an affected package vers
 An item nothing counts for is **closed**.
 Nothing about closing needs a decision: when a fix lands on the default branch, or a machine upgrades past the flaw, the item closes by itself.
 Being closed is apart from triage status: a closed item keeps its status, decisions and history, and is listed only when asked for.
-If something comes to count for it again, it is no longer closed, and its decision stands unless the reopening rules say otherwise (see [VTR](vulnerability-triage.md), "Reopening").
+If something comes to count for it again, it is no longer closed, and its decision stands unless it lapses (see [VTR](vulnerability-triage.md), "When a decision lapses").
 
 A repository that cannot be fetched, or that has a lockfile that cannot be parsed, leaves its items as they were, and does not close them.
 A repository not read for a day raises a self-alert naming it and why (see [SELF](../private-server/self-alerts.md)).
 
 ## Presentation
 
-Vulnerabilities are a top-level section of the operator interface, and the sidebar entry carries how many items are open, leaving out closed ones.
+Vulnerabilities are a top-level section of the operator interface, and the sidebar entry carries how many items need triage, leaving out closed ones.
 
 The list is one row per item, showing its severity, its summary and identifier, its affected packages with the source and their scopes, and its triage status (see [VTR](vulnerability-triage.md)).
 A Linux item also shows how many machines it exposes.
 A closed item is marked closed under its status.
-An item that is open and has a suggestion shows the suggested outcome under its status.
+An item that needs triage and has a suggestion shows the suggested outcome under its status.
 
 Every column sorts, ascending or descending.
 Without a sort chosen, the list is ordered by severity and then by how recently the advisory was published.
 
-The list shows open items by default, leaving out closed ones.
-It filters by source, by status (open, not affected, accepted risk, will fix and mixed), by scope, by severity and by whether it has a suggestion, and a switch includes closed items.
+The list shows the items that need triage by default, leaving out closed ones.
+It filters by source, by status (needs triage, not affected, accepted risk, will fix and mixed), by scope, by severity and by whether it has a suggestion, and a switch includes closed items.
 Filtering by scope gives the items reached through a path of that scope, and optional is one of its choices.
 Each filter's choices show how many items they would give with the other filters, the switch and the search applied.
 The filter bar shows how many items are in the result as it stands, with every filter and the search applied.

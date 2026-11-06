@@ -159,13 +159,13 @@ Each item is judged on its own: those that are valid are recorded, each audited 
 The result lists the outcome for every item in the order given.
 The decisions are presented as made through this interface by their caller.
 
-**Withdraw vulnerability decisions** takes a list of items and a reason, and withdraws each item's current decision on the same terms, returning each to open.
+**Withdraw vulnerability decisions** takes a list of items and a reason, and withdraws each item's current decision on the same terms, so each needs triage again.
 **Edit vulnerability decision** takes one item, and corrects the reason or issue link of its current decision, or of one entry of its split, named by a workspace package the entry covers or as the catch-all (see [VTR](../security/vulnerability-triage.md), "Changing a decision").
 
 All three writes are held by the triage grant.
 
 **Triage vulnerabilities** is a prompt the interface offers, which takes a repository and guides an agent that has that repository's source through triage.
-The agent lists the repository's open items, groups and orders them as it finds easiest for a person to review, and reads how the code uses each vulnerable package.
+The agent lists the repository's items that need triage, groups and orders them as it finds easiest for a person to review, and reads how the code uses each vulnerable package.
 It then puts its proposed decisions to the user in batches of ten, each with a reason that says what was checked, and records a batch only once the user has confirmed it, so a person approves every decision.
 The prompt tells the agent that the model's suggestions were made without source and are to be checked, and that an advisory it cannot verify from the code is left for a person.
 
