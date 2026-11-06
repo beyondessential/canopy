@@ -132,8 +132,9 @@ struct Manifest {
 #[derive(Debug)]
 struct Override {
 	/// The package the dependency must be of, where the pattern names one: the
-	/// `d2` of both `d2/left-pad` and `d2/**/left-pad`. A pattern that names
-	/// none, such as `left-pad` or `**/left-pad`, is any package.
+	/// `webpack` of `webpack/memory-fs`, and the `@babel/core` of
+	/// `@babel/core@npm:7.0.0/@babel/generator`, since a parent may be written
+	/// as a descriptor. A pattern that names no parent is any package.
 	parent: Option<String>,
 	name: String,
 	/// The range the dependency must ask for, where the entry names one.
@@ -157,14 +158,18 @@ impl Override {
 			n => n - 1,
 		};
 		let name = segments[name_from..].join("/");
-		// `**` stands for any depth, so what is left after dropping it is the
-		// package the dependency must be of, and nothing left is any package.
+		// Yarn's patterns take one parent, so what is left is it. A `**`, which
+		// Yarn does not take, is dropped rather than read as part of a name.
 		let parent = segments[..name_from]
 			.iter()
 			.filter(|segment| **segment != "**")
 			.copied()
 			.collect::<Vec<&str>>()
 			.join("/");
+		// A parent may carry a descriptor, as the `@npm:7.0.0` of
+		// `@babel/core@npm:7.0.0/@babel/generator` does; the package it names is
+		// what a dependent is matched against.
+		let parent = split_ident(&parent).map_or(parent.clone(), |(name, _)| name.to_owned());
 		Some(Self {
 			parent: (!parent.is_empty()).then_some(parent),
 			name,
@@ -939,6 +944,27 @@ __metadata:
 		assert!(
 			!applies("d2/**/left-pad", "e2"),
 			"a parent that names a package is not a wildcard"
+		);
+
+		// Every form Yarn's manifest documentation gives for the key.
+		let named = |pattern: &str, to: &str| {
+			let rule = Override::new(pattern, "1.2.3").unwrap();
+			rule.applies(&dependent(to), &rule.name.clone(), "npm:^1")
+		};
+		assert!(named("relay-compiler", "anything"));
+		assert!(named("webpack/memory-fs", "webpack"));
+		assert!(!named("webpack/memory-fs", "rollup"));
+		assert!(named("@babel/core/json5", "@babel/core"));
+		assert!(named("@babel/core/@babel/generator", "@babel/core"));
+		assert!(
+			named("@babel/core@npm:7.0.0/@babel/generator", "@babel/core"),
+			"a parent may be written as a descriptor"
+		);
+		assert_eq!(
+			Override::new("@babel/core@npm:7.0.0/@babel/generator", "1.2.3")
+				.unwrap()
+				.name,
+			"@babel/generator"
 		);
 
 		assert!(Override::new("left-pad@^1", "1.2.3").unwrap().applies(
