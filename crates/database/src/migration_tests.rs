@@ -487,7 +487,10 @@ pub async fn latest_test(
 		return Ok(None);
 	};
 	let timings = MigrationTest::timings(db, row.check_id).await?;
-	let lookup_rebuild_timings = MigrationTest::lookup_rebuild_timings(db, row.check_id).await?;
+	let lookup_rebuild_timings = match row.lookup_rebuild_elapsed {
+		Some(_) => MigrationTest::lookup_rebuild_timings(db, row.check_id).await?,
+		None => Vec::new(),
+	};
 
 	Ok(Some(LatestTest {
 		verdict: match (row.outcome, &row.failed_migration) {

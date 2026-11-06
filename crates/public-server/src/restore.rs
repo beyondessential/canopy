@@ -1040,7 +1040,8 @@ pub struct MigrationArgs {
 	#[serde(default)]
 	pub lookup_rebuild_elapsed_seconds: Option<i64>,
 	/// Each step of that rebuild which did work, in the order they ran. Empty
-	/// where the version records only the total.
+	/// where the version records only the total, and ignored without
+	/// `lookup_rebuild_elapsed_seconds`.
 	#[serde(default)]
 	pub lookup_rebuild_timings: Vec<LookupRebuildTimingArgs>,
 }
@@ -1439,6 +1440,7 @@ impl MigrationArgs {
 			lookup_rebuild_timings: self
 				.lookup_rebuild_timings
 				.into_iter()
+				.filter(|_| self.lookup_rebuild_elapsed_seconds.is_some())
 				.map(|timing| {
 					(
 						timing.name,

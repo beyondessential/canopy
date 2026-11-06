@@ -1693,6 +1693,7 @@ async fn a_migration_report_carries_its_error() {
 						"data_bytes_before": 10,
 						"data_bytes_after": 10,
 						"timings": [],
+						"lookup_rebuild_timings": [{"name": "encounters", "elapsed_seconds": 5}],
 					},
 				}))
 				.await
@@ -1707,6 +1708,15 @@ async fn a_migration_report_carries_its_error() {
 				Some("column \"note_type_id\" does not exist"),
 				"the reason reaches the operator alongside the file name"
 			);
+			let stored_steps: i64 = {
+				use diesel::QueryDsl;
+				database::schema::lookup_rebuild_timings::table
+					.count()
+					.get_result(&mut conn)
+					.await
+					.expect("count")
+			};
+			assert_eq!(stored_steps, 0, "steps without a total are not kept");
 		},
 	)
 	.await;
