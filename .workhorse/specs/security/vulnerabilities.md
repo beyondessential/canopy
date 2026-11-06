@@ -22,7 +22,7 @@ Only the default branch counts, whatever is released or deployed from it.
 A machine that has not reported its packages has no Linux or Windows exposure.
 An application on a Kubernetes cluster has no box of its own, so it has no Linux exposure (see [K8S](../monitoring/kubernetes.md)).
 
-Only production boxes count for Linux: a machine's packages are scanned when it is a live production machine (see [GRP](../servers/groups.md), "Environments").
+Only production boxes count for Linux or Windows: a machine's packages are scanned when it is a live production machine (see [GRP](../servers/groups.md), "Environments").
 Anything at another rank, pending, or archived exposes nothing, and ranking, archiving or moving a machine changes what is exposed without waiting for a rescan.
 
 ## Where a package sits
