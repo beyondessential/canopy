@@ -14,7 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{
 	Source, Status,
-	decisions::{Decision, Entry, reaching_workspace_packages, status_of, validate_entries},
+	decisions::{
+		Decision, Entry, reaching_workspace_packages, shortened_reason, status_of, validate_entries,
+	},
 	items::EXPOSURE_CTE,
 };
 
@@ -256,11 +258,20 @@ pub async fn suggest_from_decision(
 	decision: &Decision,
 	model: &str,
 ) -> Result<()> {
+	let entries = decision
+		.entries
+		.iter()
+		.cloned()
+		.map(|mut entry| {
+			entry.reason = entry.reason.as_deref().map(shortened_reason);
+			entry
+		})
+		.collect();
 	Suggestion::record(
 		conn,
 		&decision.vulnerability_id,
 		&decision.source,
-		decision.entries.clone(),
+		entries,
 		Basis::InsufficientInformation,
 		model,
 	)

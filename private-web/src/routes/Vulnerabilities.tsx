@@ -1,13 +1,13 @@
 import {
 	Alert,
 	Box,
-	Button,
 	FormControlLabel,
 	IconButton,
 	InputAdornment,
 	LinearProgress,
 	Link as MuiLink,
 	MenuItem,
+	Pagination,
 	Paper,
 	Stack,
 	Switch,
@@ -43,6 +43,7 @@ export function vulnerabilityPath(item: Pick<VulnerabilityItem, "source" | "id">
 	return `/vulnerabilities/${item.source}/${encodeURIComponent(item.id)}`;
 }
 
+const PAGE_SIZE = 50;
 const STATUSES = Object.keys(VULNERABILITY_STATUS_LABEL) as VulnerabilityStatus[];
 const SEVERITIES = ["critical", "high", "medium", "low", "unrated"] as const;
 const SUGGESTION_LABEL: Record<string, string> = {
@@ -135,15 +136,11 @@ export default function Vulnerabilities() {
 		sortColumn,
 		descending,
 	].join("|");
-	// Pages are walked with the cursors the server gave, kept with the query
-	// they belong to: a different query has no stack, in the same render that
-	// it changes in, so it is never fetched with another query's cursor.
-	const [paging, setPaging] = useState<{ key: string; stack: string[] }>({
-		key: queryKey,
-		stack: [],
-	});
-	const stack = paging.key === queryKey ? paging.stack : [];
-	const cursor = stack.at(-1) ?? null;
+	// The page belongs to the query it was chosen for: a different query is on
+	// its first page in the same render that it changes in, so it is never
+	// fetched with another query's page.
+	const [paging, setPaging] = useState({ key: queryKey, page: 0 });
+	const page = paging.key === queryKey ? paging.page : 0;
 
 	const list = useApi(
 		"vulnerabilities",
@@ -157,9 +154,10 @@ export default function Vulnerabilities() {
 			include_closed: includeClosed,
 			search: search || null,
 			sort: sortColumn ? { column: sortColumn, descending } : null,
-			cursor,
+			cursor: page > 0 ? `o${page * PAGE_SIZE}` : null,
+			page_size: PAGE_SIZE,
 		},
-		[queryKey, cursor],
+		[queryKey, page],
 	);
 
 	const sortBy = (column: VulnerabilitySortColumn) => {
@@ -321,30 +319,14 @@ export default function Vulnerabilities() {
 							))}
 						</TableBody>
 					</Table>
-					{(stack.length > 0 || list.data.next_cursor) && (
-						<Stack
-							direction="row"
-							spacing={1}
-							sx={{ p: 1, justifyContent: "flex-end", borderTop: 1, borderColor: "divider" }}
-						>
-							<Button
-								size="small"
-								disabled={stack.length === 0}
-								onClick={() => setPaging({ key: queryKey, stack: stack.slice(0, -1) })}
-							>
-								Previous
-							</Button>
-							<Button
-								size="small"
-								disabled={!list.data.next_cursor}
-								onClick={() => {
-									const next = list.data.next_cursor;
-									if (next) setPaging({ key: queryKey, stack: [...stack, next] });
-								}}
-							>
-								Next
-							</Button>
-						</Stack>
+					{list.data.total > PAGE_SIZE && (
+						<Box sx={{ display: "flex", justifyContent: "center", p: 1, borderTop: 1, borderColor: "divider" }}>
+							<Pagination
+								count={Math.ceil(list.data.total / PAGE_SIZE)}
+								page={page + 1}
+								onChange={(_, p) => setPaging({ key: queryKey, page: p - 1 })}
+							/>
+						</Box>
 					)}
 				</Paper>
 			)}

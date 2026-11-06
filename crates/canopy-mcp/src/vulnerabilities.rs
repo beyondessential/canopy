@@ -589,7 +589,8 @@ impl CanopyMcp {
 		               `workspace_packages`, last), which also covers ones that reach it later. A \
 		               linux item takes only a whole decision. An entry's `outcome` is \
 		               `not_affected` or `accepted_risk`, each with a `reason`, or `will_fix`, \
-		               with an optional reason and an `issue_url`. A decision replaces any \
+		               with an optional reason and an `issue_url`. A reason is a sentence or two, at \
+		               most 500 characters. A decision replaces any \
 		               current one, an operator's included, and the history keeps the one it \
 		               replaced. Each item is judged on its own: the valid ones are recorded and \
 		               audited, and the others refused with the reason and no effect. The result \

@@ -192,6 +192,8 @@ export type TagMap = Solidify<Schemas["TagMap"]>;
 export type VulnerabilityItem = Solidify<Schemas["VulnerabilityItem"]>;
 export type VulnerabilityDetail = Solidify<Schemas["VulnerabilityDetail"]>;
 export type VulnerabilityDecision = Solidify<Schemas["VulnerabilityDecision"]>;
+/** The longest a decision's, withdrawal's or edit's reason may be. */
+export const VULNERABILITY_MAX_REASON = 500;
 export type VulnerabilityDecisionEntry = Solidify<Schemas["VulnerabilityDecisionEntry"]>;
 export type VulnerabilityDecisionEdit = Solidify<Schemas["VulnerabilityDecisionEdit"]>;
 export type VulnerabilityWithdrawal = Solidify<Schemas["VulnerabilityWithdrawal"]>;

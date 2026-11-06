@@ -22,6 +22,41 @@ use crate::{
 
 // ── Entries ─────────────────────────────────────────────────────────────────
 
+/// The longest a reason may be, in characters, whoever gives it: an operator,
+/// a caller of the fleet query interface, or the model. A decision's reason
+/// says why in a sentence or two; the advisory and the history hold the rest.
+pub const MAX_REASON_CHARS: usize = 500;
+
+/// A reason is refused when it is longer than [`MAX_REASON_CHARS`].
+pub fn check_reason_length(reason: &str) -> Result<()> {
+	let length = reason.trim().chars().count();
+	if length > MAX_REASON_CHARS {
+		return Err(AppError::BadRequest(format!(
+			"a reason is at most {MAX_REASON_CHARS} characters, and this one is {length}"
+		)));
+	}
+	Ok(())
+}
+
+/// `reason` cut to fit [`MAX_REASON_CHARS`], at the last word that fits and
+/// with an ellipsis where it was cut. For text the model wrote, which is
+/// shortened rather than refused: asking again would give the same answer.
+pub fn shortened_reason(reason: &str) -> String {
+	let reason = reason.trim();
+	if reason.chars().count() <= MAX_REASON_CHARS {
+		return reason.to_owned();
+	}
+	let room: String = reason.chars().take(MAX_REASON_CHARS - 1).collect();
+	let cut = match room.rfind(char::is_whitespace) {
+		Some(at) if at > 0 => &room[..at],
+		_ => room.as_str(),
+	};
+	format!(
+		"{}…",
+		cut.trim_end_matches(|c: char| c.is_whitespace() || ",;:".contains(c))
+	)
+}
+
 /// One outcome of a decision, for the workspace packages it names or, with none
 /// named, for every other one: the catch-all.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -33,8 +68,10 @@ pub struct Entry {
 	pub workspace_packages: Option<Vec<String>>,
 	/// What it decides.
 	pub outcome: Outcome,
-	/// Why. Required for not affected and accepted risk.
+	/// Why. Required for not affected and accepted risk, and at most 500
+	/// characters.
 	#[serde(default)]
+	#[schema(max_length = 500)]
 	pub reason: Option<String>,
 	/// For will fix, a link to the issue tracking the fix.
 	#[serde(default)]
@@ -51,6 +88,7 @@ impl Entry {
 	/// presented as a link.
 	pub fn check(&self) -> Result<()> {
 		let reason = self.reason.as_deref().map(str::trim).unwrap_or_default();
+		check_reason_length(reason)?;
 		let issue_url = self.issue_url.as_deref().map(str::trim).unwrap_or_default();
 		match self.outcome {
 			Outcome::WillFix if !issue_url.is_empty() => match url::Url::parse(issue_url) {
@@ -576,6 +614,7 @@ impl Decision {
 		if reason.is_empty() {
 			return Err(AppError::BadRequest("a withdrawal needs a reason".into()));
 		}
+		check_reason_length(reason)?;
 		let decision = Self::standing(conn, vulnerability_id, source)
 			.await?
 			.ok_or_else(|| {
@@ -1233,6 +1272,40 @@ mod tests {
 			);
 		}
 		assert!(entry(None, Outcome::WillFix, None).check().is_ok());
+	}
+
+	#[test]
+	fn a_reason_is_held_to_its_length() {
+		let at_limit = "x".repeat(MAX_REASON_CHARS);
+		assert!(
+			entry(None, Outcome::NotAffected, Some(&at_limit))
+				.check()
+				.is_ok()
+		);
+		let over = "x".repeat(MAX_REASON_CHARS + 1);
+		for outcome in [
+			Outcome::NotAffected,
+			Outcome::AcceptedRisk,
+			Outcome::WillFix,
+		] {
+			assert!(entry(None, outcome, Some(&over)).check().is_err());
+		}
+		assert!(check_reason_length(&at_limit).is_ok());
+		assert!(check_reason_length(&over).is_err());
+	}
+
+	#[test]
+	fn a_long_reason_is_shortened_at_a_word() {
+		assert_eq!(shortened_reason("  short  "), "short");
+		let long = "word, ".repeat(200);
+		let shortened = shortened_reason(&long);
+		assert!(shortened.chars().count() <= MAX_REASON_CHARS);
+		assert!(shortened.ends_with("word…"), "{shortened}");
+		let unbroken = "x".repeat(MAX_REASON_CHARS * 2);
+		assert_eq!(
+			shortened_reason(&unbroken).chars().count(),
+			MAX_REASON_CHARS
+		);
 	}
 
 	#[test]
