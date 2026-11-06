@@ -1035,6 +1035,14 @@ pub struct MigrationArgs {
 	pub data_bytes_after: i64,
 	/// One entry per migration that ran, in the order they ran.
 	pub timings: Vec<MigrationTimingArgs>,
+	/// Whole seconds the application's lookup rebuild after the migrations
+	/// took. Omit it where the version does not record the rebuild.
+	#[serde(default)]
+	pub lookup_rebuild_elapsed_seconds: Option<i64>,
+	/// Each step of that rebuild which did work, in the order they ran. Empty
+	/// where the version records only the total.
+	#[serde(default)]
+	pub lookup_rebuild_timings: Vec<LookupRebuildTimingArgs>,
 }
 
 /// What a reporting-schema build reports beyond its replica's restore health.
@@ -1062,6 +1070,17 @@ pub struct ReportingSchemaArgs {
 pub struct MigrationTimingArgs {
 	/// The migration's name, as the migration runner reports it.
 	pub name: String,
+	/// Whole seconds it took.
+	pub elapsed_seconds: i64,
+}
+
+/// How long one step of the lookup rebuild took.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct LookupRebuildTimingArgs {
+	/// The model, or the pass, as the application names it.
+	pub name: String,
+	/// Rows the step wrote, where the application counts them.
+	pub rows: Option<i64>,
 	/// Whole seconds it took.
 	pub elapsed_seconds: i64,
 }
@@ -1410,6 +1429,20 @@ impl MigrationArgs {
 				.map(|timing| {
 					(
 						timing.name,
+						PgDuration(SignedDuration::from_secs(timing.elapsed_seconds)),
+					)
+				})
+				.collect(),
+			lookup_rebuild_elapsed: self
+				.lookup_rebuild_elapsed_seconds
+				.map(|seconds| PgDuration(SignedDuration::from_secs(seconds))),
+			lookup_rebuild_timings: self
+				.lookup_rebuild_timings
+				.into_iter()
+				.map(|timing| {
+					(
+						timing.name,
+						timing.rows,
 						PgDuration(SignedDuration::from_secs(timing.elapsed_seconds)),
 					)
 				})

@@ -737,6 +737,33 @@
         ],
         "type": "object"
       },
+      "LookupRebuildTimingArgs": {
+        "description": "How long one step of the lookup rebuild took.",
+        "properties": {
+          "elapsed_seconds": {
+            "description": "Whole seconds it took.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "description": "The model, or the pass, as the application names it.",
+            "type": "string"
+          },
+          "rows": {
+            "description": "Rows the step wrote, where the application counts them.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "elapsed_seconds"
+        ],
+        "type": "object"
+      },
       "MachinePackage": {
         "description": "One installed package, by its source package.",
         "properties": {
@@ -842,6 +869,21 @@
               "string",
               "null"
             ]
+          },
+          "lookup_rebuild_elapsed_seconds": {
+            "description": "Whole seconds the application's lookup rebuild after the migrations\ntook. Omit it where the version does not record the rebuild.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "lookup_rebuild_timings": {
+            "description": "Each step of that rebuild which did work, in the order they ran. Empty\nwhere the version records only the total.",
+            "items": {
+              "$ref": "#/components/schemas/LookupRebuildTimingArgs"
+            },
+            "type": "array"
           },
           "target_version": {
             "description": "The version whose migrations were applied, as semver, taken from the\nworklist entry's `target_version`. This is the version the consumer\nactually migrated to; send it in preference to echoing the identifier.",

@@ -996,6 +996,8 @@ async fn an_ask_shows_on_the_row_until_a_verdict_answers_it() {
 				data_bytes_before: 1,
 				data_bytes_after: 1,
 				timings: vec![],
+				lookup_rebuild_elapsed: None,
+				lookup_rebuild_timings: vec![],
 			},
 		)
 		.await

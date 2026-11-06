@@ -9722,6 +9722,14 @@ export interface components {
             error?: string | null;
             /** @description The migration that failed, when one did. */
             failed_migration?: string | null;
+            /**
+             * Format: int64
+             * @description Whole seconds the lookup rebuild after the migrations took, where it
+             *     was reported.
+             */
+            lookup_rebuild_elapsed?: number | null;
+            /** @description Each step of that rebuild which did work, in the order they ran. */
+            lookup_rebuild_timings: components["schemas"]["LookupRebuildTiming"][];
             /** @description When the consumer reported it. */
             reported_at: string;
             /** @description The snapshot the verdict was reached against. */
@@ -9941,6 +9949,29 @@ export interface components {
             max: components["schemas"]["VersionStr"];
             /** @description Oldest version currently reported by a production server. */
             min: components["schemas"]["VersionStr"];
+        };
+        /**
+         * @description One step of the lookup rebuild that follows the migrations, in the order it
+         *     ran: a model the rebuild wrote rows for, or one of its later passes.
+         */
+        LookupRebuildTiming: {
+            /**
+             * Format: int64
+             * @description Whole seconds the step took.
+             */
+            elapsed: number;
+            /** @description The model, or the pass, as the application names it. */
+            name: string;
+            /**
+             * Format: int32
+             * @description Where it fell in the rebuild, counting from zero.
+             */
+            ordinal: number;
+            /**
+             * Format: int64
+             * @description Rows the step wrote, where the application counts them.
+             */
+            rows?: number | null;
         };
         /**
          * @description A host in the fleet: a box, physical or virtual, that canopy monitors.

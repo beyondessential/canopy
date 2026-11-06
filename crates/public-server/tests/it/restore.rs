@@ -1150,6 +1150,8 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 					data_bytes_before: 10,
 					data_bytes_after: 10,
 					timings: vec![],
+					lookup_rebuild_elapsed: None,
+					lookup_rebuild_timings: vec![],
 				},
 			)
 			.await
@@ -1240,6 +1242,8 @@ async fn record_migration_test(
 			data_bytes_before: 10,
 			data_bytes_after: 10,
 			timings: vec![],
+			lookup_rebuild_elapsed: None,
+			lookup_rebuild_timings: vec![],
 		},
 	)
 	.await

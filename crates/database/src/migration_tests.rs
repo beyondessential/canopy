@@ -155,6 +155,25 @@ pub struct MigrationTiming {
 	pub elapsed: PgDuration,
 }
 
+/// One step of the lookup rebuild that follows the migrations, in the order it
+/// ran: a model the rebuild wrote rows for, or one of its later passes.
+#[derive(
+	Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema,
+)]
+#[diesel(table_name = crate::schema::lookup_rebuild_timings)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct LookupRebuildTiming {
+	/// Where it fell in the rebuild, counting from zero.
+	pub ordinal: i32,
+	/// The model, or the pass, as the application names it.
+	pub name: String,
+	/// Rows the step wrote, where the application counts them.
+	pub rows: Option<i64>,
+	/// Whole seconds the step took.
+	#[schema(value_type = i64)]
+	pub elapsed: PgDuration,
+}
+
 /// A recorded migration test, alongside the report carrying its common fields.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable)]
 #[diesel(table_name = crate::schema::migration_tests)]
@@ -167,6 +186,7 @@ pub struct MigrationTest {
 	pub data_bytes_before: i64,
 	pub data_bytes_after: i64,
 	pub error: Option<String>,
+	pub lookup_rebuild_elapsed: Option<PgDuration>,
 }
 
 /// What a consumer reports for one migration test, beyond the report's own
@@ -188,6 +208,10 @@ pub struct NewMigrationTest {
 	pub data_bytes_after: i64,
 	/// One entry per migration that ran, in the order they ran.
 	pub timings: Vec<(String, PgDuration)>,
+	/// The whole lookup rebuild after the migrations, where it was reported.
+	pub lookup_rebuild_elapsed: Option<PgDuration>,
+	/// Each step of that rebuild as (name, rows, elapsed), in the order they ran.
+	pub lookup_rebuild_timings: Vec<(String, Option<i64>, PgDuration)>,
 }
 
 /// One joined row behind [`latest_test`].
@@ -203,6 +227,7 @@ struct LatestRow {
 	total_elapsed: PgDuration,
 	data_bytes_before: i64,
 	data_bytes_after: i64,
+	lookup_rebuild_elapsed: Option<PgDuration>,
 }
 
 /// The most recent test of one (server, version) pair.
@@ -229,6 +254,12 @@ pub struct LatestTest {
 	pub data_bytes_after: i64,
 	/// Each migration that ran, in the order they ran.
 	pub timings: Vec<MigrationTiming>,
+	/// Whole seconds the lookup rebuild after the migrations took, where it
+	/// was reported.
+	#[schema(value_type = Option<i64>)]
+	pub lookup_rebuild_elapsed: Option<PgDuration>,
+	/// Each step of that rebuild which did work, in the order they ran.
+	pub lookup_rebuild_timings: Vec<LookupRebuildTiming>,
 }
 
 /// Where one of a group's applications stands against the version it would take
@@ -320,6 +351,8 @@ impl MigrationTest {
 				crate::schema::migration_tests::error.eq(test.error.map(truncate_error)),
 				crate::schema::migration_tests::data_bytes_before.eq(test.data_bytes_before),
 				crate::schema::migration_tests::data_bytes_after.eq(test.data_bytes_after),
+				crate::schema::migration_tests::lookup_rebuild_elapsed
+					.eq(test.lookup_rebuild_elapsed),
 			))
 			.execute(db)
 			.await?;
@@ -340,6 +373,27 @@ impl MigrationTest {
 		if !timings.is_empty() {
 			diesel::insert_into(crate::schema::migration_timings::table)
 				.values(timings)
+				.execute(db)
+				.await?;
+		}
+
+		let lookup_rebuild_timings: Vec<_> = test
+			.lookup_rebuild_timings
+			.into_iter()
+			.enumerate()
+			.map(|(index, (name, rows, elapsed))| {
+				(
+					crate::schema::lookup_rebuild_timings::check_id.eq(check_id),
+					crate::schema::lookup_rebuild_timings::ordinal.eq(index as i32),
+					crate::schema::lookup_rebuild_timings::name.eq(name),
+					crate::schema::lookup_rebuild_timings::rows.eq(rows),
+					crate::schema::lookup_rebuild_timings::elapsed.eq(elapsed),
+				)
+			})
+			.collect();
+		if !lookup_rebuild_timings.is_empty() {
+			diesel::insert_into(crate::schema::lookup_rebuild_timings::table)
+				.values(lookup_rebuild_timings)
 				.execute(db)
 				.await?;
 		}
@@ -377,6 +431,22 @@ impl MigrationTest {
 			.await
 			.map_err(Into::into)
 	}
+
+	/// The lookup rebuild steps of one test, in the order they ran.
+	pub async fn lookup_rebuild_timings(
+		db: &mut AsyncPgConnection,
+		check_id: i64,
+	) -> Result<Vec<LookupRebuildTiming>> {
+		use crate::schema::lookup_rebuild_timings::dsl;
+
+		dsl::lookup_rebuild_timings
+			.select(LookupRebuildTiming::as_select())
+			.filter(dsl::check_id.eq(check_id))
+			.order(dsl::ordinal.asc())
+			.load(db)
+			.await
+			.map_err(Into::into)
+	}
 }
 
 /// The most recent test of `machine`'s data against `version`, with the report
@@ -404,6 +474,7 @@ pub async fn latest_test(
 			migration_tests::total_elapsed,
 			migration_tests::data_bytes_before,
 			migration_tests::data_bytes_after,
+			migration_tests::lookup_rebuild_elapsed,
 		))
 		.filter(migration_tests::target_version_id.eq(target_version_id))
 		.filter(backup_restore_checks::machine_id.eq(machine_id))
@@ -416,6 +487,7 @@ pub async fn latest_test(
 		return Ok(None);
 	};
 	let timings = MigrationTest::timings(db, row.check_id).await?;
+	let lookup_rebuild_timings = MigrationTest::lookup_rebuild_timings(db, row.check_id).await?;
 
 	Ok(Some(LatestTest {
 		verdict: match (row.outcome, &row.failed_migration) {
@@ -430,6 +502,8 @@ pub async fn latest_test(
 		data_bytes_before: row.data_bytes_before,
 		data_bytes_after: row.data_bytes_after,
 		timings,
+		lookup_rebuild_elapsed: row.lookup_rebuild_elapsed,
+		lookup_rebuild_timings,
 	}))
 }
 

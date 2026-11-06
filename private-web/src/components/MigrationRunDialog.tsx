@@ -50,6 +50,9 @@ export default function MigrationRunDialog({
 	const timings = [...latest.timings].sort((a, b) => a.ordinal - b.ordinal);
 	const longest = timings.reduce((max, t) => Math.max(max, t.elapsed), 0);
 	const slowest = longest > 0 ? timings.find((t) => t.elapsed === longest) : undefined;
+	const rebuildSteps = [...latest.lookup_rebuild_timings].sort(
+		(a, b) => a.ordinal - b.ordinal,
+	);
 
 	return (
 		<Dialog
@@ -104,6 +107,18 @@ export default function MigrationRunDialog({
 						value={slowest ? formatDuration(slowest.elapsed) : "—"}
 					>
 						{slowest?.name ?? "all under a second"}
+					</Stat>
+					<Stat
+						label="Lookup rebuild took"
+						value={
+							latest.lookup_rebuild_elapsed == null
+								? "—"
+								: formatDuration(latest.lookup_rebuild_elapsed)
+						}
+					>
+						{latest.lookup_rebuild_elapsed == null
+							? "not recorded by this version"
+							: `${rebuildSteps.length} step${rebuildSteps.length === 1 ? "" : "s"} did work`}
 					</Stat>
 					<Stat label="Tested" value={<TimeAgo timestamp={latest.reported_at} />}>
 						<Box component="span" sx={{ fontFamily: "monospace" }}>
@@ -179,6 +194,46 @@ export default function MigrationRunDialog({
 						</TableBody>
 					</Table>
 				</TableContainer>
+
+				{rebuildSteps.length > 0 && (
+					<>
+						<Typography variant="subtitle2" component="h3" sx={{ mt: 3, mb: 1 }}>
+							Lookup rebuild
+						</Typography>
+						<TableContainer sx={{ maxHeight: "40vh" }}>
+							<Table size="small" stickyHeader sx={{ tableLayout: "fixed" }}>
+								<TableHead>
+									<TableRow>
+										<TableCell>Step</TableCell>
+										<TableCell align="right" sx={{ width: 120 }}>
+											Rows
+										</TableCell>
+										<TableCell align="right" sx={{ width: 90 }}>
+											Took
+										</TableCell>
+									</TableRow>
+								</TableHead>
+								<TableBody>
+									{rebuildSteps.map((step) => (
+										<TableRow key={step.ordinal} data-testid="lookup-rebuild-timing">
+											<TableCell
+												sx={{ fontFamily: "monospace", overflowWrap: "anywhere" }}
+											>
+												{step.name}
+											</TableCell>
+											<TableCell align="right">
+												{step.rows == null ? "—" : step.rows.toLocaleString()}
+											</TableCell>
+											<TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+												{formatDuration(step.elapsed)}
+											</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
+							</Table>
+						</TableContainer>
+					</>
+				)}
 			</DialogContent>
 		</Dialog>
 	);
