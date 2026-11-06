@@ -15387,7 +15387,8 @@
             "description": "What it decides."
           },
           "reason": {
-            "description": "Why. Required for not affected and accepted risk.",
+            "description": "Why. Required for not affected and accepted risk, and at most 500\ncharacters.",
+            "maxLength": 500,
             "type": [
               "string",
               "null"

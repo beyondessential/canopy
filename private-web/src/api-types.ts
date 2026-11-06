@@ -14934,7 +14934,10 @@ export interface components {
             issue_url?: string | null;
             /** @description What it decides. */
             outcome: components["schemas"]["VulnerabilityOutcome"];
-            /** @description Why. Required for not affected and accepted risk. */
+            /**
+             * @description Why. Required for not affected and accepted risk, and at most 500
+             *     characters.
+             */
             reason?: string | null;
             /**
              * @description The workspace packages it covers. Absent for the catch-all, which also

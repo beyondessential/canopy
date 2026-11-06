@@ -1,0 +1,3 @@
+ALTER TABLE vulnerability_decision_edits DROP CONSTRAINT vulnerability_decision_edits_reason_short;
+ALTER TABLE vulnerability_decision_withdrawals DROP CONSTRAINT vulnerability_decision_withdrawals_reason_short;
+ALTER TABLE vulnerability_decision_entries DROP CONSTRAINT vulnerability_decision_entries_reason_short;
