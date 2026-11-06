@@ -14,28 +14,29 @@ Vulnerabilities are presented on a page of their own and file no checks, so they
 There are two kinds of source, and every item belongs to one source.
 
 **A repository** is one of the repositories Canopy tracks: Tamanu, Canopy, bestool, seedling, infra, Tupaia, bliti, workhorse, pgro and pollen.
-A repository's dependencies are the packages in its npm, Cargo and uv lockfiles on its default branch.
+A repository's dependencies are the packages in its npm, Yarn, Cargo and uv lockfiles on its default branch.
+Only Yarn 2 and later's lockfiles are read: a Yarn classic lockfile counts as a lockfile that cannot be parsed.
 A repository can carry several lockfiles, such as infra's npm dependencies for Pulumi, its Cargo dependencies for pgsnap and its Python dependencies for Ansible, and all of them count.
 Only the default branch counts, whatever is released or deployed from it.
 
-**Linux** is the packages installed on machines, as each machine reports them (see [PKG](../public-server/packages.md)).
-A machine that has not reported its packages has no Linux exposure.
-An application on a cluster has no box of its own, so it has no Linux exposure (see [K8S](../monitoring/kubernetes.md)).
+**Linux** and **Windows** mean the packages installed on machines, as each machine reports them (see [PKG](../public-server/packages.md)).
+A machine that has not reported its packages has no Linux or Windows exposure.
+An application on a Kubernetes cluster has no box of its own, so it has no Linux exposure (see [K8S](../monitoring/kubernetes.md)).
 
-Only production boxes count for Linux: a machine's packages are scanned when it is a live production machine (see [GRP](../servers/groups.md), "Environments").
+Only production boxes count for Linux or Windows: a machine's packages are scanned when it is a live production machine (see [GRP](../servers/groups.md), "Environments").
 Anything at another rank, pending, or archived exposes nothing, and ranking, archiving or moving a machine changes what is exposed without waiting for a rescan.
 
 ## Where a package sits
 
 For each package in a repository, Canopy holds how the default branch reaches it:
 
-- the workspace packages that reach it, where a repository is a monorepo (npm workspaces, Cargo workspace members, uv workspace members); a repository that is one package has that one;
+- the workspace packages that reach it, where a repository is a monorepo (npm and Yarn workspaces, Cargo workspace members, uv workspace members); a repository that is one package has that one;
 - whether each of them depends on it directly;
 - the scopes of the paths by which each reaches it, and for each scope the shortest chain of packages along such a path.
 
 A path's scope names when the package is used, in the terms SPDX gives a dependency's lifecycle: **runtime**, **build**, **development**, **test**, **design** or **other**.
 A path can also be **optional**, meaning the package may not be installed.
-Each ecosystem supplies the scopes it distinguishes, and a path never takes one it does not: npm distinguishes runtime, development and optional dependencies, so a package only a build tool needs is development there; Cargo distinguishes runtime, build and development dependencies; uv distinguishes runtime dependencies, development dependencies from dependency groups, and optional ones from extras.
+Each ecosystem supplies the scopes it distinguishes, and a path never takes one it does not: npm and Yarn distinguish runtime, development and optional dependencies, so a package only a build tool needs is development there; Cargo distinguishes runtime, build and development dependencies; uv distinguishes runtime dependencies, development dependencies from dependency groups, and optional ones from extras.
 A package reached through paths of different scopes carries each of them.
 Development and build paths count like any other: a flaw in a build tool can corrupt what it builds, so the scope is something to weigh in triage.
 
