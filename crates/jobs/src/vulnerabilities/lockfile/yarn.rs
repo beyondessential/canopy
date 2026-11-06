@@ -241,12 +241,17 @@ impl Resolver<'_> {
 		optional: bool,
 	) -> Option<Edge<usize>> {
 		let lockfile = self.lockfile;
-		let located = lockfile.locate(from, name, descriptor).or_else(|| {
-			self.overrides
-				.iter()
-				.filter(|rule| rule.applies(from, name, descriptor))
-				.find_map(|rule| lockfile.locate(from, name, &rule.descriptor))
-		});
+		// An override is asked first, since the descriptor the dependent asks
+		// for may still be in the lockfile for some other package that was not
+		// overridden, and resolving to that would attribute the wrong version
+		// here. The one that names a parent is the more particular, so it wins.
+		let overridden = self
+			.overrides
+			.iter()
+			.filter(|rule| rule.applies(from, name, descriptor))
+			.max_by_key(|rule| rule.parent.is_some())
+			.and_then(|rule| lockfile.locate(from, name, &rule.descriptor));
+		let located = overridden.or_else(|| lockfile.locate(from, name, descriptor));
 		let Some(to) = located else {
 			self.unresolved
 				.borrow_mut()
@@ -832,6 +837,76 @@ __metadata:
 			path(fsevents, "app", Scope::Runtime, true).is_some(),
 			"optionalDependencies wins: {:?}",
 			fsevents.paths
+		);
+	}
+
+	/// The lockfile keys an overridden result by the new descriptor, while the
+	/// dependent still asks for the one it wrote, so the descriptor it asks for
+	/// can still be in the lockfile for a package that was not overridden.
+	const COLLIDING: &str = r#"__metadata:
+  version: 8
+
+"app@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "app@workspace:."
+  dependencies:
+    d2: "npm:^1"
+    e2: "npm:^1"
+  languageName: unknown
+  linkType: soft
+
+"d2@npm:^1":
+  version: 1.0.0
+  resolution: "d2@npm:1.0.0"
+  dependencies:
+    left-pad: "npm:^1"
+  languageName: node
+  linkType: hard
+
+"e2@npm:^1":
+  version: 1.0.0
+  resolution: "e2@npm:1.0.0"
+  dependencies:
+    left-pad: "npm:^1"
+  languageName: node
+  linkType: hard
+
+"left-pad@npm:^1":
+  version: 1.0.0
+  resolution: "left-pad@npm:1.0.0"
+  languageName: node
+  linkType: hard
+
+"left-pad@npm:1.2.3":
+  version: 1.2.3
+  resolution: "left-pad@npm:1.2.3"
+  languageName: node
+  linkType: hard
+"#;
+
+	#[test]
+	fn a_resolution_wins_over_the_descriptor_the_dependent_still_asks_for() {
+		let manifests = BTreeMap::from([(
+			String::new(),
+			r#"{"name":"app","dependencies":{"d2":"^1","e2":"^1"},
+			"resolutions":{"d2/left-pad":"1.2.3"}}"#,
+		)]);
+		let packages = read(COLLIDING).unwrap().parse("app", &manifests).unwrap();
+
+		let overridden = find(&packages, "left-pad", "1.2.3");
+		assert_eq!(
+			path(overridden, "app", Scope::Runtime, false)
+				.unwrap()
+				.chain,
+			["d2", "left-pad"],
+			"the package the resolution names takes the version it gives"
+		);
+
+		let untouched = find(&packages, "left-pad", "1.0.0");
+		assert_eq!(
+			path(untouched, "app", Scope::Runtime, false).unwrap().chain,
+			["e2", "left-pad"],
+			"and nothing else is moved off the version it asked for"
 		);
 	}
 
