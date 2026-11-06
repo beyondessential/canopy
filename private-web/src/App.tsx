@@ -104,6 +104,9 @@ export default function App() {
 	);
 	const openIncidentsCount =
 		openIncidents.status === "ok" ? openIncidents.data.length : 0;
+	const needsTriage = useApi("vulnerabilities", "count", {}, [reloadTick]);
+	const needsTriageCount =
+		needsTriage.status === "ok" ? needsTriage.data.needs_triage : 0;
 	const sections = navSections(
 		sqlAvailable.status === "ok" && !!sqlAvailable.data,
 	);
@@ -128,6 +131,7 @@ export default function App() {
 		sections,
 		externalLinks,
 		openIncidents: openIncidentsCount,
+		needsTriage: needsTriageCount,
 	};
 
 	return (

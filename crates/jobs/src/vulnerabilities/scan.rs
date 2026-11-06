@@ -1,8 +1,15 @@
-//! The scan: read the lockfile of each Tamanu version that counts, ask OSV
-//! which advisories affect every package version that counts, keep what it
-//! says, and reopen what has stopped standing.
+//! The scan: keep each tracked repository's dependencies as its default branch
+//! has them, ask OSV which advisories affect every package version that
+//! counts, keep what it says, and let lapse what has stopped standing.
 //!
-//! Spec: `.workhorse/specs/security/vulnerabilities.md` (id `VUL`), "Matching".
+//! Spec: `.workhorse/specs/security/vulnerabilities.md` (id `VUL`), "Matching"
+//! and "Exposure and closing".
+//!
+//! Two things run on their own timers. Repositories are watched every few
+//! minutes, through their heads, which costs none of GitHub's API quota, and
+//! read again only when one has moved (see [`super::repository`]). The scan
+//! asks OSV, on a schedule and early when what counts has changed: a stored
+//! read of a repository, or a machine's package list.
 
 use std::{
 	collections::{HashMap, HashSet},
@@ -12,16 +19,18 @@ use std::{
 
 use commons_errors::{AppError, Result};
 use database::{
-	audit::{self, Action, Actor, Record, RecordKind},
+	audit::{self, Actor},
 	osv::{self, Counted},
-	packages::VersionPackage,
+	packages::RepositoryRead,
+	self_alerts,
 	vulnerabilities::{
-		Advisory, CountedFleet, Exposure, Reopened, prune_matches, refresh_counts, replace_matches,
+		Advisory, Decision, Lapse, REPOSITORIES, Repository, Via, change_signal, counted_packages,
+		prune_matches, refresh_items, replace_matches, suggest_from_decision,
 	},
 };
 use diesel_async::{AsyncConnection, AsyncPgConnection};
 use futures::{StreamExt as _, stream};
-use jiff::{Timestamp, tz::TimeZone};
+use jiff::{SignedDuration, Timestamp};
 use tokio::{
 	task::{self, JoinHandle},
 	time::sleep,
@@ -29,20 +38,30 @@ use tokio::{
 use tracing::{debug, error, info, warn};
 
 use super::{
-	lockfile,
 	osv_client::{OsvClient, VulnRef},
+	repository::{Endpoints, GitHub},
 };
 
 /// The actor of what the scan does by itself.
 pub const JOB: &str = "vulnerability-scan";
 
+/// The actor of withdrawing the decisions the model made before it only
+/// suggested.
+pub const MIGRATION_JOB: &str = "vulnerability-migration";
+
 /// How long before everything is asked again, since advisories are published
 /// and revised after a version is first scanned.
 const RESCAN_EVERY: Duration = Duration::from_secs(6 * 3600);
 
-/// How often to look for something that makes a scan due sooner: a version or
-/// a machine's package list that has come to count.
+/// How often to look for something that makes a scan due sooner: a repository
+/// read, or a machine's package list, that has come to count.
 const WATCH_EVERY: Duration = Duration::from_secs(60);
+
+/// How often each repository's head is checked.
+const REPOSITORIES_EVERY: Duration = Duration::from_secs(5 * 60);
+
+/// How long after a failed attempt to read a repository to try it again.
+const REPOSITORY_RETRY_AFTER: SignedDuration = SignedDuration::from_mins(15);
 
 /// How many advisory records are fetched from OSV at once.
 const FETCH_CONCURRENCY: usize = 8;
@@ -50,79 +69,155 @@ const FETCH_CONCURRENCY: usize = 8;
 /// How long after a failed pass to try again.
 const RETRY_AFTER: Duration = Duration::from_secs(10 * 60);
 
-/// What a pass did.
+/// What a decision the model made is withdrawn with.
+const WITHDRAWN_REASON: &str = "The model now only suggests; a person decides.";
+
+/// The model a suggestion made from one of those decisions is credited to.
+const MIGRATED_MODEL: &str = "earlier model decision";
+
+/// What a pass over the repositories did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RepositoryReport {
+	/// Repositories whose default branch had moved and was read again.
+	pub read: usize,
+	/// Repositories whose head had not moved.
+	pub unchanged: usize,
+	/// Repositories that could not be read.
+	pub failed: usize,
+	/// Repositories left alone for now, after a failed attempt.
+	pub waiting: usize,
+}
+
+/// What a scan did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Report {
-	pub lockfiles_read: usize,
 	pub package_versions_queried: usize,
 	pub advisories_fetched: usize,
-	pub reopened: usize,
-}
-
-/// Where each Tamanu version's lockfile is read from.
-#[derive(Clone)]
-pub struct Lockfiles {
-	http: reqwest::Client,
-	base: String,
-}
-
-impl Lockfiles {
-	pub fn new(base: impl Into<String>) -> Self {
-		Self {
-			http: reqwest::Client::builder()
-				.timeout(Duration::from_secs(120))
-				.build()
-				.unwrap_or_default(),
-			base: base.into(),
-		}
-	}
-
-	async fn fetch(&self, version: &str) -> Result<Vec<VersionPackage>> {
-		let url = lockfile::url(&self.base, version);
-		let body = self
-			.http
-			.get(&url)
-			.send()
-			.await
-			.and_then(|r| r.error_for_status())
-			.map_err(|e| AppError::Upstream(format!("{url}: {e}")))?
-			.text()
-			.await
-			.map_err(|e| AppError::Upstream(format!("{url}: {e}")))?;
-		lockfile::parse(&body)
-	}
+	pub lapsed: usize,
 }
 
 #[derive(Clone)]
 pub struct Scanner {
 	pub osv: OsvClient,
-	pub lockfiles: Lockfiles,
+	pub github: GitHub,
+	/// The repositories whose default branches are read.
+	pub repositories: Vec<Repository>,
 }
 
 impl Scanner {
-	pub fn new(osv: OsvClient, lockfiles: Lockfiles) -> Self {
-		Self { osv, lockfiles }
+	pub fn new(osv: OsvClient, github: GitHub) -> Self {
+		Self {
+			osv,
+			github,
+			repositories: REPOSITORIES.to_vec(),
+		}
+	}
+
+	pub fn with_repositories(mut self, repositories: Vec<Repository>) -> Self {
+		self.repositories = repositories;
+		self
+	}
+
+	/// Look at the head of each tracked repository, and read again those that
+	/// have moved. One that cannot be read keeps what is held, and is tried again
+	/// after a while; the self-alert says when that has lasted.
+	pub async fn read_repositories(
+		&self,
+		conn: &mut AsyncPgConnection,
+	) -> Result<RepositoryReport> {
+		let mut report = RepositoryReport::default();
+		let tracked: Vec<String> = self
+			.repositories
+			.iter()
+			.map(|r| r.name.to_owned())
+			.collect();
+		RepositoryRead::forget_others(conn, tracked).await?;
+
+		for repository in self.repositories.clone() {
+			let held = RepositoryRead::get(conn, repository.name).await?;
+			if let Some(held) = &held
+				&& held.failure.is_some()
+				&& Timestamp::now().duration_since(held.last_attempt_at) < REPOSITORY_RETRY_AFTER
+			{
+				report.waiting += 1;
+				continue;
+			}
+
+			let head = match self.github.head(repository.slug).await {
+				Ok(head) => head,
+				Err(e) => {
+					warn!("vulnerability scan: {}: {e}", repository.name);
+					RepositoryRead::note_failure(conn, repository.name, &e.to_string()).await?;
+					report.failed += 1;
+					continue;
+				}
+			};
+			if held.as_ref().and_then(|held| held.commit_sha.as_deref()) == Some(head.as_str()) {
+				RepositoryRead::unchanged(conn, repository.name).await?;
+				report.unchanged += 1;
+				continue;
+			}
+			match self.github.read(&repository, &head).await {
+				Ok(packages) => {
+					RepositoryRead::store(conn, repository.name, &head, &packages).await?;
+					report.read += 1;
+				}
+				Err(e) => {
+					warn!("vulnerability scan: reading {}: {e}", repository.name);
+					RepositoryRead::note_failure(conn, repository.name, &e.to_string()).await?;
+					report.failed += 1;
+				}
+			}
+		}
+
+		if let Err(e) = self_alerts::sweep_vulnerability_repositories(conn).await {
+			error!("vulnerability scan: the self-alert could not be updated: {e}");
+		}
+		Ok(report)
+	}
+
+	/// Withdraw every decision the model made and still stands, now that it
+	/// only suggests, and keep each as the item's suggestion, with a basis that
+	/// says nothing was checked, so a person looks at it. Each is its own
+	/// transaction and is audited as Canopy's. A decision already withdrawn is
+	/// not looked at again, so this does nothing once it is done.
+	pub async fn withdraw_model_decisions(&self, conn: &mut AsyncPgConnection) -> Result<usize> {
+		let mut withdrawn = 0;
+		for decision in Decision::standing_by_model(conn).await? {
+			let done = conn
+				.transaction::<_, AppError, _>(async |conn| {
+					let actor = Actor::canopy(MIGRATION_JOB);
+					let withdrawal = Decision::withdraw(
+						conn,
+						&decision.vulnerability_id,
+						&decision.source,
+						WITHDRAWN_REASON,
+						actor.clone(),
+						Via::Canopy,
+						Some(decision.id),
+					)
+					.await?;
+					audit::record(conn, &actor, &withdrawal.audited()).await?;
+					suggest_from_decision(conn, &decision, MIGRATED_MODEL).await?;
+					Ok(())
+				})
+				.await;
+			match done {
+				Ok(()) => withdrawn += 1,
+				Err(e) => warn!(
+					"vulnerability scan: withdrawing the model's decision on {} ({}): {e}",
+					decision.vulnerability_id,
+					decision.source.as_str()
+				),
+			}
+		}
+		Ok(withdrawn)
 	}
 
 	/// One pass over everything that counts.
 	pub async fn scan(&self, conn: &mut AsyncPgConnection) -> Result<Report> {
 		let mut report = Report::default();
-		let fleet = CountedFleet::load(conn).await?;
-
-		for version in fleet.versions_unread(conn).await? {
-			match self.lockfiles.fetch(&version.version).await {
-				Ok(packages) => {
-					VersionPackage::store(conn, version.version_id, &packages).await?;
-					report.lockfiles_read += 1;
-				}
-				Err(e) => warn!(
-					"vulnerability scan: reading the lockfile of {}: {e}",
-					version.version
-				),
-			}
-		}
-
-		let counted = fleet.packages(conn).await?;
+		let counted = counted_packages(conn).await?;
 		report.package_versions_queried = counted.len();
 		let answers = self.osv.query(&counted).await?;
 
@@ -163,8 +258,7 @@ impl Scanner {
 		drop(records);
 		report.advisories_fetched = fetched.len();
 
-		let today = Timestamp::now().to_zoned(TimeZone::UTC).date();
-		let reopened = conn
+		let lapsed = conn
 			.transaction::<_, AppError, _>(async |conn| {
 				for record in &fetched {
 					Advisory::upsert(conn, record).await?;
@@ -183,48 +277,26 @@ impl Scanner {
 					.collect();
 				replace_matches(conn, &matched).await?;
 				prune_matches(conn, &counted).await?;
+				refresh_items(conn).await?;
 
-				let exposure = Exposure::load(conn, &fleet, None).await?;
-				refresh_counts(conn, &exposure).await?;
-
-				let reopened = Reopened::pass(conn, &counted, today).await?;
-				for done in &reopened {
-					audit::record(
-						conn,
-						&Actor::canopy(JOB),
-						&Action::VulnerabilityReopened {
-							advisory: Record::new(
-								RecordKind::Advisory,
-								&done.vulnerability_id,
-								&done.vulnerability_id,
-							),
-							source: done.source.as_str().to_owned(),
-							why: done.why.clone(),
-						},
-					)
-					.await?;
+				let lapsed = Lapse::pass(conn).await?;
+				for done in &lapsed {
+					audit::record(conn, &Actor::canopy(JOB), &done.audited()).await?;
 				}
-				Ok(reopened)
+				Ok(lapsed)
 			})
 			.await?;
-		report.reopened = reopened.len();
+		report.lapsed = lapsed.len();
 		Ok(report)
 	}
 
-	/// What the counted package versions are, to tell when a pass is due sooner
-	/// than the schedule says.
+	/// What came to count, to tell when a pass is due sooner than the schedule
+	/// says: where each repository was last read to, and which production
+	/// machines have which package lists. Not the package versions themselves,
+	/// which run to many thousands and would be read and hashed every look.
 	pub async fn fingerprint(&self, conn: &mut AsyncPgConnection) -> Result<u64> {
-		let fleet = CountedFleet::load(conn).await?;
 		let mut hasher = DefaultHasher::new();
-		// In an order of its own, so the value moves only when the counted set does.
-		let mut versions: Vec<_> = fleet.versions.iter().map(|v| v.version_id).collect();
-		versions.sort();
-		versions.hash(&mut hasher);
-		let mut machines = fleet.machines.clone();
-		machines.sort();
-		machines.hash(&mut hasher);
-		let packages: Vec<Counted> = fleet.packages(conn).await?;
-		packages.hash(&mut hasher);
+		change_signal(conn).await?.hash(&mut hasher);
 		Ok(hasher.finish())
 	}
 }
@@ -233,14 +305,33 @@ async fn fetch_advisory<'a>(osv: &OsvClient, id: &'a str) -> (&'a str, Result<os
 	(id, osv.get(id).await)
 }
 
-/// Scan at once on starting, then on the schedule, and early when something
-/// comes to count.
+async fn watch_repositories(scanner: Scanner, pool: database::Db) {
+	loop {
+		match pool.get().await {
+			Ok(mut conn) => match scanner.read_repositories(&mut conn).await {
+				Ok(report) => info!(
+					"vulnerability scan: {} repositor(ies) read, {} unchanged, {} failed, {} waiting",
+					report.read, report.unchanged, report.failed, report.waiting
+				),
+				Err(e) => error!("vulnerability scan: reading repositories failed: {e}"),
+			},
+			Err(_) => error!("vulnerability scan: failed to get database connection"),
+		}
+		sleep(REPOSITORIES_EVERY).await;
+	}
+}
+
+/// Read the repositories at once on starting and then every few minutes, and
+/// scan at once, then on the schedule, and early when something comes to count.
 pub fn spawn() -> JoinHandle<()> {
 	let pool = database::init();
 	let scanner = Scanner::new(
 		OsvClient::new(super::osv_client::BASE_URL),
-		Lockfiles::new(lockfile::BASE_URL),
+		GitHub::new(Endpoints::default()),
 	);
+
+	task::spawn(watch_repositories(scanner.clone(), pool.clone()));
+
 	task::spawn(async move {
 		let mut next_scan: Option<tokio::time::Instant> = None;
 		let mut last_seen: Option<u64> = None;
@@ -250,6 +341,16 @@ pub fn spawn() -> JoinHandle<()> {
 				sleep(WATCH_EVERY).await;
 				continue;
 			};
+			// Idempotent, and cheap once there is nothing left, so it is tried on
+			// every look: a database that was down when the process started does
+			// not leave the model's decisions standing until the next restart.
+			match scanner.withdraw_model_decisions(&mut conn).await {
+				Ok(0) => {}
+				Ok(n) => info!("vulnerability scan: withdrew {n} decision(s) the model made"),
+				Err(e) => {
+					error!("vulnerability scan: withdrawing the model's decisions failed: {e}")
+				}
+			}
 			let seen = scanner.fingerprint(&mut conn).await.ok();
 			let due = match next_scan {
 				None => true,
@@ -261,12 +362,11 @@ pub fn spawn() -> JoinHandle<()> {
 				match scanner.scan(&mut conn).await {
 					Ok(report) => {
 						info!(
-							"vulnerability scan: {} lockfile(s) read, {} package version(s) queried, \
-							 {} advisory record(s) fetched, {} reopened",
-							report.lockfiles_read,
+							"vulnerability scan: {} package version(s) queried, \
+							 {} advisory record(s) fetched, {} lapsed",
 							report.package_versions_queried,
 							report.advisories_fetched,
-							report.reopened
+							report.lapsed
 						);
 						// What was seen before the scan, so a change that landed
 						// during it still makes the next look due.

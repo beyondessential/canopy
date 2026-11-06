@@ -21,8 +21,9 @@
 //! - **operator sessions** — retires safety-mode sessions no client has
 //!   presented for a day, on its own hourly timer (see `jobs::session_sweep`).
 //!
-//! - **vulnerabilities** — asks OSV which advisories affect what production runs, on its
-//!   own timer (see `jobs::vulnerabilities::scan`).
+//! - **vulnerabilities** — reads each tracked repository's dependencies when its default
+//!   branch moves, and asks OSV which advisories affect what counts, on its own timers
+//!   (see `jobs::vulnerabilities::scan`).
 //!
 //! Plus a startup **incident reconciliation** pass (see below).
 
@@ -138,8 +139,9 @@ pub fn spawn() -> JoinHandle<()> {
 		// expires is on the record.
 		jobs::ansible::leases::spawn();
 
-		// OSV matches for what production runs: Tamanu's dependencies and each
-		// machine's packages. Asks OSV, so on a timer of its own.
+		// OSV matches for what counts: the dependencies of each tracked repository's
+		// default branch and each production machine's packages. Reads GitHub and
+		// asks OSV, so on timers of its own.
 		// spec: VUL#matching
 		jobs::vulnerabilities::scan::spawn();
 

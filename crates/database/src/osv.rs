@@ -6,7 +6,7 @@
 //!
 //! OSV does the matching: it says which advisories hit a package version.
 //! Evaluating `affected` here is only for deciding whether a revision of an
-//! advisory newly reaches something the fleet runs, which is what reopens a
+//! advisory newly reaches something the source carries, which is what lapses a
 //! decision.
 
 use std::{cmp::Ordering, str::FromStr};
@@ -258,6 +258,27 @@ impl Record {
 	}
 }
 
+/// The lowest version above `version` that fixes `name`, of the `fixed`
+/// events of the affected ranges: where to move a package at `version` to.
+pub fn min_fix_version(
+	affected: &[Affected],
+	ecosystem: &str,
+	name: &str,
+	version: &str,
+) -> Option<String> {
+	let kind = VersionKind::of(ecosystem);
+	affected
+		.iter()
+		.filter(|affected| names(affected, ecosystem, name))
+		.flat_map(|affected| &affected.ranges)
+		.filter(|range| matches!(range.r#type.as_str(), "SEMVER" | "ECOSYSTEM"))
+		.flat_map(|range| &range.events)
+		.filter_map(|event| event.fixed.as_deref())
+		.filter(|fixed| kind.compare(fixed, version) == Some(Ordering::Greater))
+		.min_by(|a, b| kind.compare(a, b).unwrap_or(Ordering::Equal))
+		.map(str::to_owned)
+}
+
 fn names(affected: &Affected, ecosystem: &str, name: &str) -> bool {
 	affected
 		.package
@@ -291,12 +312,15 @@ pub fn reaches(affected: &[Affected], ecosystem: &str, name: &str, version: &str
 enum VersionKind {
 	Semver,
 	Dpkg,
+	Pep440,
 }
 
 impl VersionKind {
 	fn of(ecosystem: &str) -> Self {
 		if ecosystem.starts_with("Ubuntu") || ecosystem.starts_with("Debian") {
 			Self::Dpkg
+		} else if ecosystem == "PyPI" {
+			Self::Pep440
 		} else {
 			Self::Semver
 		}
@@ -306,6 +330,7 @@ impl VersionKind {
 		match self {
 			Self::Dpkg => true,
 			Self::Semver => node_semver::Version::parse(version).is_ok(),
+			Self::Pep440 => version.parse::<pep440_rs::Version>().is_ok(),
 		}
 	}
 
@@ -315,6 +340,11 @@ impl VersionKind {
 			Self::Semver => {
 				let a = node_semver::Version::parse(a).ok()?;
 				let b = node_semver::Version::parse(b).ok()?;
+				Some(a.cmp(&b))
+			}
+			Self::Pep440 => {
+				let a = a.parse::<pep440_rs::Version>().ok()?;
+				let b = b.parse::<pep440_rs::Version>().ok()?;
 				Some(a.cmp(&b))
 			}
 		}
@@ -495,17 +525,17 @@ pub struct Counted {
 }
 
 impl Held {
-	/// Why a revision reopens a decision this was held for, or `None` when it
+	/// Why a revision lapses a decision this was held for, or `None` when it
 	/// does not: its severity rose, or a counted package version is inside the
 	/// revised ranges that was outside the held ones.
-	pub fn reopened_by(
+	pub fn lapsed_by(
 		&self,
 		now_severity: Severity,
 		now_affected: &[Affected],
 		counted: &[Counted],
-	) -> Option<Reopening> {
+	) -> Option<LapseReason> {
 		if now_severity > self.severity {
-			return Some(Reopening::SeverityRose {
+			return Some(LapseReason::SeverityRose {
 				from: self.severity,
 				to: now_severity,
 			});
@@ -523,26 +553,30 @@ impl Held {
 			reaches(now_affected, &c.ecosystem, &c.name, &c.version)
 				&& !reaches(&self.affected, &c.ecosystem, &c.name, &c.version)
 		})?;
-		Some(Reopening::RangeWidened {
+		Some(LapseReason::RangeWidened {
 			package: reached.name.clone(),
 			version: reached.version.clone(),
 		})
 	}
 }
 
-/// Why a decided item opened again.
+/// Why a decision stopped standing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Reopening {
-	/// An accepted risk's review date passed.
+pub enum LapseReason {
+	/// An accepted risk's review date passed. No longer made, and kept so
+	/// that lapses recorded when it was still read.
 	ReviewDue,
 	/// OSV raised the advisory's severity.
 	SeverityRose { from: Severity, to: Severity },
 	/// OSV widened the advisory's ranges to reach a package version that counts.
 	RangeWidened { package: String, version: String },
+	/// A workspace package came to reach the advisory that the decision did
+	/// not cover.
+	NewWorkspacePackage { name: String },
 }
 
-impl Reopening {
+impl LapseReason {
 	pub fn describe(&self) -> String {
 		match self {
 			Self::ReviewDue => "Review date passed".into(),
@@ -551,6 +585,9 @@ impl Reopening {
 			}
 			Self::RangeWidened { package, version } => {
 				format!("Affected range now reaches {package} {version}")
+			}
+			Self::NewWorkspacePackage { name } => {
+				format!("{name} now reaches the advisory and the decision did not cover it")
 			}
 		}
 	}
@@ -783,16 +820,16 @@ mod tests {
 	}
 
 	#[test]
-	fn a_revision_raising_severity_reopens() {
+	fn a_revision_raising_severity_lapses() {
 		let held = Held {
 			severity: Severity::Medium,
 			affected: semver_range(&[("introduced", "0"), ("fixed", "2.0.0")]),
 		};
 		let affected = held.affected.clone();
-		assert!(held.reopened_by(Severity::Medium, &affected, &[]).is_none());
+		assert!(held.lapsed_by(Severity::Medium, &affected, &[]).is_none());
 		assert!(matches!(
-			held.reopened_by(Severity::High, &affected, &[]),
-			Some(Reopening::SeverityRose { .. })
+			held.lapsed_by(Severity::High, &affected, &[]),
+			Some(LapseReason::SeverityRose { .. })
 		));
 	}
 
@@ -805,16 +842,16 @@ mod tests {
 	}
 
 	#[test]
-	fn a_revision_widening_the_range_to_a_counted_version_reopens() {
+	fn a_revision_widening_the_range_to_a_counted_version_lapses() {
 		let held = Held {
 			severity: Severity::High,
 			affected: semver_range(&[("introduced", "0"), ("fixed", "1.5.0")]),
 		};
 		let widened = semver_range(&[("introduced", "0"), ("fixed", "2.0.0")]);
-		let reopening = held.reopened_by(Severity::High, &widened, &[counted("1.8.0")]);
-		assert!(matches!(reopening, Some(Reopening::RangeWidened { .. })));
+		let lapse = held.lapsed_by(Severity::High, &widened, &[counted("1.8.0")]);
+		assert!(matches!(lapse, Some(LapseReason::RangeWidened { .. })));
 		assert!(
-			held.reopened_by(Severity::High, &widened, &[counted("2.5.0")])
+			held.lapsed_by(Severity::High, &widened, &[counted("2.5.0")])
 				.is_none()
 		);
 	}
@@ -827,7 +864,7 @@ mod tests {
 		};
 		let fixed = semver_range(&[("introduced", "0"), ("fixed", "3.0.0")]);
 		assert!(
-			held.reopened_by(
+			held.lapsed_by(
 				Severity::High,
 				&fixed,
 				&[counted("1.0.0"), counted("2.0.0")]
@@ -837,14 +874,14 @@ mod tests {
 	}
 
 	#[test]
-	fn a_counted_version_already_inside_the_held_ranges_does_not_reopen() {
+	fn a_counted_version_already_inside_the_held_ranges_does_not_lapse() {
 		let held = Held {
 			severity: Severity::High,
 			affected: semver_range(&[("introduced", "0"), ("fixed", "2.0.0")]),
 		};
 		let affected = held.affected.clone();
 		assert!(
-			held.reopened_by(Severity::High, &affected, &[counted("1.9.9")])
+			held.lapsed_by(Severity::High, &affected, &[counted("1.9.9")])
 				.is_none()
 		);
 	}

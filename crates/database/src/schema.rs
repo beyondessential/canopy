@@ -882,6 +882,40 @@ diesel::table! {
 }
 
 diesel::table! {
+	repository_package_paths (repository, ecosystem, name, version, workspace_package, scope, optional) {
+		repository -> Text,
+		ecosystem -> Text,
+		name -> Text,
+		version -> Text,
+		workspace_package -> Text,
+		scope -> Text,
+		optional -> Bool,
+		direct -> Bool,
+		chain -> Array<Nullable<Text>>,
+	}
+}
+
+diesel::table! {
+	repository_packages (repository, ecosystem, name, version) {
+		repository -> Text,
+		ecosystem -> Text,
+		name -> Text,
+		version -> Text,
+	}
+}
+
+diesel::table! {
+	repository_reads (repository) {
+		repository -> Text,
+		commit_sha -> Nullable<Text>,
+		read_at -> Nullable<Timestamptz>,
+		first_attempt_at -> Timestamptz,
+		last_attempt_at -> Timestamptz,
+		failure -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
 	restore_consumer_capabilities (consumer_device_id, intent) {
 		consumer_device_id -> Uuid,
 		intent -> Text,
@@ -1114,24 +1148,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	version_lockfiles (version_id) {
-		version_id -> Uuid,
-		read_at -> Timestamptz,
-	}
-}
-
-diesel::table! {
-	version_packages (version_id, name, version) {
-		version_id -> Uuid,
-		name -> Text,
-		version -> Text,
-		workspaces -> Array<Nullable<Text>>,
-		direct -> Bool,
-		paths -> Jsonb,
-	}
-}
-
-diesel::table! {
 	versions (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -1161,20 +1177,53 @@ diesel::table! {
 }
 
 diesel::table! {
+	vulnerability_decision_edits (id) {
+		id -> Uuid,
+		decision_id -> Uuid,
+		position -> Int4,
+		reason -> Nullable<Text>,
+		issue_url -> Nullable<Text>,
+		earlier_reason -> Nullable<Text>,
+		earlier_issue_url -> Nullable<Text>,
+		actor -> Jsonb,
+		via -> Text,
+		created_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	vulnerability_decision_entries (decision_id, position) {
+		decision_id -> Uuid,
+		position -> Int4,
+		workspace_packages -> Nullable<Array<Nullable<Text>>>,
+		outcome -> Text,
+		reason -> Nullable<Text>,
+		issue_url -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
+	vulnerability_decision_withdrawals (id) {
+		id -> Uuid,
+		decision_id -> Uuid,
+		reason -> Text,
+		actor -> Jsonb,
+		via -> Text,
+		created_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	vulnerability_decisions (id) {
 		id -> Uuid,
 		vulnerability_id -> Text,
 		source -> Text,
-		outcome -> Text,
-		reason -> Nullable<Text>,
-		review_by -> Nullable<Date>,
-		issue_url -> Nullable<Text>,
-		ground -> Nullable<Text>,
 		actor -> Jsonb,
 		via -> Text,
 		severity_held -> Text,
 		affected_held -> Jsonb,
 		created_at -> Timestamptz,
+		covered_held -> Array<Nullable<Text>>,
 	}
 }
 
@@ -1182,24 +1231,14 @@ diesel::table! {
 	vulnerability_items (vulnerability_id, source) {
 		vulnerability_id -> Text,
 		source -> Text,
-		counts -> Bool,
 		first_seen_at -> Timestamptz,
 		model_attempted_at -> Nullable<Timestamptz>,
+		search_text -> Text,
 	}
 }
 
 diesel::table! {
-	vulnerability_matches (vulnerability_id, ecosystem, package, package_version) {
-		vulnerability_id -> Text,
-		source -> Text,
-		ecosystem -> Text,
-		package -> Text,
-		package_version -> Text,
-	}
-}
-
-diesel::table! {
-	vulnerability_reopenings (id) {
+	vulnerability_lapses (id) {
 		id -> Uuid,
 		vulnerability_id -> Text,
 		source -> Text,
@@ -1210,14 +1249,22 @@ diesel::table! {
 }
 
 diesel::table! {
+	vulnerability_matches (vulnerability_id, ecosystem, package, package_version) {
+		vulnerability_id -> Text,
+		ecosystem -> Text,
+		package -> Text,
+		package_version -> Text,
+	}
+}
+
+diesel::table! {
 	vulnerability_suggestions (vulnerability_id, source) {
 		vulnerability_id -> Text,
 		source -> Text,
-		outcome -> Text,
-		ground -> Nullable<Text>,
-		reason -> Text,
 		model -> Text,
 		created_at -> Timestamptz,
+		entries -> Jsonb,
+		basis -> Text,
 	}
 }
 
@@ -1325,11 +1372,13 @@ diesel::joinable!(undeclared_dns_names -> machines (machine_id));
 diesel::joinable!(upgrade_plans -> server_groups (group_id));
 diesel::joinable!(upgrade_plans -> versions (target_version_id));
 diesel::joinable!(version_known_issues -> applications (application_id));
-diesel::joinable!(version_lockfiles -> versions (version_id));
-diesel::joinable!(version_packages -> versions (version_id));
 diesel::joinable!(versions -> devices (device_id));
+diesel::joinable!(vulnerability_decision_edits -> vulnerability_decisions (decision_id));
+diesel::joinable!(vulnerability_decision_entries -> vulnerability_decisions (decision_id));
+diesel::joinable!(vulnerability_decision_withdrawals -> vulnerability_decisions (decision_id));
 diesel::joinable!(vulnerability_items -> vulnerabilities (vulnerability_id));
-diesel::joinable!(vulnerability_reopenings -> vulnerability_decisions (decision_id));
+diesel::joinable!(vulnerability_lapses -> vulnerability_decisions (decision_id));
+diesel::joinable!(vulnerability_matches -> vulnerabilities (vulnerability_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
 	admins,
@@ -1394,6 +1443,9 @@ diesel::allow_tables_to_appear_in_same_query!(
 	relying_parties,
 	reporting_schema_builds,
 	reporting_schema_requests,
+	repository_package_paths,
+	repository_packages,
+	repository_reads,
 	restore_consumer_capabilities,
 	restore_replicas,
 	scoped_check_policies,
@@ -1409,13 +1461,14 @@ diesel::allow_tables_to_appear_in_same_query!(
 	undeclared_dns_names,
 	upgrade_plans,
 	version_known_issues,
-	version_lockfiles,
-	version_packages,
 	versions,
 	vulnerabilities,
+	vulnerability_decision_edits,
+	vulnerability_decision_entries,
+	vulnerability_decision_withdrawals,
 	vulnerability_decisions,
 	vulnerability_items,
+	vulnerability_lapses,
 	vulnerability_matches,
-	vulnerability_reopenings,
 	vulnerability_suggestions,
 );

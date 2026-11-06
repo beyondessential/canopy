@@ -1583,8 +1583,8 @@ async fn incidents_name_the_environment_they_target() {
 /// no raised session.
 ///
 /// The interface changes nothing on the fleet, so it is graded read-only as a
-/// whole except its one write, recording a vulnerability triage decision (see
-/// the SAFE spec). It is not served through the graded route tables, so this is
+/// whole except its three writes, which record, withdraw and edit vulnerability
+/// triage decisions (see the SAFE spec). It is not served through the graded route tables, so this is
 /// what holds a new tool to the same line: listed without the read-only hint,
 /// it fails here.
 #[tokio::test(flavor = "multi_thread")]
@@ -1603,14 +1603,19 @@ async fn every_tool_is_read_only() {
 		let tools = env["result"]["tools"].as_array().expect("tools array");
 		assert!(!tools.is_empty(), "the interface lists its tools");
 
-		let not_read_only: Vec<&str> = tools
+		let mut not_read_only: Vec<&str> = tools
 			.iter()
 			.filter(|tool| tool["annotations"]["readOnlyHint"] != serde_json::Value::Bool(true))
 			.filter_map(|tool| tool["name"].as_str())
 			.collect();
+		not_read_only.sort_unstable();
 		assert_eq!(
 			not_read_only,
-			["record_vulnerability_decision"],
+			[
+				"edit_vulnerability_decision",
+				"record_vulnerability_decisions",
+				"withdraw_vulnerability_decisions",
+			],
 			"tools not declared read-only"
 		);
 	})

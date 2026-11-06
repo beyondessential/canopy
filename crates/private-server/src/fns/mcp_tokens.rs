@@ -46,7 +46,8 @@ pub struct McpTokenView {
 	/// never been used. May lag the true last use by up to a minute.
 	pub last_used_at: Option<Timestamp>,
 	/// What the token may do beyond reading, chosen at minting and never
-	/// changed: `triage` records vulnerability triage decisions.
+	/// changed: `triage` records, withdraws and edits vulnerability triage
+	/// decisions.
 	pub grants: Vec<String>,
 }
 
@@ -97,9 +98,9 @@ pub struct MintArgs {
 	/// Operator-chosen label, e.g. which agent will hold this token. Cannot
 	/// be empty or only whitespace.
 	pub name: String,
-	/// What the token may do beyond reading: `triage` to record vulnerability
-	/// triage decisions. A token minted with none only reads, and cannot gain a
-	/// grant afterwards.
+	/// What the token may do beyond reading: `triage` to record, withdraw and
+	/// edit vulnerability triage decisions. A token minted with none only reads,
+	/// and cannot gain a grant afterwards.
 	#[serde(default)]
 	pub grants: Vec<String>,
 }
