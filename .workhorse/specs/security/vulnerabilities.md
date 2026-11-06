@@ -34,9 +34,9 @@ For each package in a repository, Canopy holds how main reaches it:
 - the chain of packages by which each reaches it;
 - the scope of each path.
 
-A path's scope names when the package is used, in the terms SPDX gives a dependency's lifecycle: **runtime**, **build** or **development**.
+A path's scope names when the package is used, in the terms SPDX gives a dependency's lifecycle: **runtime**, **build**, **development**, **test**, **design** or **other**.
 A path can also be **optional**, meaning the package may not be installed.
-Each ecosystem supplies the scopes it distinguishes and no more: npm distinguishes runtime, development and optional dependencies, so a package only a build tool needs is development there; Cargo distinguishes runtime, build and development dependencies.
+Each ecosystem supplies the scopes it distinguishes, and a path never takes one it does not: npm distinguishes runtime, development and optional dependencies, so a package only a build tool needs is development there; Cargo distinguishes runtime, build and development dependencies.
 A package reached through paths of different scopes carries each of them.
 Development and build paths count like any other: a flaw in a build tool can corrupt what it builds, so the scope is something to weigh in triage and not a reason to leave the package out.
 
