@@ -164,8 +164,10 @@ The decisions are presented as made through this interface by their caller.
 
 All three writes are held by the triage grant.
 
-**Triage vulnerabilities** is a prompt the interface offers, which guides an agent that has the repository's source through triage: it lists open items grouped by package, reads how the code uses the vulnerable package, and records decisions in bulk with a reason that says what was checked.
-It tells the agent that the model's suggestions were made without source and are to be checked, and that a decision about an advisory it cannot verify from the code is left for a person.
+**Triage vulnerabilities** is a prompt the interface offers, which guides an agent that has the repository's source through triage.
+The agent lists open items, groups and orders them as it finds easiest for a person to review, and reads how the code uses each vulnerable package.
+It then puts its proposed decisions to the user in batches of ten, each with a reason that says what was checked, and records a batch only once the user has confirmed it, so a person approves every decision.
+The prompt tells the agent that the model's suggestions were made without source and are to be checked, and that an advisory it cannot verify from the code is left for a person.
 
 ### Audit log
 
