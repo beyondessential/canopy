@@ -398,7 +398,7 @@ impl CanopyMcp {
 		               it, `machines` it exposes (Linux), `closed` (nothing counts for it any \
 		               more), triage `status` (`open` means it needs triage, or `mixed` for a \
 		               split whose entries differ), the current `decision` with its entries, \
-		               whether it was `withdrawn` or `edited`, the `lapse` that reopened it, the \
+		               whether it was `withdrawn` or `edited`, the `lapse` that made it need triage again, the \
 		               model's `suggestion`, and `first_seen_at`. The advisory's long `details` \
 		               text is left out unless named in `fields` or `include_details` is set. \
 		               Filter by source, status, min_severity, scope, package, workspace_package, \

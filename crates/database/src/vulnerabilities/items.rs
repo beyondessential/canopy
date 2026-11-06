@@ -73,7 +73,8 @@ const ITEM_CTES: &str = "agg AS ( \
 	      WHERE en.decision_id = n.id) AS outcomes, \
 	    (SELECT min(en.outcome) FROM vulnerability_decision_entries en \
 	      WHERE en.decision_id = n.id) AS outcome \
-	  FROM newest n), \
+	  FROM newest n \
+	  WHERE EXISTS (SELECT 1 FROM vulnerability_decision_entries en WHERE en.decision_id = n.id)), \
 	base AS ( \
 	  SELECT i.vulnerability_id AS id, i.source, i.first_seen_at, i.search_text, \
 	    v.summary, v.aliases, v.severity, v.published_at, v.details, \
@@ -97,8 +98,9 @@ const ITEM_CTES: &str = "agg AS ( \
 	  LEFT JOIN paths p ON p.vulnerability_id = i.vulnerability_id AND p.source = i.source \
 	  LEFT JOIN state s ON s.vulnerability_id = i.vulnerability_id AND s.source = i.source)";
 
-/// The conditions of a [`ListQuery`], over `base`, bound from `$3`.
-const FILTERS: &str = "($3::text IS NULL OR base.source = $3) \
+/// The conditions of a [`ListQuery`], over `base`, bound from `$3` (and the identifiers of `$1`).
+const FILTERS: &str = "($1::text[] IS NULL OR base.id = ANY($1)) \
+	AND ($3::text IS NULL OR base.source = $3) \
 	AND ($4::text IS NULL OR base.status = $4) \
 	AND ($5::text IS NULL OR $5 = ANY(base.scopes)) \
 	AND ($6::int IS NULL OR base.sev >= $6) \

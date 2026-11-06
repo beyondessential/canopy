@@ -268,20 +268,26 @@ mod vulnerabilities {
 			)
 			.await
 			.unwrap();
-			replace_matches(
-				conn,
-				&[(
-					Counted {
-						ecosystem: "npm".into(),
-						name: name.into(),
-						version: "1.0.0".into(),
-					},
-					vec![id.into()],
-				)],
-			)
-			.await
-			.unwrap();
 		}
+		let matched = |name: &str, ids: &[&str]| {
+			(
+				Counted {
+					ecosystem: "npm".into(),
+					name: name.into(),
+					version: "1.0.0".into(),
+				},
+				ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>(),
+			)
+		};
+		replace_matches(
+			conn,
+			&[
+				matched("left-pad", &["GHSA-1", "GHSA-2"]),
+				matched("lodash", &["GHSA-3"]),
+			],
+		)
+		.await
+		.unwrap();
 		refresh_items(conn).await.unwrap();
 	}
 

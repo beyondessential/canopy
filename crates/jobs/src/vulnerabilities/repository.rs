@@ -161,7 +161,7 @@ fn advertised_head(body: &[u8]) -> Option<String> {
 		let line = std::str::from_utf8(line).ok()?.trim_end();
 		if let Some((sha, name)) = line.split_once(' ')
 			&& name == "HEAD"
-			&& matches!(sha.len(), 40 | 64)
+			&& sha.len() >= 4
 			&& sha.bytes().all(|byte| byte.is_ascii_hexdigit())
 		{
 			return Some(sha.to_ascii_lowercase());
