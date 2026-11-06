@@ -2,6 +2,7 @@
 
 ## Data carried over
 
+- `repository_packages` has no `lockfile` column; its key is (repository, ecosystem, name, version). Package-lookups use a repository's whole read.
 - Existing `tamanu` items, matches and decisions become items and decisions of the Tamanu repository source; the source column moves from a two-value enum to a source name (a repository name, or `linux`).
 - Review dates on existing accepted risks are dropped and those decisions stand.
 - Decisions the model made (via `model`) are withdrawn and become suggestions, with a basis of insufficient information, so a person looks at each. The withdrawal is done by the scan job on start (idempotent, skipping already-withdrawn ones) rather than in SQL, so each is audited as Canopy's.
@@ -52,60 +53,60 @@
 ## Checklist
 
 ### Schema
-- [ ] `just migration vulnerability_repositories`. In it:
+- [x] `just migration vulnerability_repositories`. In it:
   - add `repository_reads` (repository, commit, read_at, last_attempt_at, failure), `repository_packages` (repository, lockfile, ecosystem, name, version) and `repository_package_paths` (repository, ecosystem, name, version, workspace_package, scope, optional, direct, chain);
   - drop `version_lockfiles` and `version_packages`.
-- [ ] In the same migration, rework the items:
+- [x] In the same migration, rework the items:
   - drop the `source` check on items, decisions, lapses and suggestions (the source becomes a repository name or `linux`);
   - drop `vulnerability_items.counts` and add `search_text` with a trigram index, plus a trigram index on `vulnerabilities.details`;
   - drop `source` from `vulnerability_matches` and re-key the table on (vulnerability_id, ecosystem, package, package_version).
-- [ ] In the same migration, rework the decisions:
+- [x] In the same migration, rework the decisions:
   - drop `review_by` and its check, and `ground`;
   - add `vulnerability_decision_entries` (decision_id, position, workspace_packages TEXT[] NULL for catch-all, outcome, reason, issue_url, plus the reason-needed check), filled from existing decisions as one catch-all entry each, then drop outcome/reason/issue_url from `vulnerability_decisions`;
   - add `covered_held TEXT[]` (the workspace packages the decision covered when made), empty for existing ones;
   - add `vulnerability_decision_withdrawals` (decision_id unique, reason, actor, via, created_at) and `vulnerability_decision_edits` (decision_id, position, reason, issue_url, earlier reason, earlier issue link, actor, via, created_at);
   - rename `vulnerability_reopenings` to `vulnerability_lapses`.
-- [ ] In the same migration, rework the suggestions: delete existing ones, replace `outcome`/`ground`/`reason` with `entries JSONB` (same shape as decision entries) plus `basis TEXT NOT NULL` (checked against the four bases).
-- [ ] Write `down.sql`, run `just migrate`, regenerate `schema.rs`.
+- [x] In the same migration, rework the suggestions: delete existing ones, replace `outcome`/`ground`/`reason` with `entries JSONB` (same shape as decision entries) plus `basis TEXT NOT NULL` (checked against the four bases).
+- [x] Write `down.sql`, run `just migrate`, regenerate `schema.rs`.
 
 ### Database (`crates/database`)
-- [ ] `vulnerabilities.rs`: `Source` becomes `Repository(name)` / `Linux`, serialised as the name. Add a `REPOSITORIES` const (name, GitHub slug) for the ten repositories, and check each slug exists before relying on it. Map ecosystems `npm`, `crates.io` and `PyPI` to repository items; everything else is Linux.
-- [ ] `packages.rs`:
+- [x] `vulnerabilities.rs`: `Source` becomes `Repository(name)` / `Linux`, serialised as the name. Add a `REPOSITORIES` const (name, GitHub slug) for the ten repositories, and check each slug exists before relying on it. Map ecosystems `npm`, `crates.io` and `PyPI` to repository items; everything else is Linux.
+- [x] `packages.rs`:
   - replace `VersionPackage` with `RepositoryPackage { lockfile, ecosystem, name, version, paths: Vec<Path { workspace_package, scope, optional, direct, chain }> }`;
   - add `Scope` (the SPDX six);
   - add `RepositoryRead::store(conn, repo, commit, packages)`, which replaces a repository's rows in one transaction;
   - add `RepositoryRead::note_failure` and `RepositoryRead::stale(conn, after)` for the self-alert.
-- [ ] Replace `CountedFleet` / `Exposure` / `refresh_counts` with:
+- [x] Replace `CountedFleet` / `Exposure` / `refresh_counts` with:
   - `Counted::all(conn)`: distinct (ecosystem, name, version) across `repository_packages` and live production machines;
   - an `item_view` SQL fragment giving per item its source, status, closed, scopes, workspace packages, affected packages, machine count, suggestion presence and search rank.
-- [ ] `replace_matches` / `prune_matches` without `source`. Items are inserted for every (advisory, source) the join finds, and their `search_text` is refreshed.
-- [ ] `osv.rs`:
+- [x] `replace_matches` / `prune_matches` without `source`. Items are inserted for every (advisory, source) the join finds, and their `search_text` is refreshed.
+- [x] `osv.rs`:
   - add `VersionKind::Pep440` for `PyPI`;
   - add `min_fix_version(affected, ecosystem, name, version)` (lowest fix above the version);
   - rename `Reopening` to `Lapse`, keep the `review_due` variant for parsing old rows, and add `NewWorkspacePackage { name }`.
-- [ ] Decisions:
+- [x] Decisions:
   - `NewDecision { entries: Vec<Entry> }` with `validate(workspace_packages_now)`. It refuses: an uncovered package with no catch-all, a package in two entries, a package that doesn't reach the advisory, more than one catch-all, a catch-all not last, and a split on a Linux item. It applies the outcome field rules per entry.
   - `Decision::record` keeps `covered_held`.
   - `Decision::withdraw(conn, item, reason, actor, via)`, which refuses when there is no current decision or it is already withdrawn.
   - `Decision::edit(conn, item, entry selector (package or catch-all), reason?, issue_url?, actor, via)`.
-- [ ] `Lapse::pass(conn, counted)`:
+- [x] `Lapse::pass(conn, counted)`:
   - drop the review-date branch;
   - add a workspace-package branch that lapses a split without a catch-all when a package now reaches the advisory outside `covered_held`;
   - on a lapse, delete the suggestion and clear `model_attempted_at`.
-- [ ] `Suggestion { entries, basis, model, created_at }` with `Basis` (dependency_path_only, advisory_text_only, dependency_path_and_advisory_text, insufficient_information). `Suggestion::record` checks the entries against the item's workspace packages with the same validation as a decision.
-- [ ] Listing:
+- [x] `Suggestion { entries, basis, model, created_at }` with `Basis` (dependency_path_only, advisory_text_only, dependency_path_and_advisory_text, insufficient_information). `Suggestion::record` checks the entries against the item's workspace packages with the same validation as a decision.
+- [x] Listing:
   - `ListQuery { source, status, scope, severity, has_suggestion, include_closed, affected_package, workspace_package, search, sort (column, direction), cursor, page_size }`;
   - `ItemSummary::list` returns `{ items, total, next_cursor }`;
   - `ItemSummary::facets` returns counts per choice of source, status, scope, severity and suggestion, each without its own filter;
   - `ItemSummary::group(query, by)` groups by affected package, workspace package, scope, source or status;
   - `ItemSummary::needs_triage_count`.
-- [ ] `ItemDetail`:
+- [x] `ItemDetail`:
   - repository items list affected packages, each with version, minimum fix version and paths (workspace package, scope, optional, direct, chain), and the commit read at;
   - Linux items list machines with installed version and minimum fix version;
   - the history merges decisions (with entries and an "edited" marker), edits, withdrawals, suggestions and lapses, newest first;
   - expose `withdrawn` / `edited` on the current decision.
-- [ ] `claim_for_model`: items that need triage, aren't closed and have no suggestion, read through the item view.
-- [ ] `audit.rs`:
+- [x] `claim_for_model`: items that need triage, aren't closed and have no suggestion, read through the item view.
+- [x] `audit.rs`:
   - `VulnerabilityDecided` detail gets `entries` and drops `review_by`;
   - add `VulnerabilityDecisionWithdrawn` (`vulnerability_decision_withdrawn`) and `VulnerabilityDecisionEdited` (`vulnerability_decision_edited`), with the decision id, entry, reason and earlier text;
   - relabel `VulnerabilityReopened` to "Vulnerability decision lapsed", keeping its stable name.
@@ -132,9 +133,9 @@
 - [x] Remove the Tamanu-version lockfile fetch and `versions_unread` uses from `scan.rs`, and `CountedVersion` references in `monitor.rs`.
 
 ### Private API (`crates/private-server/src/fns/vulnerabilities.rs`)
-- [ ] `list` takes `ListQuery`-shaped args and returns items, total, next cursor and facets. `count` (read_only, silent) feeds the sidebar badge.
-- [ ] `decide` takes entries and drops `review_by`, keeping `write, audit(VulnerabilityDecided)`. Add `withdraw` (`write, audit(VulnerabilityDecisionWithdrawn)`) and `edit` (`write, audit(VulnerabilityDecisionEdited)`), both admin, on `audit.begin()`.
-- [ ] `just gen-openapi`. Add the new endpoints to `private-web/src/safety-modes.ts` (withdraw and edit as write, count as read-only).
+- [x] `list` takes `ListQuery`-shaped args and returns items, total, next cursor and facets. `count` (read_only, silent) feeds the sidebar badge.
+- [x] `decide` takes entries and drops `review_by`, keeping `write, audit(VulnerabilityDecided)`. Add `withdraw` (`write, audit(VulnerabilityDecisionWithdrawn)`) and `edit` (`write, audit(VulnerabilityDecisionEdited)`), both admin, on `audit.begin()`.
+- [x] `just gen-openapi`. Add the new endpoints to `private-web/src/safety-modes.ts` (withdraw and edit as write, count as read-only).
 
 ### MCP (`crates/canopy-mcp`)
 - [x] `find_vulnerabilities`:
@@ -162,8 +163,8 @@
   Update the server instructions' vulnerability paragraph.
 
 ### UI (`private-web`)
-- [ ] `AppSidebar.tsx`: add a count badge on Vulnerabilities from `vulnerabilities/count`, like `IncidentCount`.
-- [ ] `routes/Vulnerabilities.tsx`, per the list mockup:
+- [x] `AppSidebar.tsx`: add a count badge on Vulnerabilities from `vulnerabilities/count`, like `IncidentCount`.
+- [x] `routes/Vulnerabilities.tsx`, per the list mockup:
   - a search field;
   - a "Show closed" switch replacing "Show all";
   - status (Needs triage default), source, scope, severity and suggestion selects with counts;
@@ -172,13 +173,13 @@
   - server-side paging;
   - all state in URL params;
   - Package, Source, Scope and Status columns ("Untriaged" chip, a "Closed" line, a suggested outcome with its basis, an "Edited/Withdrawn" line), and Machines for Linux items.
-- [ ] `routes/VulnerabilityDetail.tsx`:
+- [x] `routes/VulnerabilityDetail.tsx`:
   - an affected-packages table (package and version, reached from, scope, direct, fix in, commit read at);
   - the minimum fix version on Linux machines;
   - a "decision lapsed" banner in place of "Reopened";
   - history entries for edits (with the earlier text struck through), withdrawals and lapses;
   - "AI · based on …" on suggestions.
-- [ ] `components/VulnerabilityDecisionPanel.tsx`, per the split-decision mockup:
+- [x] `components/VulnerabilityDecisionPanel.tsx`, per the split-decision mockup:
   - a whole/split toggle;
   - per-package outcome rows plus a catch-all;
   - per-row reason and issue link;
@@ -186,14 +187,14 @@
   - prefill from the suggestion (whole or split), or from the lapsed decision;
   - Withdraw (with a reason) and Edit actions on a current decision;
   - the review date removed.
-- [ ] `VulnerabilityChips.tsx`: "Untriaged" for needs triage, and a mixed status.
+- [x] `VulnerabilityChips.tsx`: "Untriaged" for needs triage, and a mixed status.
 
 ### Tests
 - [x] `crates/jobs` unit tests:
   - npm: a dev-only path is development, an optional dependency is optional, a package reached by two scopes carries both, and the shortest chain is kept;
   - Cargo: build and dev kinds, target-specific tables, transitive inheritance;
   - uv: groups are development, extras are optional, members are found.
-- [ ] `crates/database/tests/it/vulnerabilities.rs`:
+- [x] `crates/database/tests/it/vulnerabilities.rs`:
   - the same npm version in two repositories makes two items;
   - a fix landing closes an item and keeps its status;
   - an unreadable repository keeps its items;
@@ -215,14 +216,14 @@
   - an answer with no basis or an invalid split gives no suggestion;
   - a valid split suggestion is stored;
   - a Linux prompt has no machine names.
-- [ ] `crates/private-server/tests/it/vulnerabilities.rs`: a split decision is recorded and audited with entries; withdraw and edit are audited and admin-only; a read-only session refuses all three; the list paging and search arguments round-trip.
+- [x] `crates/private-server/tests/it/vulnerabilities.rs`: a split decision is recorded and audited with entries; withdraw and edit are audited and admin-only; a read-only session refuses all three; the list paging and search arguments round-trip.
 - [x] `crates/public-server/tests/it/mcp.rs`:
   - a batch records valid items and refuses invalid ones in order, auditing only the recorded;
   - withdraw and edit through a granted token, with a token without the grant refused;
   - `fields` limits the output;
   - `group_by` returns counts only;
   - the prompt is listed and takes `repository`.
-- [ ] e2e: rewrite `seedTamanuDependencies` as `seedRepositoryPackages`, then cover in `e2e/vulnerabilities.spec.ts`:
+- [x] e2e: rewrite `seedTamanuDependencies` as `seedRepositoryPackages`, then cover in `e2e/vulnerabilities.spec.ts`:
   - the sidebar badge;
   - search with highlight;
   - filter counts and the result count;
@@ -233,5 +234,5 @@
   - a lapsed banner.
 
 ### Finish
-- [ ] `just gen-openapi`, `just check`, and targeted `just test -p <crate> vulnerab`.
-- [ ] Check `grep -rn 'review_by\|Ground\|tamanu' crates/*/src/vulnerabilities* crates/canopy-mcp/src/vulnerabilities.rs private-web/src` for leftovers.
+- [x] `just gen-openapi`, `just check`, and targeted `just test -p <crate> vulnerab`.
+- [x] Check `grep -rn 'review_by\|Ground\|tamanu' crates/*/src/vulnerabilities* crates/canopy-mcp/src/vulnerabilities.rs private-web/src` for leftovers.
