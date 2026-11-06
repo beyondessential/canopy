@@ -96,10 +96,10 @@ Silencing a check on a machine that already exists removes a protection and is d
 A handler that lets an already-trusted machine obtain credentials is graded write, because making a machine trusted is itself danger and the decision to trust it has already been made there.
 Opening a machine's restore window is graded on this basis.
 
-Recording, withdrawing or editing a vulnerability triage decision is graded write: it amends Canopy's records and is undone by recording another (see [VTR](../security/vulnerability-triage.md)).
+Recording, withdrawing or editing a vulnerability triage decision is graded write: it amends Canopy's records, and the item's history keeps what it replaced (see [VTR](../security/vulnerability-triage.md)).
 
-The fleet query interface (see [MCP](mcp.md)) changes nothing on the fleet, so every one of its tools is read-only except its one write, recording a triage decision, which is graded write.
-That interface has no sessions, so its write is allowed by the caller's standing instead of a raised mode: an administrator on the operator path, a token with the triage grant on the token path.
+The fleet query interface (see [MCP](mcp.md)) changes nothing on the fleet, so every one of its tools is read-only except its triage writes, recording, withdrawing and editing triage decisions, which are graded write.
+That interface has no sessions, so its writes are allowed by the caller's standing instead of a raised mode: an administrator on the operator path, a token with the triage grant on the token path.
 The handlers that mint, revoke, and list its access tokens belong to the administrative surface rather than to that interface: minting and revoking are danger, and listing is read-only.
 
 The handlers by which an operator reads and changes their own safety mode are read-only, because a read-only session has to be able to reach them: what they change is that operator's own session rather than the fleet or Canopy's records.

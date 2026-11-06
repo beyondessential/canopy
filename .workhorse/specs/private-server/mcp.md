@@ -138,34 +138,34 @@ An item is a vulnerability within one source, a tracked repository or Linux, as 
 
 **Find vulnerabilities** takes optional filters and a free-text search, and returns a page of items.
 The filters are source, triage status, minimum severity, scope, affected package, workspace package, and whether the item has a suggestion, plus a flag to include closed items.
-The search matches as it does in the operator interface, and the order is the one the operator interface gives its list, or by relevance for a search.
-Each item carries its identifier and aliases, summary, severity, source, affected packages with their scopes and minimum fix versions, how many machines it exposes for a Linux item, its triage status with the current decision and whether that decision was withdrawn or edited, and the model's suggestion where there is one.
+The search and the scope filter match as they do in the operator interface, and the order is the one the operator interface gives its list, or by relevance for a search.
+Each item carries its identifier and aliases, summary, severity, source, affected packages with their scopes and minimum fix versions, how many machines it exposes for a Linux item, its triage status with the current decision and whether that decision was withdrawn or edited, whether it is closed, and the model's suggestion where there is one.
 A caller may name the fields it wants with `fields`, and receives only those, with the item's identifier and source always included.
 The advisory's long details text is left out unless the caller names it in `fields`.
 A result is a page with the number of items matching in all and a cursor for the next page, so the client does not mistake a partial list for the whole.
 
-A caller may also ask for the result `group_by` package, scope, source or status.
+A caller may also ask for the result `group_by` affected package, workspace package, scope, source or status.
 The result is then each group with how many items fall in it, and no items, so an agent can size the work and then fetch a group by filtering on it.
-An item with several scopes is counted in each, so the groups of a scope grouping can add up to more than the items matching.
+An item that falls in several groups, such as one with several scopes or workspace packages, is counted in each, so the groups can add up to more than the items matching.
 
-**Get vulnerability** takes an item's identifier and source and returns the item in full: the advisory's details and affected ranges with the versions that fix it; for a repository, the affected packages on main with each one's version, the workspace packages that reach it, whether directly, the chain of packages and the scope of each path, and the commit of main it was read at; for Linux, the exposed machines with each one's group and installed version; its decision history; and the model's suggestion with its reasoning and basis (see [VTR](../security/vulnerability-triage.md)).
+**Get vulnerability** takes an item's identifier and source and returns the item in full: the advisory's details and affected ranges with the versions that fix it; for a repository, the affected packages on the default branch with each one's version and minimum fix version, the workspace packages that reach it, whether directly, the scope and shortest chain of packages of each path, and the commit of the default branch they were read at; for Linux, the exposed machines with each one's group, installed version and minimum fix version; its decision history; and the model's suggestion with its reasoning and basis (see [VTR](../security/vulnerability-triage.md)).
 
 The model's suggestion is made without access to source code, and every place the interface presents one says so, in the description of the queries that return it and in the suggestion itself.
 It is an inference from the advisory and the package's place in the dependency tree, and a caller with the source is expected to check it.
 
 **Record vulnerability decisions** takes a list of items, each an identifier and source with a decision, whole or split, carrying the fields its outcome requires (see [VTR](../security/vulnerability-triage.md), "Decisions").
 A decision may replace any current decision, an operator's included, and the history keeps the one it replaced.
-Each item is judged on its own: those that are valid are recorded and those that are not, such as an unknown item or a split that leaves a workspace package uncovered, are refused with the reason, each audited as its own decision.
+Each item is judged on its own: those that are valid are recorded, each audited as its own decision, and those that are not, such as an unknown item or a split that leaves a workspace package uncovered, are refused with the reason.
 The result lists the outcome for every item in the order given.
 The decisions are presented as made through this interface by their caller.
 
 **Withdraw vulnerability decisions** takes a list of items and a reason, and withdraws each item's current decision on the same terms, returning each to open.
-**Edit vulnerability decision** takes one item, and corrects the reason or issue link of its current decision (see [VTR](../security/vulnerability-triage.md), "Changing a decision").
+**Edit vulnerability decision** takes one item, and corrects the reason or issue link of its current decision, or of one entry of its split, named by a workspace package the entry covers or as the catch-all (see [VTR](../security/vulnerability-triage.md), "Changing a decision").
 
 All three writes are held by the triage grant.
 
-**Triage vulnerabilities** is a prompt the interface offers, which guides an agent that has the repository's source through triage.
-The agent lists open items, groups and orders them as it finds easiest for a person to review, and reads how the code uses each vulnerable package.
+**Triage vulnerabilities** is a prompt the interface offers, which takes a repository and guides an agent that has that repository's source through triage.
+The agent lists the repository's open items, groups and orders them as it finds easiest for a person to review, and reads how the code uses each vulnerable package.
 It then puts its proposed decisions to the user in batches of ten, each with a reason that says what was checked, and records a batch only once the user has confirmed it, so a person approves every decision.
 The prompt tells the agent that the model's suggestions were made without source and are to be checked, and that an advisory it cannot verify from the code is left for a person.
 
