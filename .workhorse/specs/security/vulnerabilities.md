@@ -18,7 +18,7 @@ A repository's dependencies are the packages in its npm, Cargo and uv lockfiles 
 A repository can carry several lockfiles, such as infra's npm dependencies for Pulumi, its Cargo dependencies for pgsnap and its Python dependencies for Ansible, and all of them count.
 Only the default branch counts, whatever is released or deployed from it.
 
-**Linux** is the packages installed on machines, as each machine reports them (see [PKG](../public-server/packages.md)).
+**Linux** and Windows is the packages installed on machines, as each machine reports them (see [PKG](../public-server/packages.md)).
 A machine that has not reported its packages has no Linux exposure.
 An application on a cluster has no box of its own, so it has no Linux exposure (see [K8S](../monitoring/kubernetes.md)).
 
