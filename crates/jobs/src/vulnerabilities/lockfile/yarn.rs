@@ -21,6 +21,7 @@
 //! itself however the descriptor that reaches it is written.
 
 use std::{
+	borrow::Cow,
 	cell::RefCell,
 	collections::{BTreeMap, BTreeSet, HashMap},
 	fmt::Display,
@@ -86,6 +87,21 @@ fn split_ident(ident: &str) -> Option<(&str, &str)> {
 	let search = ident.strip_prefix('@').map_or(0, |_| 1);
 	let at = ident[search..].find('@')? + search;
 	Some((&ident[..at], &ident[at + 1..]))
+}
+
+/// A descriptor or resolution with any credentials in it taken out. What goes
+/// wrong with a lockfile is logged and kept against the repository, and one
+/// that names a host can carry a token committed with it.
+fn without_credentials(text: &str) -> Cow<'_, str> {
+	let Some(scheme) = text.find("://") else {
+		return Cow::Borrowed(text);
+	};
+	let host = scheme + 3;
+	let host_ends = text[host..].find('/').map_or(text.len(), |at| host + at);
+	match text[host..host_ends].rfind('@') {
+		None => Cow::Borrowed(text),
+		Some(at) => Cow::Owned(format!("{}***{}", &text[..host], &text[host + at..])),
+	}
 }
 
 fn percent_decode(text: &str) -> String {
@@ -258,9 +274,11 @@ impl Resolver<'_> {
 			.and_then(|rule| lockfile.locate(from, name, &rule.descriptor));
 		let located = overridden.or_else(|| lockfile.locate(from, name, descriptor));
 		let Some(to) = located else {
-			self.unresolved
-				.borrow_mut()
-				.insert(format!("{name}@{descriptor} of {}", from.resolution));
+			self.unresolved.borrow_mut().insert(format!(
+				"{name}@{} of {}",
+				without_credentials(descriptor),
+				from.name
+			));
 			return None;
 		};
 		Some(Edge {
@@ -326,12 +344,17 @@ pub fn read(lockfile: &str) -> Result<Lockfile, ParseError> {
 	let mut entries = Vec::with_capacity(raw.len());
 	let mut by_descriptor = BTreeMap::new();
 	for (key, raw) in raw {
-		let raw = raw.ok_or_else(|| unreadable(format!("{key} has no fields")))?;
-		let resolution = raw
-			.resolution
-			.ok_or_else(|| unreadable(format!("{key} has no resolution")))?;
-		let (name, rest) = split_ident(&resolution)
-			.ok_or_else(|| unreadable(format!("the resolution {resolution} names no package")))?;
+		let raw =
+			raw.ok_or_else(|| unreadable(format!("{} has no fields", without_credentials(&key))))?;
+		let resolution = raw.resolution.ok_or_else(|| {
+			unreadable(format!("{} has no resolution", without_credentials(&key)))
+		})?;
+		let (name, rest) = split_ident(&resolution).ok_or_else(|| {
+			unreadable(format!(
+				"the resolution {} names no package",
+				without_credentials(&resolution)
+			))
+		})?;
 		let (protocol, location) = rest.split_once(':').unwrap_or((rest, ""));
 
 		let index = entries.len();
@@ -1092,6 +1115,47 @@ __metadata:
 		);
 		assert!(read("name: not a lockfile\n").is_err());
 		assert!(read("").is_err());
+	}
+
+	#[test]
+	fn what_goes_wrong_is_said_without_the_credentials_in_it() {
+		assert_eq!(
+			without_credentials("https://ci-bot:ghp_secret@github.com/o/r.git#commit"),
+			"https://***@github.com/o/r.git#commit"
+		);
+		assert_eq!(
+			without_credentials("git+ssh://git@github.com/o/r.git"),
+			"git+ssh://***@github.com/o/r.git"
+		);
+		assert_eq!(without_credentials("npm:^1.2.3"), "npm:^1.2.3");
+		assert_eq!(
+			without_credentials("https://registry.example/a.tgz"),
+			"https://registry.example/a.tgz"
+		);
+
+		// A dependency on a host nothing holds, so the failure names it.
+		let lockfile = r#"__metadata:
+  version: 8
+
+"app@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "app@workspace:."
+  dependencies:
+    private: "https://ci-bot:ghp_secret@github.com/o/r.git"
+  languageName: unknown
+  linkType: soft
+"#;
+		let manifests = BTreeMap::from([(
+			String::new(),
+			r#"{"name":"app","dependencies":{"private":"https://ci-bot:ghp_secret@github.com/o/r.git"}}"#,
+		)]);
+		let why = read(lockfile)
+			.unwrap()
+			.parse("app", &manifests)
+			.unwrap_err()
+			.to_string();
+		assert!(!why.contains("ghp_secret"), "{why}");
+		assert!(why.contains("private"), "it still says what failed: {why}");
 	}
 
 	#[test]
