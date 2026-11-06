@@ -416,7 +416,7 @@ impl GitHub {
 						.into_iter()
 						.map(|workspace| {
 							let manifest = workspace_manifest(path, workspace);
-							(workspace.to_owned(), texts[&manifest].clone())
+							(workspace.to_owned(), texts[&manifest].as_str())
 						})
 						.collect();
 					yarn[path].parse(repository.name, &manifests)

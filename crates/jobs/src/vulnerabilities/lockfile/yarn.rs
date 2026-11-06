@@ -358,7 +358,7 @@ impl Lockfile {
 	pub fn parse(
 		&self,
 		repository: &str,
-		manifests: &BTreeMap<String, String>,
+		manifests: &BTreeMap<String, &str>,
 	) -> Result<Vec<RepositoryPackage>, ParseError> {
 		let mut kinds: BTreeMap<usize, Manifest> = BTreeMap::new();
 		for (index, entry) in self.entries.iter().enumerate() {
@@ -370,7 +370,7 @@ impl Lockfile {
 			} else {
 				entry.location.as_str()
 			};
-			let text = manifests
+			let text = *manifests
 				.get(at)
 				.ok_or_else(|| unreadable(format!("the workspace {at:?} has no package.json")))?;
 			let manifest = serde_json::from_str(text).map_err(|e| {
@@ -618,8 +618,8 @@ __metadata:
   linkType: hard
 "#;
 
-	fn manifests() -> BTreeMap<String, String> {
-		let manifest = |text: &str| text.to_owned();
+	fn manifests() -> BTreeMap<String, &'static str> {
+		let manifest = |text: &'static str| text;
 		BTreeMap::from([
 			(
 				String::new(),
@@ -753,8 +753,7 @@ __metadata:
 "#;
 		let manifests = BTreeMap::from([(
 			String::new(),
-			r#"{"name":"app","dependencies":{"react-router-dom-v6":"npm:react-router-dom@6.3.0"}}"#
-				.to_owned(),
+			r#"{"name":"app","dependencies":{"react-router-dom-v6":"npm:react-router-dom@6.3.0"}}"#,
 		)]);
 		let packages = read(lockfile).unwrap().parse("app", &manifests).unwrap();
 		assert!(
@@ -793,8 +792,7 @@ __metadata:
 			String::new(),
 			r#"{"name":"app",
 			"dependencies":{"fsevents":"^2"},
-			"optionalDependencies":{"fsevents":"^2"}}"#
-				.to_owned(),
+			"optionalDependencies":{"fsevents":"^2"}}"#,
 		)]);
 		let packages = read(lockfile).unwrap().parse("app", &manifests).unwrap();
 		let fsevents = find(&packages, "fsevents", "2.3.3");
@@ -944,7 +942,7 @@ __metadata:
 	fn a_missing_or_broken_manifest_is_refused() {
 		let lockfile = read(LOCKFILE).unwrap();
 		let mut manifests = manifests();
-		manifests.insert("packages/web".into(), "not json".into());
+		manifests.insert("packages/web".into(), "not json");
 		assert!(lockfile.parse("tamanu", &manifests).is_err());
 		manifests.remove("packages/web");
 		assert!(lockfile.parse("tamanu", &manifests).is_err());
@@ -974,5 +972,35 @@ __metadata:
 			Some(("@scope/name", "workspace:a/b"))
 		);
 		assert_eq!(split_ident("lodash"), None);
+	}
+}
+
+#[cfg(test)]
+mod scratch_bench {
+	use super::*;
+	#[test]
+	fn time_tupaia() {
+		let root = std::path::Path::new("/home/felix/code/work/tupaia");
+		let text = std::fs::read_to_string(root.join("yarn.lock")).unwrap();
+		let t0 = std::time::Instant::now();
+		let lock = read(&text).unwrap();
+		let read_ms = t0.elapsed().as_millis();
+		let mut manifests = BTreeMap::new();
+		for ws in lock.workspaces() {
+			manifests.insert(
+				ws.to_owned(),
+				std::fs::read_to_string(root.join(ws).join("package.json"))
+					.unwrap()
+					.leak() as &str,
+			);
+		}
+		let t1 = std::time::Instant::now();
+		let pkgs = lock.parse("tupaia", &manifests).unwrap();
+		eprintln!(
+			"read {read_ms}ms  parse {}ms  packages {}  workspaces {}",
+			t1.elapsed().as_millis(),
+			pkgs.len(),
+			lock.workspaces().len()
+		);
 	}
 }
