@@ -19,7 +19,7 @@ A repository can carry several lockfiles, such as infra's npm dependencies for P
 Only the default branch counts, whatever is released or deployed from it.
 
 **Linux** and **Windows** mean the packages installed on machines, as each machine reports them (see [PKG](../public-server/packages.md)).
-A machine that has not reported its packages has no Linux exposure.
+A machine that has not reported its packages has no  exposure.
 An application on a cluster has no box of its own, so it has no Linux exposure (see [K8S](../monitoring/kubernetes.md)).
 
 Only production boxes count for Linux: a machine's packages are scanned when it is a live production machine (see [GRP](../servers/groups.md), "Environments").
