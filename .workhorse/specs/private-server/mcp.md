@@ -38,7 +38,7 @@ A token can be revoked at any time, taking effect immediately.
 Each token records when it was last used, so idle tokens are visible.
 
 A token carries the grants chosen when it is minted, which cannot be changed afterwards; a token minted without one never gains it.
-The **triage grant** allows the token to record vulnerability triage decisions.
+The **triage grant** allows the token to record, withdraw and edit vulnerability triage decisions.
 A token is minted with no grants unless the administrator chooses one, so every token reads only unless minted to write.
 The token list shows each token's grants.
 
@@ -134,17 +134,38 @@ This is the raw material for analysing whether a check's noise is a flap, a load
 
 ### Vulnerabilities
 
-An item is a vulnerability within one source, Tamanu or Linux, as the operator interface presents it (see [VUL](../security/vulnerabilities.md)).
+An item is a vulnerability within one source, a tracked repository or Linux, as the operator interface presents it (see [VUL](../security/vulnerabilities.md)).
 
-**Find vulnerabilities** takes optional filters for source, triage status, and minimum severity, plus a flag to include items nothing counts for any more, and returns a bounded list of items, sorted as the operator interface sorts them.
-Each carries its identifier and aliases, summary, severity, source, affected package, how many applications or machines it exposes, its triage status with the current decision, and the model's suggestion where there is one.
-When the result is truncated to its bound, the result says so.
+**Find vulnerabilities** takes optional filters and a free-text search, and returns a page of items.
+The filters are source, triage status, minimum severity, scope, affected package, workspace package, and whether the item has a suggestion, plus a flag to include closed items.
+The search matches as it does in the operator interface, and the order is the one the operator interface gives its list, or by relevance for a search.
+Each item carries its identifier and aliases, summary, severity, source, affected packages with their scopes and minimum fix versions, how many machines it exposes for a Linux item, its triage status with the current decision and whether that decision was withdrawn or edited, and the model's suggestion where there is one.
+A caller may name the fields it wants with `fields`, and receives only those, with the item's identifier and source always included.
+The advisory's long details text is left out unless the caller names it in `fields`.
+A result is a page with the number of items matching in all and a cursor for the next page, so the client does not mistake a partial list for the whole.
 
-**Get vulnerability** takes an item's identifier and source and returns the item in full: the advisory's details and affected ranges, the exposed Tamanu versions with each one's package version, the workspaces that reach the package and whether directly, and how many applications run it, or the exposed machines with each one's group and installed version; its decision history; and the model's suggestion with its reasoning (see [VTR](../security/vulnerability-triage.md)).
+A caller may also ask for the result `group_by` package, scope, source or status.
+The result is then each group with how many items fall in it, and no items, so an agent can size the work and then fetch a group by filtering on it.
+An item with several scopes is counted in each, so the groups of a scope grouping can add up to more than the items matching.
 
-**Record vulnerability decision** takes an item's identifier and source and a decision, with the fields its outcome requires, and records it as the item's current decision (see [VTR](../security/vulnerability-triage.md), "Decisions").
-It may replace any decision, an operator's included, and the item's history keeps the one it replaced.
-The decision is presented as made through this interface by its caller.
+**Get vulnerability** takes an item's identifier and source and returns the item in full: the advisory's details and affected ranges with the versions that fix it; for a repository, the affected packages on main with each one's version, the workspace packages that reach it, whether directly, the chain of packages and the scope of each path, and the commit of main it was read at; for Linux, the exposed machines with each one's group and installed version; its decision history; and the model's suggestion with its reasoning and basis (see [VTR](../security/vulnerability-triage.md)).
+
+The model's suggestion is made without access to source code, and every place the interface presents one says so, in the description of the queries that return it and in the suggestion itself.
+It is an inference from the advisory and the package's place in the dependency tree, and a caller with the source is expected to check it.
+
+**Record vulnerability decisions** takes a list of items, each an identifier and source with a decision, whole or split, carrying the fields its outcome requires (see [VTR](../security/vulnerability-triage.md), "Decisions").
+A decision may replace any current decision, an operator's included, and the history keeps the one it replaced.
+Each item is judged on its own: those that are valid are recorded and those that are not, such as an unknown item or a split that leaves a workspace package uncovered, are refused with the reason, each audited as its own decision.
+The result lists the outcome for every item in the order given.
+The decisions are presented as made through this interface by their caller.
+
+**Withdraw vulnerability decisions** takes a list of items and a reason, and withdraws each item's current decision on the same terms, returning each to open.
+**Edit vulnerability decision** takes one item, and corrects the reason or issue link of its current decision (see [VTR](../security/vulnerability-triage.md), "Changing a decision").
+
+All three writes are held by the triage grant.
+
+**Triage vulnerabilities** is a prompt the interface offers, which guides an agent that has the repository's source through triage: it lists open items grouped by package, reads how the code uses the vulnerable package, and records decisions in bulk with a reason that says what was checked.
+It tells the agent that the model's suggestions were made without source and are to be checked, and that a decision about an advisory it cannot verify from the code is left for a person.
 
 ### Audit log
 

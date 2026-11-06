@@ -96,7 +96,7 @@ Silencing a check on a machine that already exists removes a protection and is d
 A handler that lets an already-trusted machine obtain credentials is graded write, because making a machine trusted is itself danger and the decision to trust it has already been made there.
 Opening a machine's restore window is graded on this basis.
 
-Recording a vulnerability triage decision is graded write: it amends Canopy's records and is undone by recording another (see [VTR](../security/vulnerability-triage.md)).
+Recording, withdrawing or editing a vulnerability triage decision is graded write: it amends Canopy's records and is undone by recording another (see [VTR](../security/vulnerability-triage.md)).
 
 The fleet query interface (see [MCP](mcp.md)) changes nothing on the fleet, so every one of its tools is read-only except its one write, recording a triage decision, which is graded write.
 That interface has no sessions, so its write is allowed by the caller's standing instead of a raised mode: an administrator on the operator path, a token with the triage grant on the token path.

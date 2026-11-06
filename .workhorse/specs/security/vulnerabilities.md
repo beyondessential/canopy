@@ -82,10 +82,10 @@ Every column sorts, ascending or descending.
 Without a sort chosen, the list is ordered by severity and then by how recently the advisory was published.
 
 The list shows open items by default.
-It filters by source, by status (open, not affected, accepted risk, will fix, mixed, and closed), by scope and by severity, and each filter's choices show how many items they would give with the other filters and the search applied.
+It filters by source, by status (open, not affected, accepted risk, will fix, mixed, and closed), by scope, by severity and by whether it has a suggestion, and each filter's choices show how many items they would give with the other filters and the search applied.
 The filter bar shows how many items are in the result as it stands, with every filter and the search applied.
 
-A search box matches partially and tolerates small typos, across an advisory's identifier and aliases, summary, affected package name and source name.
+A search box matches partially and tolerates small typos, across an advisory's identifier and aliases, summary, affected package name, the workspace packages that reach it, and source name.
 It also searches the advisory's full details, where a match counts for less than one in the fields above.
 While a search is entered, rows are ordered by how well they match until a column is chosen to sort by.
 
