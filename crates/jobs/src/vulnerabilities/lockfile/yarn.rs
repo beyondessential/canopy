@@ -1171,3 +1171,42 @@ __metadata:
 		assert_eq!(split_ident("lodash"), None);
 	}
 }
+
+#[cfg(test)]
+mod scratch_real {
+	use super::*;
+	#[test]
+	fn tupaia_unchanged() {
+		let root = std::path::Path::new("/home/felix/code/work/tupaia");
+		let lock = read(&std::fs::read_to_string(root.join("yarn.lock")).unwrap()).unwrap();
+		let mut manifests = BTreeMap::new();
+		for ws in lock.workspaces() {
+			manifests.insert(
+				ws.to_owned(),
+				std::fs::read_to_string(root.join(ws).join("package.json"))
+					.unwrap()
+					.leak() as &str,
+			);
+		}
+		let pkgs = lock.parse("tupaia", &manifests).unwrap();
+		let mut scopes = std::collections::BTreeMap::<String, usize>::new();
+		for p in &pkgs {
+			for path in &p.paths {
+				*scopes
+					.entry(format!("{:?}/{}", path.scope, path.optional))
+					.or_default() += 1;
+			}
+		}
+		eprintln!(
+			"packages {} unreached {} scopes {scopes:?}",
+			pkgs.len(),
+			pkgs.iter().filter(|p| p.paths.is_empty()).count()
+		);
+		let lodash: Vec<&str> = pkgs
+			.iter()
+			.filter(|p| p.name == "lodash")
+			.map(|p| p.version.as_str())
+			.collect();
+		eprintln!("lodash versions {lodash:?}");
+	}
+}
