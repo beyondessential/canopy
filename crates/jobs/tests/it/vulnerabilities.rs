@@ -717,7 +717,7 @@ async fn decisions_the_model_made_are_withdrawn_on_start_and_become_suggestions(
 		let log = audited(&mut conn, "vulnerability_decision_withdrawn").await;
 		assert_eq!(log.len(), 1);
 		assert!(matches!(&log[0].actor, Actor::Canopy { job } if job == "vulnerability-migration"));
-		assert_eq!(log[0].detail["via"], "model");
+		assert_eq!(log[0].detail["via"], "canopy");
 
 		assert_eq!(
 			scanner.withdraw_model_decisions(&mut conn).await.unwrap(),

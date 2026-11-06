@@ -15291,7 +15291,7 @@ export interface components {
          * @description How a decision or a change to one was made.
          * @enum {string}
          */
-        VulnerabilityVia: "ui" | "model" | "mcp";
+        VulnerabilityVia: "ui" | "model" | "mcp" | "canopy";
         /** @description A decision to withdraw. */
         VulnerabilityWithdrawArgs: {
             /** @description The advisory's OSV identifier. */

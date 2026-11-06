@@ -16317,7 +16317,8 @@
         "enum": [
           "ui",
           "model",
-          "mcp"
+          "mcp",
+          "canopy"
         ],
         "type": "string"
       },

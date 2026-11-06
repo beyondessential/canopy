@@ -193,7 +193,8 @@ impl Scanner {
 						&decision.source,
 						WITHDRAWN_REASON,
 						actor.clone(),
-						Via::Model,
+						Via::Canopy,
+						Some(decision.id),
 					)
 					.await?;
 					audit::record(conn, &actor, &withdrawal.audited()).await?;
@@ -332,17 +333,6 @@ pub fn spawn() -> JoinHandle<()> {
 	task::spawn(watch_repositories(scanner.clone(), pool.clone()));
 
 	task::spawn(async move {
-		match pool.get().await {
-			Ok(mut conn) => match scanner.withdraw_model_decisions(&mut conn).await {
-				Ok(0) => {}
-				Ok(n) => info!("vulnerability scan: withdrew {n} decision(s) the model made"),
-				Err(e) => {
-					error!("vulnerability scan: withdrawing the model's decisions failed: {e}")
-				}
-			},
-			Err(_) => error!("vulnerability scan: failed to get database connection"),
-		}
-
 		let mut next_scan: Option<tokio::time::Instant> = None;
 		let mut last_seen: Option<u64> = None;
 		loop {
@@ -351,6 +341,16 @@ pub fn spawn() -> JoinHandle<()> {
 				sleep(WATCH_EVERY).await;
 				continue;
 			};
+			// Idempotent, and cheap once there is nothing left, so it is tried on
+			// every look: a database that was down when the process started does
+			// not leave the model's decisions standing until the next restart.
+			match scanner.withdraw_model_decisions(&mut conn).await {
+				Ok(0) => {}
+				Ok(n) => info!("vulnerability scan: withdrew {n} decision(s) the model made"),
+				Err(e) => {
+					error!("vulnerability scan: withdrawing the model's decisions failed: {e}")
+				}
+			}
 			let seen = scanner.fingerprint(&mut conn).await.ok();
 			let due = match next_scan {
 				None => true,

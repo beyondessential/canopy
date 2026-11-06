@@ -360,8 +360,16 @@ async fn withdraw_one(
 ) -> Result<Withdrawal, AppError> {
 	let source = source_of(&arg.source)?;
 	conn.transaction::<_, AppError, _>(async |conn| {
-		let withdrawal =
-			Decision::withdraw(conn, &arg.id, &source, reason, actor.clone(), Via::Mcp).await?;
+		let withdrawal = Decision::withdraw(
+			conn,
+			&arg.id,
+			&source,
+			reason,
+			actor.clone(),
+			Via::Mcp,
+			None,
+		)
+		.await?;
 		audit::record(conn, actor, &withdrawal.audited()).await?;
 		Ok(withdrawal)
 	})

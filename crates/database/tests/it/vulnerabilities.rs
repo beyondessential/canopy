@@ -857,8 +857,16 @@ async fn withdrawing_leaves_the_item_needing_triage_with_its_suggestion() {
 		.unwrap();
 		assert!(
 			refused(
-				Decision::withdraw(&mut conn, "GHSA-1", &tamanu(), "why", operator(), Via::Ui)
-					.await
+				Decision::withdraw(
+					&mut conn,
+					"GHSA-1",
+					&tamanu(),
+					"why",
+					operator(),
+					Via::Ui,
+					None
+				)
+				.await
 			)
 			.contains("no current decision")
 		);
@@ -868,7 +876,16 @@ async fn withdrawing_leaves_the_item_needing_triage_with_its_suggestion() {
 			.unwrap();
 		assert!(
 			refused(
-				Decision::withdraw(&mut conn, "GHSA-1", &tamanu(), "  ", operator(), Via::Ui).await
+				Decision::withdraw(
+					&mut conn,
+					"GHSA-1",
+					&tamanu(),
+					"  ",
+					operator(),
+					Via::Ui,
+					None
+				)
+				.await
 			)
 			.contains("needs a reason")
 		);
@@ -879,6 +896,7 @@ async fn withdrawing_leaves_the_item_needing_triage_with_its_suggestion() {
 			"wrong call",
 			operator(),
 			Via::Ui,
+			None,
 		)
 		.await
 		.unwrap();
@@ -893,8 +911,16 @@ async fn withdrawing_leaves_the_item_needing_triage_with_its_suggestion() {
 		);
 		assert!(
 			refused(
-				Decision::withdraw(&mut conn, "GHSA-1", &tamanu(), "again", operator(), Via::Ui)
-					.await
+				Decision::withdraw(
+					&mut conn,
+					"GHSA-1",
+					&tamanu(),
+					"again",
+					operator(),
+					Via::Ui,
+					None
+				)
+				.await
 			)
 			.contains("no current decision")
 		);
@@ -904,6 +930,50 @@ async fn withdrawing_leaves_the_item_needing_triage_with_its_suggestion() {
 			.unwrap();
 		assert_eq!(history.len(), 1);
 		assert_eq!(history[0].reason, "wrong call");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_withdrawal_naming_a_decision_is_refused_when_another_stands() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		let inspected =
+			Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::NotAffected))
+				.await
+				.unwrap();
+		let newer = Decision::record(&mut conn, whole("GHSA-1", tamanu(), Outcome::WillFix))
+			.await
+			.unwrap();
+
+		let refusal = Decision::withdraw(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			"model no longer decides",
+			Actor::canopy("migration"),
+			Via::Canopy,
+			Some(inspected.id),
+		)
+		.await;
+		assert!(refused(refusal).contains("no longer the one"));
+		assert_eq!(
+			list(&mut conn, &ListQuery::default()).await[0].status,
+			Status::WillFix,
+			"the newer decision still stands"
+		);
+
+		Decision::withdraw(
+			&mut conn,
+			"GHSA-1",
+			&tamanu(),
+			"model no longer decides",
+			Actor::canopy("migration"),
+			Via::Canopy,
+			Some(newer.id),
+		)
+		.await
+		.unwrap();
 	})
 	.await;
 }

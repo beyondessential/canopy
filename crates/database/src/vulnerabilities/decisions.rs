@@ -486,7 +486,10 @@ impl Decision {
 	}
 
 	/// Take the item's current decision away, with a reason. The item needs
-	/// triage again, with the suggestion it had.
+	/// triage again, with the suggestion it had. A caller that inspected a
+	/// particular decision names it in `only`, and it is refused when another
+	/// decision stands by the time the item is held, so a decision recorded
+	/// meanwhile is never withdrawn in its place.
 	pub async fn withdraw(
 		conn: &mut AsyncPgConnection,
 		vulnerability_id: &str,
@@ -494,6 +497,7 @@ impl Decision {
 		reason: &str,
 		actor: Actor,
 		via: Via,
+		only: Option<Uuid>,
 	) -> Result<Withdrawal> {
 		Self::lock_item(conn, vulnerability_id, source).await?;
 		let reason = reason.trim();
@@ -507,6 +511,11 @@ impl Decision {
 					"{vulnerability_id} has no current decision to withdraw"
 				))
 			})?;
+		if only.is_some_and(|id| id != decision.id) {
+			return Err(AppError::BadRequest(format!(
+				"the decision on {vulnerability_id} is no longer the one that was inspected"
+			)));
+		}
 		Withdrawal::insert(conn, &decision, reason, &actor, via).await
 	}
 

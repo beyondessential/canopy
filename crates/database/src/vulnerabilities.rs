@@ -254,6 +254,8 @@ pub enum Via {
 	Model,
 	/// A caller of the fleet query interface.
 	Mcp,
+	/// Canopy itself, as when it withdraws what the model once decided.
+	Canopy,
 }
 
 impl Via {
@@ -262,6 +264,7 @@ impl Via {
 			Self::Ui => "ui",
 			Self::Model => "model",
 			Self::Mcp => "mcp",
+			Self::Canopy => "canopy",
 		}
 	}
 
@@ -270,6 +273,7 @@ impl Via {
 			"ui" => Some(Self::Ui),
 			"model" => Some(Self::Model),
 			"mcp" => Some(Self::Mcp),
+			"canopy" => Some(Self::Canopy),
 			_ => None,
 		}
 	}
