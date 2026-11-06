@@ -121,12 +121,19 @@ impl Scanner {
 	/// Look at the head of each tracked repository, and read again those that
 	/// have moved. One that cannot be read keeps what is held, and is tried again
 	/// after a while; the self-alert says when that has lasted.
-	pub async fn read_repositories(&self, conn: &mut AsyncPgConnection) -> Result<RepositoryReport> {
+	pub async fn read_repositories(
+		&self,
+		conn: &mut AsyncPgConnection,
+	) -> Result<RepositoryReport> {
 		let mut report = RepositoryReport::default();
-		let tracked: Vec<&str> = self.repositories.iter().map(|r| r.name).collect();
-		RepositoryRead::forget_others(conn, &tracked).await?;
+		let tracked: Vec<String> = self
+			.repositories
+			.iter()
+			.map(|r| r.name.to_owned())
+			.collect();
+		RepositoryRead::forget_others(conn, tracked).await?;
 
-		for repository in &self.repositories {
+		for repository in self.repositories.clone() {
 			let held = RepositoryRead::get(conn, repository.name).await?;
 			if let Some(held) = &held
 				&& held.failure.is_some()
@@ -150,7 +157,7 @@ impl Scanner {
 				report.unchanged += 1;
 				continue;
 			}
-			match self.github.read(repository, &head).await {
+			match self.github.read(&repository, &head).await {
 				Ok(packages) => {
 					RepositoryRead::store(conn, repository.name, &head, &packages).await?;
 					report.read += 1;
@@ -297,6 +304,22 @@ async fn fetch_advisory<'a>(osv: &OsvClient, id: &'a str) -> (&'a str, Result<os
 	(id, osv.get(id).await)
 }
 
+async fn watch_repositories(scanner: Scanner, pool: database::Db) {
+	loop {
+		match pool.get().await {
+			Ok(mut conn) => match scanner.read_repositories(&mut conn).await {
+				Ok(report) => info!(
+					"vulnerability scan: {} repositor(ies) read, {} unchanged, {} failed, {} waiting",
+					report.read, report.unchanged, report.failed, report.waiting
+				),
+				Err(e) => error!("vulnerability scan: reading repositories failed: {e}"),
+			},
+			Err(_) => error!("vulnerability scan: failed to get database connection"),
+		}
+		sleep(REPOSITORIES_EVERY).await;
+	}
+}
+
 /// Read the repositories at once on starting and then every few minutes, and
 /// scan at once, then on the schedule, and early when something comes to count.
 pub fn spawn() -> JoinHandle<()> {
@@ -306,30 +329,16 @@ pub fn spawn() -> JoinHandle<()> {
 		GitHub::new(Endpoints::default()),
 	);
 
-	let repositories = scanner.clone();
-	let repositories_pool = pool.clone();
-	task::spawn(async move {
-		loop {
-			match repositories_pool.get().await {
-				Ok(mut conn) => match repositories.read_repositories(&mut conn).await {
-					Ok(report) => info!(
-						"vulnerability scan: {} repositor(ies) read, {} unchanged, {} failed, {} waiting",
-						report.read, report.unchanged, report.failed, report.waiting
-					),
-					Err(e) => error!("vulnerability scan: reading repositories failed: {e}"),
-				},
-				Err(_) => error!("vulnerability scan: failed to get database connection"),
-			}
-			sleep(REPOSITORIES_EVERY).await;
-		}
-	});
+	task::spawn(watch_repositories(scanner.clone(), pool.clone()));
 
 	task::spawn(async move {
 		match pool.get().await {
 			Ok(mut conn) => match scanner.withdraw_model_decisions(&mut conn).await {
 				Ok(0) => {}
 				Ok(n) => info!("vulnerability scan: withdrew {n} decision(s) the model made"),
-				Err(e) => error!("vulnerability scan: withdrawing the model's decisions failed: {e}"),
+				Err(e) => {
+					error!("vulnerability scan: withdrawing the model's decisions failed: {e}")
+				}
 			},
 			Err(_) => error!("vulnerability scan: failed to get database connection"),
 		}

@@ -19,7 +19,7 @@ use commons_types::server::rank::ServerRank;
 use database::{
 	audit::{self, Actor, Filter},
 	machines::{Machine, NewMachine},
-	packages::{MachinePackageReport, PackageReport, RepositoryRead, ReportedPackage},
+	packages::{MachinePackageReport, PackageReport, ReportedPackage, RepositoryRead},
 	self_alerts::{self, VULNERABILITY_REPOSITORIES_REF},
 	vulnerabilities::{
 		Basis, Decision, Entry, ItemDetail, ItemSummary, ListQuery, NewDecision, Outcome,
@@ -383,7 +383,10 @@ async fn a_repository_is_read_when_its_head_moves_and_not_otherwise() {
 		{
 			let f = fake.lock().unwrap();
 			assert_eq!(f.tree_requests.len(), 1);
-			assert_eq!(f.raw_requests, [("aaaa".to_owned(), "package-lock.json".to_owned())]);
+			assert_eq!(
+				f.raw_requests,
+				[("aaaa".to_owned(), "package-lock.json".to_owned())]
+			);
 		}
 
 		let again = scanner.read_repositories(&mut conn).await.unwrap();
@@ -521,15 +524,18 @@ async fn a_scan_lapses_a_decided_item_when_severity_rises_and_audits_it_as_canop
 	.await;
 }
 
+async fn held(conn: &mut AsyncPgConnection) -> usize {
+	database::vulnerabilities::counted_packages(conn)
+		.await
+		.unwrap()
+		.len()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn one_bad_lockfile_leaves_what_is_held_and_raises_the_self_alert_until_a_good_read() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let (fake, base) = scanned(&mut conn).await;
 		let scanner = scanner(&base);
-		let held = |conn: &mut AsyncPgConnection| {
-			let counted = database::vulnerabilities::counted_packages(conn);
-			async move { counted.await.unwrap().len() }
-		};
 		assert_eq!(held(&mut conn).await, 2);
 
 		// The next commit has a good lockfile and a bad one.
@@ -548,9 +554,16 @@ async fn one_bad_lockfile_leaves_what_is_held_and_raises_the_self_alert_until_a_
 			.await
 			.unwrap()
 			.unwrap();
-		assert_eq!(read.commit_sha.as_deref(), Some("aaaa"), "still the last good read");
+		assert_eq!(
+			read.commit_sha.as_deref(),
+			Some("aaaa"),
+			"still the last good read"
+		);
 		assert!(
-			read.failure.as_deref().unwrap().contains("tools/package-lock.json"),
+			read.failure
+				.as_deref()
+				.unwrap()
+				.contains("tools/package-lock.json"),
 			"{:?}",
 			read.failure
 		);
@@ -583,14 +596,20 @@ async fn one_bad_lockfile_leaves_what_is_held_and_raises_the_self_alert_until_a_
 			.unwrap();
 		assert!(alert.active);
 		assert!(alert.message.contains("tamanu"), "{}", alert.message);
-		assert!(alert.message.contains("tools/package-lock.json"), "{}", alert.message);
+		assert!(
+			alert.message.contains("tools/package-lock.json"),
+			"{}",
+			alert.message
+		);
 
 		// Fixed.
 		publish(&fake, "cccc", &[("package-lock.json", TWO_WORKSPACES)]);
-		diesel::sql_query("UPDATE repository_reads SET last_attempt_at = now() - interval '1 hour'")
-			.execute(&mut conn)
-			.await
-			.unwrap();
+		diesel::sql_query(
+			"UPDATE repository_reads SET last_attempt_at = now() - interval '1 hour'",
+		)
+		.execute(&mut conn)
+		.await
+		.unwrap();
 		let fixed = scanner.read_repositories(&mut conn).await.unwrap();
 		assert_eq!(fixed.read, 1);
 		let alert = self_alerts::current(&mut conn, VULNERABILITY_REPOSITORIES_REF)
@@ -647,7 +666,10 @@ async fn decisions_the_model_made_are_withdrawn_on_start_and_become_suggestions(
 			NewDecision {
 				vulnerability_id: "GHSA-1".into(),
 				source: tamanu(),
-				entries: vec![whole(Outcome::NotAffected, Some("Only the bundler loads it."))],
+				entries: vec![whole(
+					Outcome::NotAffected,
+					Some("Only the bundler loads it."),
+				)],
 				actor: Actor::canopy("ai-worker"),
 				via: Via::Model,
 			},
@@ -667,7 +689,10 @@ async fn decisions_the_model_made_are_withdrawn_on_start_and_become_suggestions(
 		.await
 		.unwrap();
 
-		assert_eq!(scanner.withdraw_model_decisions(&mut conn).await.unwrap(), 1);
+		assert_eq!(
+			scanner.withdraw_model_decisions(&mut conn).await.unwrap(),
+			1
+		);
 
 		let detail = item(&mut conn).await;
 		assert_eq!(detail.item.status, Status::Open);
@@ -683,13 +708,15 @@ async fn decisions_the_model_made_are_withdrawn_on_start_and_become_suggestions(
 		let other = ItemDetail::load(&mut conn, "GHSA-2", &tamanu())
 			.await
 			.unwrap();
-		assert_eq!(other.item.status, Status::AcceptedRisk, "a person's decision stands");
+		assert_eq!(
+			other.item.status,
+			Status::AcceptedRisk,
+			"a person's decision stands"
+		);
 
 		let log = audited(&mut conn, "vulnerability_decision_withdrawn").await;
 		assert_eq!(log.len(), 1);
-		assert!(
-			matches!(&log[0].actor, Actor::Canopy { job } if job == "vulnerability-migration")
-		);
+		assert!(matches!(&log[0].actor, Actor::Canopy { job } if job == "vulnerability-migration"));
 		assert_eq!(log[0].detail["via"], "model");
 
 		assert_eq!(
@@ -698,7 +725,9 @@ async fn decisions_the_model_made_are_withdrawn_on_start_and_become_suggestions(
 			"once done, it is done"
 		);
 		assert_eq!(
-			audited(&mut conn, "vulnerability_decision_withdrawn").await.len(),
+			audited(&mut conn, "vulnerability_decision_withdrawn")
+				.await
+				.len(),
 			1
 		);
 	})
@@ -877,12 +906,20 @@ async fn the_prompt_sets_the_advisory_apart_and_quotes_what_was_reported() {
 		let (advisory, rest) = prompt.split_once("</advisory>").unwrap();
 		assert!(advisory.contains("Fixed in left-pad: 2.0.0"));
 		assert!(rest.contains(r#"- "left-pad" "1.0.0""#), "{rest}");
-		assert!(rest.contains(r#"the lowest version that fixes it is "2.0.0""#), "{rest}");
 		assert!(
-			rest.contains(r#"workspace package "@tamanu/server": scope runtime, a direct dependency, chain ["left-pad"]"#),
+			rest.contains(r#"the lowest version that fixes it is "2.0.0""#),
 			"{rest}"
 		);
-		assert!(rest.contains(r#"Workspace packages that reach it: ["@tamanu/server"]"#), "{rest}");
+		assert!(
+			rest.contains(
+				r#"workspace package "@tamanu/server": scope runtime, a direct dependency, chain ["left-pad"]"#
+			),
+			"{rest}"
+		);
+		assert!(
+			rest.contains(r#"Workspace packages that reach it: ["@tamanu/server"]"#),
+			"{rest}"
+		);
 	})
 	.await;
 }

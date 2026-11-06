@@ -231,7 +231,10 @@ pub fn prompt(detail: &ItemDetail) -> String {
 	}
 	out.push_str("</advisory>\n\n");
 
-	out.push_str(&format!("Source: {}\n", quoted(detail.item.source.as_str())));
+	out.push_str(&format!(
+		"Source: {}\n",
+		quoted(detail.item.source.as_str())
+	));
 	match &detail.item.source {
 		Source::Repository(_) => {
 			out.push_str(
@@ -443,19 +446,13 @@ pub async fn look_at(
 		warn!("ai: no usable answer for {id} ({})", source.as_str());
 		return Ok(Looked::NoAnswer);
 	};
-	match Suggestion::record(
-		conn,
-		id,
-		source,
-		answer.entries,
-		answer.basis,
-		model.name(),
-	)
-	.await
-	{
+	match Suggestion::record(conn, id, source, answer.entries, answer.basis, model.name()).await {
 		Ok(()) => Ok(Looked::Suggested),
 		Err(AppError::BadRequest(why)) => {
-			warn!("ai: the answer for {id} ({}) is not valid: {why}", source.as_str());
+			warn!(
+				"ai: the answer for {id} ({}) is not valid: {why}",
+				source.as_str()
+			);
 			Ok(Looked::NoAnswer)
 		}
 		Err(e) => Err(e),
@@ -558,7 +555,10 @@ mod tests {
 		let schema = schema();
 		assert_eq!(schema["required"], json!(["basis", "entries"]));
 		assert_eq!(
-			schema["properties"]["basis"]["enum"].as_array().unwrap().len(),
+			schema["properties"]["basis"]["enum"]
+				.as_array()
+				.unwrap()
+				.len(),
 			Basis::ALL.len()
 		);
 	}

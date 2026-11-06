@@ -304,7 +304,11 @@ dependencies = [
 	#[test]
 	fn members_are_found_and_names_are_normalised() {
 		let packages = parse(LOCKFILE).unwrap();
-		assert!(!packages.iter().any(|p| p.name == "app" || p.name == "worker"));
+		assert!(
+			!packages
+				.iter()
+				.any(|p| p.name == "app" || p.name == "worker")
+		);
 		let thing = find(&packages, "some-thing");
 		assert!(path(thing, "app", Scope::Runtime, false).unwrap().direct);
 		assert_eq!(thing.ecosystem, "PyPI");
@@ -320,7 +324,11 @@ dependencies = [
 
 		let pytest = find(&packages, "pytest");
 		assert_eq!(pytest.paths.len(), 1);
-		assert!(path(pytest, "app", Scope::Development, false).unwrap().direct);
+		assert!(
+			path(pytest, "app", Scope::Development, false)
+				.unwrap()
+				.direct
+		);
 	}
 
 	#[test]

@@ -237,7 +237,9 @@ impl GitHub {
 			.await
 			.map_err(|e| Failure::Unreachable(format!("{what}: {e}")))?;
 		advertised_head(&body).ok_or_else(|| {
-			Failure::Unreachable(format!("{what}: it has no head, or the answer is not git's"))
+			Failure::Unreachable(format!(
+				"{what}: it has no head, or the answer is not git's"
+			))
 		})
 	}
 
@@ -314,15 +316,24 @@ impl GitHub {
 		commit: &str,
 		paths: &BTreeSet<String>,
 	) -> Result<BTreeMap<String, String>, Failure> {
-		stream::iter(paths)
-			.map(|path| async move {
-				self.raw(slug, commit, path)
-					.await
-					.map(|text| (path.clone(), text))
-			})
+		let fetches: Vec<_> = paths
+			.iter()
+			.map(|path| self.raw_named(slug, commit, path))
+			.collect();
+		stream::iter(fetches)
 			.buffer_unordered(FETCH_CONCURRENCY)
 			.try_collect()
 			.await
+	}
+
+	async fn raw_named(
+		&self,
+		slug: &str,
+		commit: &str,
+		path: &str,
+	) -> Result<(String, String), Failure> {
+		let text = self.raw(slug, commit, path).await?;
+		Ok((path.to_owned(), text))
 	}
 
 	/// Read the dependencies of `repository` as its default branch stands at
@@ -334,25 +345,21 @@ impl GitHub {
 	) -> Result<Vec<RepositoryPackage>, Failure> {
 		let slug = repository.slug;
 		let files = self.files(slug, commit).await?;
-		let lockfiles: Vec<(&str, Kind)> = files
+		let lockfiles: Vec<(String, Kind)> = files
 			.iter()
-			.filter_map(|path| Some((path.as_str(), Kind::of(path)?)))
+			.filter_map(|path| Some((path.clone(), Kind::of(path)?)))
 			.collect();
-		let unparseable = |lockfile: &str, e: ParseError| Failure::Unparseable {
-			lockfile: lockfile.to_owned(),
-			reason: e.to_string(),
-		};
 
 		// The lockfiles, and the root manifest beside each Cargo.lock, which
 		// says where the members are.
 		let mut first: BTreeSet<String> = BTreeSet::new();
 		for (path, kind) in &lockfiles {
-			first.insert((*path).to_owned());
+			first.insert(path.clone());
 			if *kind == Kind::Cargo {
 				let manifest = join(directory(path), "Cargo.toml");
 				if !files.contains(&manifest) {
 					return Err(Failure::Unparseable {
-						lockfile: (*path).to_owned(),
+						lockfile: path.clone(),
 						reason: "there is no Cargo.toml beside it".into(),
 					});
 				}
@@ -362,7 +369,7 @@ impl GitHub {
 		let mut texts = self.raw_all(slug, commit, &first).await?;
 
 		// The manifests of each workspace's members.
-		let mut members: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+		let mut members: BTreeMap<String, Vec<String>> = BTreeMap::new();
 		let mut second: BTreeSet<String> = BTreeSet::new();
 		for (path, kind) in &lockfiles {
 			if *kind != Kind::Cargo {
@@ -370,18 +377,18 @@ impl GitHub {
 			}
 			let dir = directory(path);
 			let root = join(dir, "Cargo.toml");
-			let workspace = lockfile::cargo::workspace(&texts[&root])
-				.map_err(|e| unparseable(&root, e))?;
+			let workspace =
+				lockfile::cargo::workspace(&texts[&root]).map_err(|e| unparseable(&root, e))?;
 			let matching = member_manifests(&files, dir, &workspace);
 			second.extend(matching.iter().filter(|m| **m != root).cloned());
-			members.insert(path, matching);
+			members.insert(path.clone(), matching);
 		}
 		second.retain(|path| !texts.contains_key(path));
 		texts.extend(self.raw_all(slug, commit, &second).await?);
 
-		let mut read: Vec<(&str, Vec<RepositoryPackage>)> = Vec::new();
+		let mut read: Vec<(String, Vec<RepositoryPackage>)> = Vec::new();
 		for (path, kind) in &lockfiles {
-			let text = &texts[*path];
+			let text = &texts[path];
 			let packages = match kind {
 				Kind::Npm => lockfile::npm::parse(text, repository.name),
 				Kind::Uv => lockfile::uv::parse(text),
@@ -394,9 +401,16 @@ impl GitHub {
 				}
 			}
 			.map_err(|e| unparseable(path, e))?;
-			read.push((directory(path), packages));
+			read.push((directory(path).to_owned(), packages));
 		}
 		Ok(qualified(read))
+	}
+}
+
+fn unparseable(lockfile: &str, e: ParseError) -> Failure {
+	Failure::Unparseable {
+		lockfile: lockfile.to_owned(),
+		reason: e.to_string(),
 	}
 }
 
@@ -450,7 +464,7 @@ fn member_manifests(
 /// The packages of every lockfile together, with a workspace package named by
 /// its lockfile's directory as well wherever two lockfiles have one of the same
 /// name, so each is told apart.
-fn qualified(read: Vec<(&str, Vec<RepositoryPackage>)>) -> Vec<RepositoryPackage> {
+fn qualified(read: Vec<(String, Vec<RepositoryPackage>)>) -> Vec<RepositoryPackage> {
 	let mut lockfiles_by_name: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
 	for (dir, packages) in &read {
 		for path in packages.iter().flat_map(|package| &package.paths) {
@@ -474,7 +488,7 @@ fn qualified(read: Vec<(&str, Vec<RepositoryPackage>)>) -> Vec<RepositoryPackage
 					path.workspace_package = format!(
 						"{} ({})",
 						path.workspace_package,
-						if dir.is_empty() { "." } else { dir }
+						if dir.is_empty() { "." } else { &dir }
 					);
 				}
 			}
@@ -578,8 +592,11 @@ mod tests {
 			}],
 		};
 		let out = qualified(vec![
-			("", vec![package("a", "app"), package("b", "web")]),
-			("tools", vec![package("c", "app")]),
+			(
+				String::new(),
+				vec![package("a", "app"), package("b", "web")],
+			),
+			("tools".to_owned(), vec![package("c", "app")]),
 		]);
 		let names: Vec<&str> = out
 			.iter()

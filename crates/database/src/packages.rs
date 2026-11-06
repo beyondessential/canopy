@@ -257,13 +257,13 @@ impl RepositoryRead {
 	}
 
 	/// Drop what is held for repositories no longer tracked.
-	pub async fn forget_others(conn: &mut AsyncPgConnection, tracked: &[&str]) -> Result<()> {
+	pub async fn forget_others(conn: &mut AsyncPgConnection, tracked: Vec<String>) -> Result<()> {
 		diesel::sql_query("DELETE FROM repository_packages WHERE repository <> ALL($1)")
-			.bind::<sql_types::Array<sql_types::Text>, _>(tracked)
+			.bind::<sql_types::Array<sql_types::Text>, _>(&tracked)
 			.execute(conn)
 			.await?;
 		diesel::sql_query("DELETE FROM repository_reads WHERE repository <> ALL($1)")
-			.bind::<sql_types::Array<sql_types::Text>, _>(tracked)
+			.bind::<sql_types::Array<sql_types::Text>, _>(&tracked)
 			.execute(conn)
 			.await?;
 		Ok(())

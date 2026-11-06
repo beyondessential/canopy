@@ -140,7 +140,8 @@ pub fn parse(lockfile: &str, manifests: &[&str]) -> Result<Vec<RepositoryPackage
 			.push(index);
 	}
 	let locate = |dependency: &Dependency| -> Option<usize> {
-		let candidates = by_name.get(&(dependency.name.as_str(), dependency.version.to_string()))?;
+		let candidates =
+			by_name.get(&(dependency.name.as_str(), dependency.version.to_string()))?;
 		match candidates.as_slice() {
 			[only] => Some(*only),
 			several => several
@@ -183,7 +184,9 @@ pub fn parse(lockfile: &str, manifests: &[&str]) -> Result<Vec<RepositoryPackage
 			let Some(to) = locate(dependency) else {
 				continue;
 			};
-			let declared = manifest.dependencies.get(&normalised(dependency.name.as_str()));
+			let declared = manifest
+				.dependencies
+				.get(&normalised(dependency.name.as_str()));
 			let scopes: Vec<Scope> = match declared {
 				Some(scopes) => scopes.iter().copied().collect(),
 				None => vec![Scope::Runtime],
@@ -209,7 +212,7 @@ pub fn parse(lockfile: &str, manifests: &[&str]) -> Result<Vec<RepositoryPackage
 					found.reach(
 						package.name.as_str(),
 						&package.version.to_string(),
-						&member.name,
+						member.name.as_str(),
 						scope,
 						optional,
 						chain,
@@ -341,9 +344,21 @@ itoa = "1"
 	#[test]
 	fn dependency_kinds_become_scopes() {
 		let packages = parse(&lockfile(), &[APP, CORE]).unwrap();
-		assert!(path(find(&packages, "serde"), "app", Scope::Runtime).unwrap().direct);
-		assert!(path(find(&packages, "cc"), "app", Scope::Build).unwrap().direct);
-		assert!(path(find(&packages, "tempfile"), "app", Scope::Development).unwrap().direct);
+		assert!(
+			path(find(&packages, "serde"), "app", Scope::Runtime)
+				.unwrap()
+				.direct
+		);
+		assert!(
+			path(find(&packages, "cc"), "app", Scope::Build)
+				.unwrap()
+				.direct
+		);
+		assert!(
+			path(find(&packages, "tempfile"), "app", Scope::Development)
+				.unwrap()
+				.direct
+		);
 		assert_eq!(find(&packages, "cc").paths.len(), 1);
 	}
 
@@ -371,18 +386,25 @@ itoa = "1"
 
 		let from_app = path(itoa, "app", Scope::Runtime).unwrap();
 		assert_eq!(from_app.chain.len(), 2);
-		assert!(from_app.chain == ["serde", "itoa"] || from_app.chain == ["core", "itoa"] || from_app.chain == ["tool", "itoa"]);
+		assert!(
+			from_app.chain == ["serde", "itoa"]
+				|| from_app.chain == ["core", "itoa"]
+				|| from_app.chain == ["tool", "itoa"]
+		);
 		assert!(path(itoa, "core", Scope::Runtime).unwrap().direct);
 
 		assert!(
-			!packages.iter().any(|p| p.name == "tool" || p.name == "core"),
+			!packages
+				.iter()
+				.any(|p| p.name == "tool" || p.name == "core"),
 			"only crates.io packages are held"
 		);
 	}
 
 	#[test]
 	fn a_workspace_manifest_names_its_members_and_exclusions() {
-		let manifest = "[workspace]\nmembers = [\"crates/*\", \"./tools/x/\"]\nexclude = [\"crates/old\"]\n";
+		let manifest =
+			"[workspace]\nmembers = [\"crates/*\", \"./tools/x/\"]\nexclude = [\"crates/old\"]\n";
 		assert_eq!(
 			workspace(manifest).unwrap(),
 			Workspace {

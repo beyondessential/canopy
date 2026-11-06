@@ -147,7 +147,9 @@ pub async fn get(
 	Json(args): Json<VulnerabilityItemArgs>,
 ) -> Result<Json<ItemDetail>> {
 	let mut conn = state.db.get().await?;
-	Ok(Json(ItemDetail::load(&mut conn, &args.id, &args.source).await?))
+	Ok(Json(
+		ItemDetail::load(&mut conn, &args.id, &args.source).await?,
+	))
 }
 
 /// A decision to record.
