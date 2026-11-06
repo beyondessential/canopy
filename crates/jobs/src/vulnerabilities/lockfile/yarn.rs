@@ -127,7 +127,9 @@ struct Manifest {
 /// entry still names the one it asked for.
 #[derive(Debug)]
 struct Override {
-	/// The package the dependency must be of, where the entry names one.
+	/// The package the dependency must be of, where the pattern names one: the
+	/// `d2` of both `d2/left-pad` and `d2/**/left-pad`. A pattern that names
+	/// none, such as `left-pad` or `**/left-pad`, is any package.
 	parent: Option<String>,
 	name: String,
 	/// The range the dependency must ask for, where the entry names one.
@@ -151,7 +153,14 @@ impl Override {
 			n => n - 1,
 		};
 		let name = segments[name_from..].join("/");
-		let parent = segments[..name_from].join("/");
+		// `**` stands for any depth, so what is left after dropping it is the
+		// package the dependency must be of, and nothing left is any package.
+		let parent = segments[..name_from]
+			.iter()
+			.filter(|segment| **segment != "**")
+			.copied()
+			.collect::<Vec<&str>>()
+			.join("/");
 		Some(Self {
 			parent: (!parent.is_empty()).then_some(parent),
 			name,
@@ -173,7 +182,7 @@ impl Override {
 			&& self
 				.parent
 				.as_ref()
-				.is_none_or(|parent| parent.contains("**") || *parent == from.name)
+				.is_none_or(|parent| *parent == from.name)
 	}
 }
 
@@ -215,13 +224,14 @@ impl Resolver<'_> {
 
 impl Manifest {
 	/// The scope a workspace depends on a package by, and whether optionally.
-	/// A dependency the manifest does not say anything about is taken as a plain
-	/// runtime one.
+	/// `optionalDependencies` wins over `dependencies` where both name a
+	/// package, as npm and Yarn both have it. A dependency the manifest does not
+	/// say anything about is taken as a plain runtime one.
 	fn kind(&self, name: &str) -> (Scope, bool) {
-		if self.dependencies.contains_key(name) {
-			(Scope::Runtime, false)
-		} else if self.optional_dependencies.contains_key(name) {
+		if self.optional_dependencies.contains_key(name) {
 			(Scope::Runtime, true)
+		} else if self.dependencies.contains_key(name) {
+			(Scope::Runtime, false)
 		} else if self.dev_dependencies.contains_key(name) {
 			(Scope::Development, false)
 		} else {
@@ -715,6 +725,84 @@ __metadata:
 				.unwrap()
 				.direct
 		);
+	}
+
+	#[test]
+	fn a_dependency_listed_as_both_plain_and_optional_is_optional() {
+		let lockfile = r#"__metadata:
+  version: 8
+
+"app@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "app@workspace:."
+  dependencies:
+    fsevents: "npm:^2"
+  languageName: unknown
+  linkType: soft
+
+"fsevents@npm:^2":
+  version: 2.3.3
+  resolution: "fsevents@npm:2.3.3"
+  languageName: node
+  linkType: hard
+"#;
+		let manifests = BTreeMap::from([(
+			String::new(),
+			r#"{"name":"app",
+			"dependencies":{"fsevents":"^2"},
+			"optionalDependencies":{"fsevents":"^2"}}"#
+				.to_owned(),
+		)]);
+		let packages = read(lockfile).unwrap().parse("app", &manifests).unwrap();
+		let fsevents = find(&packages, "fsevents", "2.3.3");
+		assert!(
+			path(fsevents, "app", Scope::Runtime, true).is_some(),
+			"optionalDependencies wins: {:?}",
+			fsevents.paths
+		);
+	}
+
+	#[test]
+	fn a_resolution_applies_to_the_dependent_its_pattern_names() {
+		let dependent = |name: &str| Entry {
+			name: name.to_owned(),
+			protocol: "npm".into(),
+			location: String::new(),
+			resolution: format!("{name}@npm:1.0.0"),
+			version: Some("1.0.0".into()),
+			dependencies: BTreeMap::new(),
+			optional: BTreeSet::new(),
+		};
+		let applies = |pattern: &str, to: &str| {
+			Override::new(pattern, "1.2.3")
+				.unwrap()
+				.applies(&dependent(to), "left-pad", "npm:^1")
+		};
+
+		assert!(
+			applies("left-pad", "anything"),
+			"a bare name is any dependent"
+		);
+		assert!(applies("**/left-pad", "anything"));
+		assert!(applies("d2/left-pad", "d2"));
+		assert!(!applies("d2/left-pad", "e2"));
+
+		assert!(applies("d2/**/left-pad", "d2"));
+		assert!(
+			!applies("d2/**/left-pad", "e2"),
+			"a parent that names a package is not a wildcard"
+		);
+
+		assert!(Override::new("left-pad@^1", "1.2.3").unwrap().applies(
+			&dependent("d2"),
+			"left-pad",
+			"npm:^1"
+		));
+		assert!(!Override::new("left-pad@^2", "1.2.3").unwrap().applies(
+			&dependent("d2"),
+			"left-pad",
+			"npm:^1"
+		));
 	}
 
 	#[test]
