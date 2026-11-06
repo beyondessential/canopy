@@ -623,13 +623,28 @@ async fn one_bad_lockfile_leaves_what_is_held_and_raises_the_self_alert_until_a_
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_repository_whose_first_read_fails_is_reported_at_once() {
+async fn a_repository_whose_first_read_fails_is_given_a_day_before_it_is_reported() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let fake: Shared = Arc::default();
 		let base = serve(fake.clone()).await;
-		let report = scanner(&base).read_repositories(&mut conn).await.unwrap();
+		let scanner = scanner(&base);
+		let report = scanner.read_repositories(&mut conn).await.unwrap();
 		assert_eq!(report.failed, 1, "GitHub does not know the repository");
+		let alert = self_alerts::current(&mut conn, VULNERABILITY_REPOSITORIES_REF)
+			.await
+			.unwrap();
+		assert!(
+			alert.is_none_or(|alert| !alert.active),
+			"a first failure is not yet a day without a read"
+		);
 
+		diesel::sql_query(
+			"UPDATE repository_reads SET first_attempt_at = now() - interval '2 days'",
+		)
+		.execute(&mut conn)
+		.await
+		.unwrap();
+		scanner.read_repositories(&mut conn).await.unwrap();
 		let alert = self_alerts::current(&mut conn, VULNERABILITY_REPOSITORIES_REF)
 			.await
 			.unwrap()

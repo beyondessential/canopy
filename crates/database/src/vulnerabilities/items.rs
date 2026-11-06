@@ -99,7 +99,8 @@ const ITEM_CTES: &str = "agg AS ( \
 	  JOIN vulnerabilities v ON v.id = i.vulnerability_id \
 	  LEFT JOIN agg a ON a.vulnerability_id = i.vulnerability_id AND a.source = i.source \
 	  LEFT JOIN paths p ON p.vulnerability_id = i.vulnerability_id AND p.source = i.source \
-	  LEFT JOIN state s ON s.vulnerability_id = i.vulnerability_id AND s.source = i.source)";
+	  LEFT JOIN state s ON s.vulnerability_id = i.vulnerability_id AND s.source = i.source \
+	  WHERE i.source IN (/*TRACKED*/))";
 
 /// The conditions of a [`ListQuery`] over `base`, bound from `$3` (and the
 /// identifiers of `$1`), each named so that the facet counts, which drop one
@@ -163,8 +164,22 @@ const RANK: &str = "CASE WHEN $12::text IS NULL THEN 0::float8 \
 /// The word similarity a search must reach to match.
 const SEARCH_THRESHOLD: &str = "0.4";
 
+/// The sources an item can be of, as SQL literals. Items of a repository no
+/// longer tracked are kept, with their decisions, but are not part of the view,
+/// so what is counted is what can be shown.
+fn tracked_sources() -> String {
+	REPOSITORIES
+		.iter()
+		.map(|repository| repository.name)
+		.chain([LINUX])
+		.map(|name| format!("'{name}'"))
+		.collect::<Vec<_>>()
+		.join(", ")
+}
+
 fn view(tail: &str) -> String {
-	format!("WITH {EXPOSURE_CTE}, {ITEM_CTES} {tail}")
+	let items = ITEM_CTES.replace("/*TRACKED*/", &tracked_sources());
+	format!("WITH {EXPOSURE_CTE}, {items} {tail}")
 }
 
 fn production() -> String {

@@ -909,6 +909,7 @@ diesel::table! {
 		repository -> Text,
 		commit_sha -> Nullable<Text>,
 		read_at -> Nullable<Timestamptz>,
+		first_attempt_at -> Timestamptz,
 		last_attempt_at -> Timestamptz,
 		failure -> Nullable<Text>,
 	}

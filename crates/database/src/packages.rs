@@ -270,8 +270,9 @@ impl RepositoryRead {
 	}
 
 	/// The tracked repositories not read for `after`, with why the last attempt
-	/// failed, where it did. A repository nothing has tried to read yet is not
-	/// stale.
+	/// failed, where it did. One never read is measured from when it was first
+	/// tried, so a first attempt that fails is given the same time. A repository
+	/// nothing has tried to read yet is not stale.
 	pub async fn stale(
 		conn: &mut AsyncPgConnection,
 		after: jiff::SignedDuration,
@@ -279,8 +280,7 @@ impl RepositoryRead {
 		diesel::sql_query(
 			"SELECT repository, commit_sha, read_at, last_attempt_at, failure \
 			 FROM repository_reads \
-			 WHERE read_at < now() - make_interval(secs => $1) \
-			 OR (read_at IS NULL AND failure IS NOT NULL) \
+			 WHERE coalesce(read_at, first_attempt_at) < now() - make_interval(secs => $1) \
 			 ORDER BY repository",
 		)
 		.bind::<sql_types::Double, _>(after.as_secs_f64())

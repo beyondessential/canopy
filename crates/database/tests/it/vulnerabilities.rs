@@ -533,11 +533,54 @@ async fn a_repository_is_stale_when_it_has_not_been_read_for_the_period() {
 		.execute(&mut conn)
 		.await
 		.unwrap();
-		let stale = RepositoryRead::stale(&mut conn, SignedDuration::from_hours(24))
-			.await
-			.unwrap();
-		let names: Vec<&str> = stale.iter().map(|r| r.repository.as_str()).collect();
-		assert_eq!(names, ["canopy", "tamanu"]);
+		let day = SignedDuration::from_hours(24);
+		let names = |stale: Vec<RepositoryRead>| -> Vec<String> {
+			stale.into_iter().map(|r| r.repository).collect()
+		};
+		assert_eq!(
+			names(RepositoryRead::stale(&mut conn, day).await.unwrap()),
+			["tamanu"],
+			"a repository never read is given a day from its first attempt"
+		);
+
+		diesel::sql_query(
+			"UPDATE repository_reads SET first_attempt_at = now() - interval '2 days' \
+			 WHERE repository = 'canopy'",
+		)
+		.execute(&mut conn)
+		.await
+		.unwrap();
+		assert_eq!(
+			names(RepositoryRead::stale(&mut conn, day).await.unwrap()),
+			["canopy", "tamanu"]
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn items_of_a_repository_no_longer_tracked_are_neither_counted_nor_listed() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		tamanu_item(&mut conn).await;
+		diesel::sql_query(
+			"INSERT INTO vulnerability_items (vulnerability_id, source) VALUES ('GHSA-1', 'dropped')",
+		)
+		.execute(&mut conn)
+		.await
+		.unwrap();
+
+		let page = ItemSummary::list(
+			&mut conn,
+			&ListQuery {
+				include_closed: true,
+				..Default::default()
+			},
+		)
+		.await
+		.unwrap();
+		assert_eq!(page.total, 1, "the dropped item is not in the total");
+		assert_eq!(page.items.len(), 1);
+		assert_eq!(ItemSummary::needs_triage_count(&mut conn).await.unwrap(), 1);
 	})
 	.await;
 }
