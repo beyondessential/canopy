@@ -15149,6 +15149,7 @@
             ]
           },
           "name": {
+            "description": "The package's name within its ecosystem.",
             "type": "string"
           },
           "scopes": {
@@ -15551,10 +15552,12 @@
         "description": "How many items a choice of a filter would give.",
         "properties": {
           "count": {
+            "description": "How many items choosing it would give.",
             "format": "int64",
             "type": "integer"
           },
           "value": {
+            "description": "The choice, as the filter takes it.",
             "type": "string"
           }
         },
@@ -15568,24 +15571,28 @@
         "description": "The choices of each filter, with how many items each would give with every\nother filter, the closed switch and the search applied.",
         "properties": {
           "scope": {
+            "description": "Each scope a path can have, with `optional`.",
             "items": {
               "$ref": "#/components/schemas/VulnerabilityFacetCount"
             },
             "type": "array"
           },
           "severity": {
+            "description": "Each severity, critical first.",
             "items": {
               "$ref": "#/components/schemas/VulnerabilityFacetCount"
             },
             "type": "array"
           },
           "source": {
+            "description": "Every tracked repository, and Linux.",
             "items": {
               "$ref": "#/components/schemas/VulnerabilityFacetCount"
             },
             "type": "array"
           },
           "status": {
+            "description": "Each triage status, needs triage first.",
             "items": {
               "$ref": "#/components/schemas/VulnerabilityFacetCount"
             },
@@ -16116,6 +16123,7 @@
             ]
           },
           "name": {
+            "description": "The package's name within its ecosystem.",
             "type": "string"
           },
           "paths": {
@@ -16126,6 +16134,7 @@
             "type": "array"
           },
           "version": {
+            "description": "The version the default branch carries.",
             "type": "string"
           }
         },
@@ -16200,7 +16209,8 @@
         "description": "A sort the caller chose.",
         "properties": {
           "column": {
-            "$ref": "#/components/schemas/VulnerabilitySortColumn"
+            "$ref": "#/components/schemas/VulnerabilitySortColumn",
+            "description": "The column to order by."
           },
           "descending": {
             "description": "Highest first. Defaults to ascending.",

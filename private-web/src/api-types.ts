@@ -14824,6 +14824,7 @@ export interface components {
              *     one.
              */
             min_fix_version?: string | null;
+            /** @description The package's name within its ecosystem. */
             name: string;
             /**
              * @description The scopes of the paths that reach it, with `optional` where one is
@@ -14994,8 +14995,12 @@ export interface components {
         };
         /** @description How many items a choice of a filter would give. */
         VulnerabilityFacetCount: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description How many items choosing it would give.
+             */
             count: number;
+            /** @description The choice, as the filter takes it. */
             value: string;
         };
         /**
@@ -15003,9 +15008,13 @@ export interface components {
          *     other filter, the closed switch and the search applied.
          */
         VulnerabilityFacets: {
+            /** @description Each scope a path can have, with `optional`. */
             scope: components["schemas"]["VulnerabilityFacetCount"][];
+            /** @description Each severity, critical first. */
             severity: components["schemas"]["VulnerabilityFacetCount"][];
+            /** @description Every tracked repository, and Linux. */
             source: components["schemas"]["VulnerabilityFacetCount"][];
+            /** @description Each triage status, needs triage first. */
             status: components["schemas"]["VulnerabilityFacetCount"][];
             /** @description `yes` and `no`: whether the item has a suggestion. */
             suggestion: components["schemas"]["VulnerabilityFacetCount"][];
@@ -15191,9 +15200,11 @@ export interface components {
             fixed_in: string[];
             /** @description The lowest version above it that fixes the flaw. */
             min_fix_version?: string | null;
+            /** @description The package's name within its ecosystem. */
             name: string;
             /** @description How workspace packages reach it. */
             paths: components["schemas"]["VulnerabilityPackagePath"][];
+            /** @description The version the default branch carries. */
             version: string;
         };
         /** @description How a workspace package reaches a package by paths of one scope. */
@@ -15224,6 +15235,7 @@ export interface components {
         VulnerabilitySeverity: "unrated" | "low" | "medium" | "high" | "critical";
         /** @description A sort the caller chose. */
         VulnerabilitySort: {
+            /** @description The column to order by. */
             column: components["schemas"]["VulnerabilitySortColumn"];
             /** @description Highest first. Defaults to ascending. */
             descending?: boolean;

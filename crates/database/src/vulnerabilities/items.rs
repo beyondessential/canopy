@@ -190,6 +190,7 @@ impl SortColumn {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilitySort)]
 pub struct Sort {
+	/// The column to order by.
 	pub column: SortColumn,
 	/// Highest first. Defaults to ascending.
 	#[serde(default)]
@@ -300,7 +301,9 @@ pub struct Listing {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityFacetCount)]
 pub struct FacetCount {
+	/// The choice, as the filter takes it.
 	pub value: String,
+	/// How many items choosing it would give.
 	pub count: i64,
 }
 
@@ -309,9 +312,13 @@ pub struct FacetCount {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityFacets)]
 pub struct Facets {
+	/// Every tracked repository, and Linux.
 	pub source: Vec<FacetCount>,
+	/// Each triage status, needs triage first.
 	pub status: Vec<FacetCount>,
+	/// Each scope a path can have, with `optional`.
 	pub scope: Vec<FacetCount>,
+	/// Each severity, critical first.
 	pub severity: Vec<FacetCount>,
 	/// `yes` and `no`: whether the item has a suggestion.
 	pub suggestion: Vec<FacetCount>,
@@ -390,6 +397,7 @@ macro_rules! searching {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityAffectedPackage)]
 pub struct AffectedPackage {
+	/// The package's name within its ecosystem.
 	pub name: String,
 	/// The version carried.
 	pub version: String,
@@ -831,7 +839,9 @@ impl ItemSummary {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilityPackageDetail)]
 pub struct PackageDetail {
+	/// The package's name within its ecosystem.
 	pub name: String,
+	/// The version the default branch carries.
 	pub version: String,
 	/// The lowest version above it that fixes the flaw.
 	pub min_fix_version: Option<String>,
