@@ -313,7 +313,7 @@ Beyond the fields every report carries, a migration-testing report carries:
 - the **total elapsed time** of the migration run;
 - the **elapsed time of each migration** that ran;
 - the **size of the data**, both before the migrations ran and after;
-- where the application rebuilds derived data after migrating, how long that **rebuild** took in all, and each step of it that did work, with the rows it wrote.
+- where the application does further work after migrating, such as rebuilding derived data, how long that **post-migration work** took in all, and each step of it that did something, with the rows it wrote.
 
 The report's outcome and replica health describe the restore, and the named failing migration describes the migrations.
 A restore that succeeded into a healthy replica whose migrations then failed reports a healthy restore and names the migration that failed.
@@ -326,8 +326,8 @@ The size before the run is what lets a duration be read against the volume that 
 The growth between the two figures is its own finding: a migration that backfills a large table leaves the machine needing disk it was not provisioned for, and every group that has yet to run it will grow the same way in proportion to its own data.
 Growth is also a second reason a window overruns, since the write volume that produces it is time the application spends down.
 
-The rebuild is reported apart from the migrations because it is part of the same window but is not a migration: it can take far longer than every migration together, and it is the data's volume, not the version's changes, that sets how long.
-A consumer reports the rebuild where the version records it; a version that records only the total reports no steps.
+Post-migration work is reported apart from the migrations because it is part of the same window but is not a migration: it can take far longer than every migration together, and it is the data's volume, not the version's changes, that sets how long.
+A consumer reports it where the version records it; a version that records only the total reports no steps.
 
 ### Verdicts
 

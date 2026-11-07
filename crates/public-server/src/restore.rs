@@ -31,7 +31,7 @@ use commons_types::server::rank::ServerRank;
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
-	migration_tests::{self, MigrationTest, NewLookupRebuild, NewMigrationTest},
+	migration_tests::{self, MigrationTest, NewMigrationTest, NewPostMigration},
 	pg_duration::PgDuration,
 	reporting_schemas::{NewReportingSchemaBuild, ReportingSchemaBuild},
 	restore::{
@@ -1035,15 +1035,16 @@ pub struct MigrationArgs {
 	pub data_bytes_after: i64,
 	/// One entry per migration that ran, in the order they ran.
 	pub timings: Vec<MigrationTimingArgs>,
-	/// Whole seconds the application's lookup rebuild after the migrations
-	/// took. Omit it where the version does not record the rebuild.
+	/// Whole seconds the work the application does after its migrations took,
+	/// such as rebuilding derived data. Omit it where the version does not
+	/// record it.
 	#[serde(default)]
-	pub lookup_rebuild_elapsed_seconds: Option<i64>,
-	/// Each step of that rebuild which did work, in the order they ran. Empty
+	pub post_migration_elapsed_seconds: Option<i64>,
+	/// Each step of that work which did something, in the order they ran. Empty
 	/// where the version records only the total; a report with steps and no
-	/// `lookup_rebuild_elapsed_seconds` is refused.
+	/// `post_migration_elapsed_seconds` is refused.
 	#[serde(default)]
-	pub lookup_rebuild_timings: Vec<LookupRebuildTimingArgs>,
+	pub post_migration_timings: Vec<PostMigrationTimingArgs>,
 }
 
 /// What a reporting-schema build reports beyond its replica's restore health.
@@ -1075,10 +1076,10 @@ pub struct MigrationTimingArgs {
 	pub elapsed_seconds: i64,
 }
 
-/// How long one step of the lookup rebuild took.
+/// How long one step of the work after the migrations took.
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct LookupRebuildTimingArgs {
-	/// The model, or the pass, as the application names it.
+pub struct PostMigrationTimingArgs {
+	/// The step, as the application names it.
 	pub name: String,
 	/// Rows the step wrote, where the application counts them.
 	pub rows: Option<i64>,
@@ -1317,11 +1318,11 @@ async fn verification(
 			let application_id =
 				resolve_migration_application(&mut conn, &migration, machine_id, target_version_id)
 					.await?;
-			if migration.lookup_rebuild_elapsed_seconds.is_none()
-				&& !migration.lookup_rebuild_timings.is_empty()
+			if migration.post_migration_elapsed_seconds.is_none()
+				&& !migration.post_migration_timings.is_empty()
 			{
 				return Err(AppError::BadRequest(
-					"lookup_rebuild_timings sent without lookup_rebuild_elapsed_seconds".into(),
+					"post_migration_timings sent without post_migration_elapsed_seconds".into(),
 				));
 			}
 			MigrationTest::record(
@@ -1441,12 +1442,12 @@ impl MigrationArgs {
 					)
 				})
 				.collect(),
-			lookup_rebuild: self
-				.lookup_rebuild_elapsed_seconds
-				.map(|seconds| NewLookupRebuild {
+			post_migration: self
+				.post_migration_elapsed_seconds
+				.map(|seconds| NewPostMigration {
 					elapsed: PgDuration(SignedDuration::from_secs(seconds)),
 					steps: self
-						.lookup_rebuild_timings
+						.post_migration_timings
 						.into_iter()
 						.map(|timing| {
 							(

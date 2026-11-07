@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "2.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "098143bb3017825a145a74f2bc37bf8409fd1e2dd4b1d41c76c11bf826004a25";
+pub const OPENAPI_BLAKE3: &str = "1c82f379d55f9916d7e000d57b8336f84c7e4b0a4d95e3754c7a9e4029f3126a";
 
 /// Error types.
 pub mod error {
@@ -1691,52 +1691,6 @@ of Canopy support.*/
     #[builder(default)]
     pub semantics: ::std::vec::Vec<::std::string::String>,
 }
-///How long one step of the lookup rebuild took.
-///
-/// <details><summary>JSON schema</summary>
-///
-/// ```json
-///{
-///  "description": "How long one step of the lookup rebuild took.",
-///  "type": "object",
-///  "required": [
-///    "elapsed_seconds",
-///    "name"
-///  ],
-///  "properties": {
-///    "elapsed_seconds": {
-///      "description": "Whole seconds it took.",
-///      "type": "integer",
-///      "format": "int64"
-///    },
-///    "name": {
-///      "description": "The model, or the pass, as the application names it.",
-///      "type": "string"
-///    },
-///    "rows": {
-///      "description": "Rows the step wrote, where the application counts them.",
-///      "type": [
-///        "integer",
-///        "null"
-///      ],
-///      "format": "int64"
-///    }
-///  }
-///}
-/// ```
-/// </details>
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
-#[derive(::bon::Builder)]
-#[non_exhaustive]
-pub struct LookupRebuildTimingArgs {
-    ///Whole seconds it took.
-    pub elapsed_seconds: i64,
-    ///The model, or the pass, as the application names it.
-    pub name: ::std::string::String,
-    ///Rows the step wrote, where the application counts them.
-    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-    pub rows: ::std::option::Option<i64>,
-}
 ///One installed package, by its source package.
 ///
 /// <details><summary>JSON schema</summary>
@@ -1916,19 +1870,19 @@ on the wire.*/
 ///        "null"
 ///      ]
 ///    },
-///    "lookup_rebuild_elapsed_seconds": {
-///      "description": "Whole seconds the application's lookup rebuild after the migrations\ntook. Omit it where the version does not record the rebuild.",
+///    "post_migration_elapsed_seconds": {
+///      "description": "Whole seconds the work the application does after its migrations took,\nsuch as rebuilding derived data. Omit it where the version does not\nrecord it.",
 ///      "type": [
 ///        "integer",
 ///        "null"
 ///      ],
 ///      "format": "int64"
 ///    },
-///    "lookup_rebuild_timings": {
-///      "description": "Each step of that rebuild which did work, in the order they ran. Empty\nwhere the version records only the total; a report with steps and no\n`lookup_rebuild_elapsed_seconds` is refused.",
+///    "post_migration_timings": {
+///      "description": "Each step of that work which did something, in the order they ran. Empty\nwhere the version records only the total; a report with steps and no\n`post_migration_elapsed_seconds` is refused.",
 ///      "type": "array",
 ///      "items": {
-///        "$ref": "#/components/schemas/LookupRebuildTimingArgs"
+///        "$ref": "#/components/schemas/PostMigrationTimingArgs"
 ///      }
 ///    },
 ///    "target_version": {
@@ -1986,16 +1940,17 @@ to fix. Send no connection strings or credentials. Kept to the first
     ///The migration that failed, when one did.
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub failed_migration: ::std::option::Option<::std::string::String>,
-    /**Whole seconds the application's lookup rebuild after the migrations
-took. Omit it where the version does not record the rebuild.*/
+    /**Whole seconds the work the application does after its migrations took,
+such as rebuilding derived data. Omit it where the version does not
+record it.*/
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-    pub lookup_rebuild_elapsed_seconds: ::std::option::Option<i64>,
-    /**Each step of that rebuild which did work, in the order they ran. Empty
+    pub post_migration_elapsed_seconds: ::std::option::Option<i64>,
+    /**Each step of that work which did something, in the order they ran. Empty
 where the version records only the total; a report with steps and no
-`lookup_rebuild_elapsed_seconds` is refused.*/
+`post_migration_elapsed_seconds` is refused.*/
     #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
     #[builder(default)]
-    pub lookup_rebuild_timings: ::std::vec::Vec<LookupRebuildTimingArgs>,
+    pub post_migration_timings: ::std::vec::Vec<PostMigrationTimingArgs>,
     /**The version whose migrations were applied, as semver, taken from the
 worklist entry's `target_version`. This is the version the consumer
 actually migrated to; send it in preference to echoing the identifier.*/
@@ -2142,6 +2097,52 @@ impl ::std::convert::TryFrom<::std::string::String> for ParamType {
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
+}
+///How long one step of the work after the migrations took.
+///
+/// <details><summary>JSON schema</summary>
+///
+/// ```json
+///{
+///  "description": "How long one step of the work after the migrations took.",
+///  "type": "object",
+///  "required": [
+///    "elapsed_seconds",
+///    "name"
+///  ],
+///  "properties": {
+///    "elapsed_seconds": {
+///      "description": "Whole seconds it took.",
+///      "type": "integer",
+///      "format": "int64"
+///    },
+///    "name": {
+///      "description": "The step, as the application names it.",
+///      "type": "string"
+///    },
+///    "rows": {
+///      "description": "Rows the step wrote, where the application counts them.",
+///      "type": [
+///        "integer",
+///        "null"
+///      ],
+///      "format": "int64"
+///    }
+///  }
+///}
+/// ```
+/// </details>
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::bon::Builder)]
+#[non_exhaustive]
+pub struct PostMigrationTimingArgs {
+    ///Whole seconds it took.
+    pub elapsed_seconds: i64,
+    ///The step, as the application names it.
+    pub name: ::std::string::String,
+    ///Rows the step wrote, where the application counts them.
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub rows: ::std::option::Option<i64>,
 }
 /**Standard error response body, returned for every non-2xx response.
 

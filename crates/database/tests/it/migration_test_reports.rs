@@ -4,7 +4,7 @@ use commons_tests::db::TestDb;
 use commons_types::backup::{BackupType, RestoreIntent, RunOutcome};
 use database::{
 	migration_tests::{
-		MigrationTest, NewLookupRebuild, NewMigrationTest, Verdict, latest_test, verdict,
+		MigrationTest, NewMigrationTest, NewPostMigration, Verdict, latest_test, verdict,
 	},
 	pg_duration::PgDuration,
 	restore::NewBackupRestoreCheck,
@@ -137,7 +137,7 @@ async fn a_passing_test_records_timings_in_order() {
 					("addIndexToFhirJobs".into(), secs(12)),
 					("backfillNoteTypeIds".into(), secs(880)),
 				],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -169,7 +169,7 @@ async fn a_passing_test_records_timings_in_order() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_lookup_rebuild_is_read_back_with_the_test() {
+async fn the_post_migration_is_read_back_with_the_test() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
@@ -188,7 +188,7 @@ async fn the_lookup_rebuild_is_read_back_with_the_test() {
 				data_bytes_before: 0,
 				data_bytes_after: 0,
 				timings: vec![],
-				lookup_rebuild: Some(NewLookupRebuild {
+				post_migration: Some(NewPostMigration {
 					elapsed: secs(1860),
 					steps: vec![
 						("encounters".into(), Some(341_744), secs(298)),
@@ -204,9 +204,9 @@ async fn the_lookup_rebuild_is_read_back_with_the_test() {
 			.await
 			.expect("latest")
 			.expect("a test");
-		assert_eq!(latest.lookup_rebuild_elapsed, Some(secs(1860)));
+		assert_eq!(latest.post_migration_elapsed, Some(secs(1860)));
 		let steps: Vec<(&str, Option<i64>)> = latest
-			.lookup_rebuild_timings
+			.post_migration_timings
 			.iter()
 			.map(|t| (t.name.as_str(), t.rows))
 			.collect();
@@ -239,7 +239,7 @@ async fn a_named_failing_migration_is_a_failed_verdict() {
 				data_bytes_before: 200_000_000_000,
 				data_bytes_after: 200_000_000_000,
 				timings: vec![("backfillNoteTypeIds".into(), secs(45))],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -284,7 +284,7 @@ async fn an_untested_pair_and_an_untested_version() {
 				data_bytes_before: 1,
 				data_bytes_after: 1,
 				timings: vec![],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -369,7 +369,7 @@ async fn a_failure_warns_on_the_server_and_holds_the_version_back() {
 				data_bytes_before: 10,
 				data_bytes_after: 10,
 				timings: vec![],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -472,7 +472,7 @@ async fn tomorrows_snapshot_does_not_file_the_issue_twice() {
 					data_bytes_before: 10,
 					data_bytes_after: 10,
 					timings: vec![],
-					lookup_rebuild: None,
+					post_migration: None,
 				},
 			)
 			.await
@@ -510,7 +510,7 @@ async fn a_later_pass_recovers_the_check() {
 				data_bytes_before: 10,
 				data_bytes_after: 10,
 				timings: vec![],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -531,7 +531,7 @@ async fn a_later_pass_recovers_the_check() {
 				data_bytes_before: 10,
 				data_bytes_after: 12,
 				timings: vec![],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -653,7 +653,7 @@ async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
 				data_bytes_before: 1,
 				data_bytes_after: 1,
 				timings: vec![],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -697,7 +697,7 @@ async fn a_group_shows_where_each_server_stands() {
 					("addIndexToFhirJobs".into(), secs(12)),
 					("backfillNoteTypeIds".into(), secs(3588)),
 				],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -781,7 +781,7 @@ async fn one_report_keeps_backup_health_and_version_readiness_apart() {
 				data_bytes_before: 10,
 				data_bytes_after: 10,
 				timings: vec![],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -829,7 +829,7 @@ async fn a_failed_restore_leaves_the_version_unjudged() {
 				data_bytes_before: 0,
 				data_bytes_after: 0,
 				timings: vec![],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -879,7 +879,7 @@ async fn a_verdict_with_no_declaration_still_surfaces() {
 				data_bytes_before: 10,
 				data_bytes_after: 10,
 				timings: vec![],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -980,7 +980,7 @@ async fn record_test_at(
 			data_bytes_before: 1,
 			data_bytes_after: 1,
 			timings: vec![],
-			lookup_rebuild: None,
+			post_migration: None,
 		},
 	)
 	.await
@@ -1300,7 +1300,7 @@ async fn a_run_already_under_way_does_not_answer_an_ask() {
 				data_bytes_before: 1,
 				data_bytes_after: 1,
 				timings: vec![],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -1358,7 +1358,7 @@ async fn only_the_reporting_consumer_s_run_says_when_it_began() {
 				data_bytes_before: 1,
 				data_bytes_after: 1,
 				timings: vec![],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await
@@ -1400,7 +1400,7 @@ async fn a_report_with_no_run_began_its_elapsed_time_before() {
 				data_bytes_before: 1,
 				data_bytes_after: 1,
 				timings: vec![],
-				lookup_rebuild: None,
+				post_migration: None,
 			},
 		)
 		.await

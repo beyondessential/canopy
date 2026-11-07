@@ -50,7 +50,7 @@ export default function MigrationRunDialog({
 	const timings = [...latest.timings].sort((a, b) => a.ordinal - b.ordinal);
 	const longest = timings.reduce((max, t) => Math.max(max, t.elapsed), 0);
 	const slowest = longest > 0 ? timings.find((t) => t.elapsed === longest) : undefined;
-	const rebuildSteps = [...latest.lookup_rebuild_timings].sort(
+	const postSteps = [...latest.post_migration_timings].sort(
 		(a, b) => a.ordinal - b.ordinal,
 	);
 
@@ -109,18 +109,18 @@ export default function MigrationRunDialog({
 						{slowest?.name ?? "all under a second"}
 					</Stat>
 					<Stat
-						label="Lookup rebuild took"
+						label="After migrations took"
 						value={
-							latest.lookup_rebuild_elapsed == null
+							latest.post_migration_elapsed == null
 								? "—"
-								: formatDuration(latest.lookup_rebuild_elapsed)
+								: formatDuration(latest.post_migration_elapsed)
 						}
 					>
-						{latest.lookup_rebuild_elapsed == null
+						{latest.post_migration_elapsed == null
 							? "not recorded by this version"
-							: rebuildSteps.length === 0
+							: postSteps.length === 0
 								? "steps not recorded by this version"
-								: `${rebuildSteps.length} step${rebuildSteps.length === 1 ? "" : "s"} did work`}
+								: `${postSteps.length} step${postSteps.length === 1 ? "" : "s"} did work`}
 					</Stat>
 					<Stat label="Tested" value={<TimeAgo timestamp={latest.reported_at} />}>
 						<Box component="span" sx={{ fontFamily: "monospace" }}>
@@ -197,10 +197,10 @@ export default function MigrationRunDialog({
 					</Table>
 				</TableContainer>
 
-				{rebuildSteps.length > 0 && (
+				{postSteps.length > 0 && (
 					<>
 						<Typography variant="subtitle2" component="h3" sx={{ mt: 3, mb: 1 }}>
-							Lookup rebuild
+							After migrations
 						</Typography>
 						<TableContainer sx={{ maxHeight: "40vh" }}>
 							<Table size="small" stickyHeader sx={{ tableLayout: "fixed" }}>
@@ -216,8 +216,8 @@ export default function MigrationRunDialog({
 									</TableRow>
 								</TableHead>
 								<TableBody>
-									{rebuildSteps.map((step) => (
-										<TableRow key={step.ordinal} data-testid="lookup-rebuild-timing">
+									{postSteps.map((step) => (
+										<TableRow key={step.ordinal} data-testid="post-migration-timing">
 											<TableCell
 												sx={{ fontFamily: "monospace", overflowWrap: "anywhere" }}
 											>

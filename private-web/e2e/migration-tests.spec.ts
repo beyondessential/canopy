@@ -57,7 +57,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 				{ name: "addIndexToFhirJobs", elapsedSecs: 12 },
 				{ name: "backfillNoteTypeIds", elapsedSecs: 5388 },
 			],
-			lookupRebuild: {
+			postMigration: {
 				elapsedSecs: 1860,
 				steps: [
 					{ name: "encounters", rows: 341_744, elapsedSecs: 298 },
@@ -106,9 +106,9 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			timings.filter({ hasText: "backfillNoteTypeIds" }),
 		).toContainText("1.5h");
 
-		// The rebuild after the migrations is part of the same window.
-		await expect(run).toContainText("Lookup rebuild took");
-		const steps = run.getByTestId("lookup-rebuild-timing");
+		// The work after the migrations is part of the same window.
+		await expect(run).toContainText("After migrations took");
+		const steps = run.getByTestId("post-migration-timing");
 		await expect(steps).toHaveCount(2);
 		await expect(steps.filter({ hasText: "encounters" })).toContainText("341,744");
 

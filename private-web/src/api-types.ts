@@ -9724,12 +9724,12 @@ export interface components {
             failed_migration?: string | null;
             /**
              * Format: int64
-             * @description Whole seconds the lookup rebuild after the migrations took, where it
-             *     was reported.
+             * @description Whole seconds the work after the migrations took, where it was
+             *     reported.
              */
-            lookup_rebuild_elapsed?: number | null;
-            /** @description Each step of that rebuild which did work, in the order they ran. */
-            lookup_rebuild_timings: components["schemas"]["LookupRebuildTiming"][];
+            post_migration_elapsed?: number | null;
+            /** @description Each step of that work which did something, in the order they ran. */
+            post_migration_timings: components["schemas"]["PostMigrationTiming"][];
             /** @description When the consumer reported it. */
             reported_at: string;
             /** @description The snapshot the verdict was reached against. */
@@ -9949,29 +9949,6 @@ export interface components {
             max: components["schemas"]["VersionStr"];
             /** @description Oldest version currently reported by a production server. */
             min: components["schemas"]["VersionStr"];
-        };
-        /**
-         * @description One step of the lookup rebuild that follows the migrations, in the order it
-         *     ran: a model the rebuild wrote rows for, or one of its later passes.
-         */
-        LookupRebuildTiming: {
-            /**
-             * Format: int64
-             * @description Whole seconds the step took.
-             */
-            elapsed: number;
-            /** @description The model, or the pass, as the application names it. */
-            name: string;
-            /**
-             * Format: int32
-             * @description Where it fell in the rebuild, counting from zero.
-             */
-            ordinal: number;
-            /**
-             * Format: int64
-             * @description Rows the step wrote, where the application counts them.
-             */
-            rows?: number | null;
         };
         /**
          * @description A host in the fleet: a box, physical or virtual, that canopy monitors.
@@ -11456,6 +11433,29 @@ export interface components {
              * @description The group to read.
              */
             group_id: string;
+        };
+        /**
+         * @description One step of the work an application does after its migrations, such as
+         *     rebuilding derived data, in the order it ran.
+         */
+        PostMigrationTiming: {
+            /**
+             * Format: int64
+             * @description Whole seconds the step took.
+             */
+            elapsed: number;
+            /** @description The step, as the application names it. */
+            name: string;
+            /**
+             * Format: int32
+             * @description Where it fell among the steps, counting from zero.
+             */
+            ordinal: number;
+            /**
+             * Format: int64
+             * @description Rows the step wrote, where the application counts them.
+             */
+            rows?: number | null;
         };
         /**
          * @description A key as an operator sees it.

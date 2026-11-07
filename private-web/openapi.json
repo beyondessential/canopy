@@ -6633,18 +6633,18 @@
               "null"
             ]
           },
-          "lookup_rebuild_elapsed": {
-            "description": "Whole seconds the lookup rebuild after the migrations took, where it\nwas reported.",
+          "post_migration_elapsed": {
+            "description": "Whole seconds the work after the migrations took, where it was\nreported.",
             "format": "int64",
             "type": [
               "integer",
               "null"
             ]
           },
-          "lookup_rebuild_timings": {
-            "description": "Each step of that rebuild which did work, in the order they ran.",
+          "post_migration_timings": {
+            "description": "Each step of that work which did something, in the order they ran.",
             "items": {
-              "$ref": "#/components/schemas/LookupRebuildTiming"
+              "$ref": "#/components/schemas/PostMigrationTiming"
             },
             "type": "array"
           },
@@ -6683,7 +6683,7 @@
           "data_bytes_before",
           "data_bytes_after",
           "timings",
-          "lookup_rebuild_timings"
+          "post_migration_timings"
         ],
         "type": "object"
       },
@@ -7036,39 +7036,6 @@
         "required": [
           "min",
           "max"
-        ],
-        "type": "object"
-      },
-      "LookupRebuildTiming": {
-        "description": "One step of the lookup rebuild that follows the migrations, in the order it\nran: a model the rebuild wrote rows for, or one of its later passes.",
-        "properties": {
-          "elapsed": {
-            "description": "Whole seconds the step took.",
-            "format": "int64",
-            "type": "integer"
-          },
-          "name": {
-            "description": "The model, or the pass, as the application names it.",
-            "type": "string"
-          },
-          "ordinal": {
-            "description": "Where it fell in the rebuild, counting from zero.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "rows": {
-            "description": "Rows the step wrote, where the application counts them.",
-            "format": "int64",
-            "type": [
-              "integer",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "ordinal",
-          "name",
-          "elapsed"
         ],
         "type": "object"
       },
@@ -9757,6 +9724,39 @@
         },
         "required": [
           "group_id"
+        ],
+        "type": "object"
+      },
+      "PostMigrationTiming": {
+        "description": "One step of the work an application does after its migrations, such as\nrebuilding derived data, in the order it ran.",
+        "properties": {
+          "elapsed": {
+            "description": "Whole seconds the step took.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "description": "The step, as the application names it.",
+            "type": "string"
+          },
+          "ordinal": {
+            "description": "Where it fell among the steps, counting from zero.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rows": {
+            "description": "Rows the step wrote, where the application counts them.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "ordinal",
+          "name",
+          "elapsed"
         ],
         "type": "object"
       },

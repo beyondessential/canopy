@@ -1150,7 +1150,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 					data_bytes_before: 10,
 					data_bytes_after: 10,
 					timings: vec![],
-					lookup_rebuild: None,
+					post_migration: None,
 				},
 			)
 			.await
@@ -1241,7 +1241,7 @@ async fn record_migration_test(
 			data_bytes_before: 10,
 			data_bytes_after: 10,
 			timings: vec![],
-			lookup_rebuild: None,
+			post_migration: None,
 		},
 	)
 	.await
@@ -1538,7 +1538,7 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 			assert_eq!(dispatched.len(), 1, "got {dispatched:?}");
 			let entry = &dispatched[0];
 
-			// Rebuild steps belong to a rebuild total; a report with one and not
+			// Post-migration steps belong to their total; a report with one and not
 			// the other is refused rather than half-recorded.
 			public
 				.post("/restore-verification")
@@ -1560,7 +1560,7 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 						"data_bytes_before": 0,
 						"data_bytes_after": 0,
 						"timings": [],
-						"lookup_rebuild_timings": [{"name": "encounters", "elapsed_seconds": 5}],
+						"post_migration_timings": [{"name": "encounters", "elapsed_seconds": 5}],
 					},
 				}))
 				.await
@@ -1591,8 +1591,8 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 							{"name": "addIndexToFhirJobs", "elapsed_seconds": 12},
 							{"name": "backfillNoteTypeIds", "elapsed_seconds": 880},
 						],
-						"lookup_rebuild_elapsed_seconds": 1860,
-						"lookup_rebuild_timings": [
+						"post_migration_elapsed_seconds": 1860,
+						"post_migration_timings": [
 							{"name": "encounters", "rows": 341_744, "elapsed_seconds": 298},
 							{"name": "self-heal", "elapsed_seconds": 840},
 						],
@@ -1617,13 +1617,13 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 				"a consumer that sends no error leaves it unset"
 			);
 			assert_eq!(
-				latest.lookup_rebuild_elapsed,
+				latest.post_migration_elapsed,
 				Some(database::pg_duration::PgDuration(
 					jiff::SignedDuration::from_secs(1860)
 				))
 			);
 			let steps: Vec<(&str, Option<i64>)> = latest
-				.lookup_rebuild_timings
+				.post_migration_timings
 				.iter()
 				.map(|t| (t.name.as_str(), t.rows))
 				.collect();
