@@ -1818,6 +1818,10 @@ export async function seedMigrationTest(
 		dataBytesBefore?: number;
 		dataBytesAfter?: number;
 		timings?: Array<{ name: string; elapsedSecs: number }>;
+		postMigration?: {
+			elapsedSecs: number;
+			steps: Array<{ name: string; rows: number | null; elapsedSecs: number }>;
+		};
 	},
 ): Promise<void> {
 	const rows = await sql.query<{ id: string }>(
@@ -1833,8 +1837,9 @@ export async function seedMigrationTest(
 	await sql.query(
 		`INSERT INTO migration_tests
 		 (check_id, application_id, target_version_id, total_elapsed, failed_migration, error,
-		  data_bytes_before, data_bytes_after)
-		 VALUES ($1, $2, $3, make_interval(secs => $4), $5, $6, $7, $8)`,
+		  data_bytes_before, data_bytes_after, post_migration_elapsed)
+		 VALUES ($1, $2, $3, make_interval(secs => $4), $5, $6, $7, $8,
+		  CASE WHEN $9::float8 IS NULL THEN NULL ELSE make_interval(secs => $9) END)`,
 		[
 			checkId,
 			opts.applicationId,
@@ -1844,8 +1849,17 @@ export async function seedMigrationTest(
 			opts.error ?? null,
 			opts.dataBytesBefore ?? 0,
 			opts.dataBytesAfter ?? 0,
+			opts.postMigration?.elapsedSecs ?? null,
 		],
 	);
+
+	for (const [ordinal, step] of (opts.postMigration?.steps ?? []).entries()) {
+		await sql.query(
+			`INSERT INTO post_migration_timings (check_id, ordinal, name, rows, elapsed)
+			 VALUES ($1, $2, $3, $4, make_interval(secs => $5))`,
+			[checkId, ordinal, step.name, step.rows, step.elapsedSecs],
+		);
+	}
 
 	for (const [ordinal, timing] of (opts.timings ?? []).entries()) {
 		await sql.query(

@@ -57,6 +57,13 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 				{ name: "addIndexToFhirJobs", elapsedSecs: 12 },
 				{ name: "backfillNoteTypeIds", elapsedSecs: 5388 },
 			],
+			postMigration: {
+				elapsedSecs: 1860,
+				steps: [
+					{ name: "encounters", rows: 341_744, elapsedSecs: 298 },
+					{ name: "self-heal", rows: null, elapsedSecs: 840 },
+				],
+			},
 		});
 
 		await page.goto(`/fleet/groups/${group.id}`);
@@ -98,6 +105,12 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		await expect(
 			timings.filter({ hasText: "backfillNoteTypeIds" }),
 		).toContainText("1.5h");
+
+		// The work after the migrations is part of the same window.
+		await expect(run).toContainText("After migrations took");
+		const steps = run.getByTestId("post-migration-timing");
+		await expect(steps).toHaveCount(2);
+		await expect(steps.filter({ hasText: "encounters" })).toContainText("341,744");
 
 		// The open run is in the URL, so the link shares the migrations.
 		await expect(page).toHaveURL(new RegExp(`migrations=${failed.id}`));

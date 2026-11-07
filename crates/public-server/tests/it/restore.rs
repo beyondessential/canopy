@@ -1150,6 +1150,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 					data_bytes_before: 10,
 					data_bytes_after: 10,
 					timings: vec![],
+					post_migration: None,
 				},
 			)
 			.await
@@ -1240,6 +1241,7 @@ async fn record_migration_test(
 			data_bytes_before: 10,
 			data_bytes_after: 10,
 			timings: vec![],
+			post_migration: None,
 		},
 	)
 	.await
@@ -1536,6 +1538,34 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 			assert_eq!(dispatched.len(), 1, "got {dispatched:?}");
 			let entry = &dispatched[0];
 
+			// Post-migration steps belong to their total; a report with one and not
+			// the other is refused rather than half-recorded.
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": entry["replica_id"],
+					"group": group,
+					"machine_id": server,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": entry["snapshot_id"],
+					"outcome": "success",
+					"replica_healthy": true,
+					"postgres_version": "18",
+					"observed_at": "2026-07-30T00:00:00Z",
+					"migration": {
+						"target_version": entry["target_version"],
+						"total_elapsed_seconds": 900,
+						"data_bytes_before": 0,
+						"data_bytes_after": 0,
+						"timings": [],
+						"post_migration_timings": [{"name": "encounters", "elapsed_seconds": 5}],
+					},
+				}))
+				.await
+				.assert_status(http::StatusCode::BAD_REQUEST);
+
 			// Report it back the way a consumer would: naming the version by its
 			// semver, not echoing the identifier.
 			public
@@ -1561,6 +1591,11 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 							{"name": "addIndexToFhirJobs", "elapsed_seconds": 12},
 							{"name": "backfillNoteTypeIds", "elapsed_seconds": 880},
 						],
+						"post_migration_elapsed_seconds": 1860,
+						"post_migration_timings": [
+							{"name": "encounters", "rows": 341_744, "elapsed_seconds": 298},
+							{"name": "self-heal", "elapsed_seconds": 840},
+						],
 					},
 				}))
 				.await
@@ -1581,6 +1616,18 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 				latest.error, None,
 				"a consumer that sends no error leaves it unset"
 			);
+			assert_eq!(
+				latest.post_migration_elapsed,
+				Some(database::pg_duration::PgDuration(
+					jiff::SignedDuration::from_secs(1860)
+				))
+			);
+			let steps: Vec<(&str, Option<i64>)> = latest
+				.post_migration_timings
+				.iter()
+				.map(|t| (t.name.as_str(), t.rows))
+				.collect();
+			assert_eq!(steps, [("encounters", Some(341_744)), ("self-heal", None)]);
 
 			// And the pair is settled, so it is not dispatched again.
 			let after: Vec<serde_json::Value> = public

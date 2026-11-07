@@ -843,6 +843,21 @@
               "null"
             ]
           },
+          "post_migration_elapsed_seconds": {
+            "description": "Whole seconds the work the application does after its migrations took,\nsuch as rebuilding derived data. Omit it where the version does not\nrecord it.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "post_migration_timings": {
+            "description": "Each step of that work which did something, in the order they ran. Empty\nwhere the version records only the total; a report with steps and no\n`post_migration_elapsed_seconds` is refused.",
+            "items": {
+              "$ref": "#/components/schemas/PostMigrationTimingArgs"
+            },
+            "type": "array"
+          },
           "target_version": {
             "description": "The version whose migrations were applied, as semver, taken from the\nworklist entry's `target_version`. This is the version the consumer\nactually migrated to; send it in preference to echoing the identifier.",
             "type": [
@@ -908,6 +923,33 @@
           "text"
         ],
         "type": "string"
+      },
+      "PostMigrationTimingArgs": {
+        "description": "How long one step of the work after the migrations took.",
+        "properties": {
+          "elapsed_seconds": {
+            "description": "Whole seconds it took.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "description": "The step, as the application names it.",
+            "type": "string"
+          },
+          "rows": {
+            "description": "Rows the step wrote, where the application counts them.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "elapsed_seconds"
+        ],
+        "type": "object"
       },
       "ProblemDetailsSchema": {
         "description": "Standard error response body, returned for every non-2xx response.\n\nThis follows the RFC 7807 \"Problem Details\" shape: a stable machine-readable\n`type`, a short `title`, the repeated HTTP `status` code, and an optional\n`detail` string with specifics of this particular occurrence.",

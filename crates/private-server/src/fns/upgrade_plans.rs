@@ -891,6 +891,8 @@ mod failure_tests {
 				data_bytes_before: 0,
 				data_bytes_after: 0,
 				timings: Vec::new(),
+				post_migration_elapsed: None,
+				post_migration_timings: vec![],
 			}),
 		}
 	}

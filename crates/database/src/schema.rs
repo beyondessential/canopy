@@ -637,6 +637,16 @@ diesel::table! {
 }
 
 diesel::table! {
+	post_migration_timings (check_id, ordinal) {
+		check_id -> Int8,
+		ordinal -> Int4,
+		name -> Text,
+		rows -> Nullable<Int8>,
+		elapsed -> Interval,
+	}
+}
+
+diesel::table! {
 	machine_backup_capabilities (machine_id, type_) {
 		machine_id -> Uuid,
 		#[sql_name = "type"]
@@ -815,6 +825,7 @@ diesel::table! {
 		data_bytes_after -> Int8,
 		application_id -> Nullable<Uuid>,
 		error -> Nullable<Text>,
+		post_migration_elapsed -> Nullable<Interval>,
 	}
 }
 
@@ -1320,6 +1331,7 @@ diesel::joinable!(issues -> kubernetes_clusters (kubernetes_cluster_id));
 diesel::joinable!(issues -> machines (machine_id));
 diesel::joinable!(issues -> server_groups (server_group_id));
 diesel::joinable!(kubernetes_clusters -> devices (relay_identity_id));
+diesel::joinable!(post_migration_timings -> migration_tests (check_id));
 diesel::joinable!(machine_backup_capabilities -> machines (machine_id));
 diesel::joinable!(machine_backup_schedule -> machines (machine_id));
 diesel::joinable!(machine_enrollment_challenges -> machines (machine_id));
@@ -1423,6 +1435,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	issue_notes,
 	issues,
 	kubernetes_clusters,
+	post_migration_timings,
 	machine_backup_capabilities,
 	machine_backup_schedule,
 	machine_enrollment_challenges,
