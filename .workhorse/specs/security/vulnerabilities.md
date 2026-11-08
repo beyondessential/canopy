@@ -13,11 +13,12 @@ Vulnerabilities are presented on a page of their own and file no checks, so they
 
 There are two kinds of source, and every item belongs to one source.
 
-**A repository** is one of the repositories Canopy tracks: Tamanu, Canopy, bestool, seedling, infra, Tupaia, bliti, workhorse, pgro and pollen.
+**A repository** is one of the repositories Canopy tracks: Tamanu, Canopy, bestool, seedling, infra, Tupaia, bliti, pgro and pollen.
 A repository's dependencies are the packages in its npm, Yarn, Cargo and uv lockfiles on its default branch.
 Only Yarn 2 and later's lockfiles are read: a Yarn classic lockfile counts as a lockfile that cannot be parsed.
 A repository can carry several lockfiles, such as infra's npm dependencies for Pulumi, its Cargo dependencies for pgsnap and its Python dependencies for Ansible, and all of them count.
 Only the default branch counts, whatever is released or deployed from it.
+A repository that stops being tracked keeps the items scanned from it, with the triage decisions taken on them, but they are out of the item list and out of what it counts, and Canopy forgets the packages and the reads it held for that repository.
 
 **Linux** and **Windows** mean the packages installed on machines, as each machine reports them (see [PKG](../public-server/packages.md)).
 A machine that has not reported its packages has no Linux or Windows exposure.
