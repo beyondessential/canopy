@@ -44,7 +44,7 @@ pub struct Repository {
 }
 
 /// The repositories Canopy tracks.
-pub const REPOSITORIES: [Repository; 10] = [
+pub const REPOSITORIES: [Repository; 9] = [
 	Repository {
 		name: "tamanu",
 		slug: "beyondessential/tamanu",
@@ -73,10 +73,12 @@ pub const REPOSITORIES: [Repository; 10] = [
 		name: "bliti",
 		slug: "beyondessential/bliti",
 	},
-	Repository {
-		name: "workhorse",
-		slug: "beyondessential/workhorse",
-	},
+	// Uncomment to track workhorse again; items already scanned from it are kept
+	// with their decisions, out of view until it is tracked once more.
+	// Repository {
+	// 	name: "workhorse",
+	// 	slug: "beyondessential/workhorse",
+	// },
 	Repository {
 		name: "pgro",
 		slug: "beyondessential/postgres-restore-operator",
