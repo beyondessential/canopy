@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v2.0.0...bes-canopy-api-v2.0.1) - 2026-11-08
+
+### Fixed
+
+- *(packages)* refuse a malformed or implausible package report (R5)
+
+### Other
+
+- update 36 files
+
 ## [2.0.0](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v1.1.2...bes-canopy-api-v2.0.0) - 2026-11-04
 
 ### Other
