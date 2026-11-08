@@ -10,8 +10,8 @@ use database::{
 	machines::{Machine, NewMachine},
 	osv::{Affected, Counted, Event, LapseReason, Package, Range, Record, Severity},
 	packages::{
-		MachinePackageReport, PackagePath, PackageReport, Reported, ReportedPackage,
-		RepositoryPackage, RepositoryRead, Scope,
+		MachinePackageReport, PackagePath, PackageReport, READER_VERSION, Reported,
+		ReportedPackage, RepositoryPackage, RepositoryRead, Scope,
 	},
 	vulnerabilities::{
 		Advisory, Basis, Decision, Edit, Entry, GroupBy, ItemDetail, ItemSummary, Lapse, ListQuery,
@@ -107,7 +107,7 @@ async fn read_repository(
 	commit: &str,
 	packages: &[RepositoryPackage],
 ) {
-	RepositoryRead::store(conn, repository, commit, packages)
+	RepositoryRead::store(conn, repository, commit, READER_VERSION, packages)
 		.await
 		.unwrap();
 }

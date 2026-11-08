@@ -8,7 +8,7 @@ use database::{
 	admins::Admin,
 	audit::{self, Actor, Filter},
 	osv::{Counted, Record},
-	packages::{PackagePath, RepositoryPackage, RepositoryRead, Scope},
+	packages::{PackagePath, READER_VERSION, RepositoryPackage, RepositoryRead, Scope},
 	vulnerabilities::{Advisory, refresh_items, replace_matches},
 };
 use serde_json::{Value, json};
@@ -37,6 +37,7 @@ async fn an_item(conn: &mut AsyncPgConnection) {
 		conn,
 		"tamanu",
 		"abc",
+		READER_VERSION,
 		&[RepositoryPackage {
 			ecosystem: "npm".into(),
 			name: "left-pad".into(),

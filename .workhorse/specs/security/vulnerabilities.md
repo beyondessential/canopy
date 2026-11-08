@@ -40,7 +40,10 @@ Each ecosystem supplies the scopes it distinguishes, and a path never takes one 
 A package reached through paths of different scopes carries each of them.
 Development and build paths count like any other: a flaw in a build tool can corrupt what it builds, so the scope is something to weigh in triage.
 
-A repository's lockfiles are read again whenever its default branch moves.
+A repository's lockfiles are read again whenever its default branch moves, and whenever what Canopy reads from a lockfile has changed since the read it holds was made.
+
+> [!NOTE]
+> Without the second, a repository whose default branch is still keeps whatever an older reading made of it, and the head says nothing about that. Tupaia carried no packages at all for days after Yarn lockfiles came to count, because its branch had last moved before they did.
 
 ## Matching
 

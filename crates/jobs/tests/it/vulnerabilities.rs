@@ -19,7 +19,9 @@ use commons_types::server::rank::ServerRank;
 use database::{
 	audit::{self, Actor, Filter},
 	machines::{Machine, NewMachine},
-	packages::{MachinePackageReport, PackageReport, ReportedPackage, RepositoryRead},
+	packages::{
+		MachinePackageReport, PackageReport, READER_VERSION, ReportedPackage, RepositoryRead,
+	},
 	self_alerts::{self, VULNERABILITY_REPOSITORIES_REF},
 	vulnerabilities::{
 		Basis, Decision, Entry, ItemDetail, ItemSummary, ListQuery, NewDecision, Outcome,
@@ -407,6 +409,48 @@ async fn a_repository_is_read_when_its_head_moves_and_not_otherwise() {
 			.unwrap()
 			.unwrap();
 		assert_eq!(read.commit_sha.as_deref(), Some("bbbb"));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repository_read_by_an_earlier_reader_is_read_again_where_it_stands() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let fake: Shared = Arc::default();
+		publish(&fake, "aaaa", &[("package-lock.json", LOCKFILE)]);
+		let base = serve(fake.clone()).await;
+		let scanner = scanner(&base);
+
+		scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!(held(&mut conn).await, 1);
+
+		// What the migration leaves on a read made before readers were told
+		// apart, and what a read by any earlier reader amounts to.
+		diesel::sql_query("UPDATE repository_reads SET read_by = NULL")
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+		let again = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!(
+			(again.read, again.unchanged),
+			(1, 0),
+			"the head has not moved, but what Canopy makes of it has"
+		);
+		assert_eq!(fake.lock().unwrap().tree_requests.len(), 2);
+		let read = RepositoryRead::get(&mut conn, "tamanu")
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(read.commit_sha.as_deref(), Some("aaaa"));
+		assert_eq!(read.read_by, Some(READER_VERSION));
+
+		let settled = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!(
+			(settled.read, settled.unchanged),
+			(0, 1),
+			"once read by this reader it is left alone again"
+		);
 	})
 	.await;
 }

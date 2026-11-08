@@ -207,7 +207,7 @@ mod vulnerabilities {
 	use database::{
 		audit::{self, Actor, Filter},
 		osv::{Counted, Record},
-		packages::{PackagePath, RepositoryPackage, RepositoryRead, Scope},
+		packages::{PackagePath, READER_VERSION, RepositoryPackage, RepositoryRead, Scope},
 		vulnerabilities::{Advisory, refresh_items, replace_matches},
 	};
 	use diesel_async::AsyncPgConnection;
@@ -244,6 +244,7 @@ mod vulnerabilities {
 			conn,
 			"tamanu",
 			"abc",
+			READER_VERSION,
 			&[
 				package("left-pad", &["server", "web"]),
 				package("lodash", &["server"]),

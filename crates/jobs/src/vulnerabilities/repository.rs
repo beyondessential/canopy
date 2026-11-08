@@ -15,6 +15,11 @@
 //! - the lockfiles, and the manifests Cargo's and Yarn's need, from the raw file
 //!   host at that commit.
 //!
+//! What a read of one commit yields is versioned: raise
+//! [`READER_VERSION`](database::packages::READER_VERSION) whenever a change
+//! here, or in a parser under [`lockfile`](super::lockfile), alters what the
+//! same commit is read as.
+//!
 //! Every `package-lock.json`, `yarn.lock`, `Cargo.lock` and `uv.lock` in the
 //! tree counts, apart from those inside `node_modules`. A repository that cannot
 //! be reached, or has a lockfile that does not parse, is not read at all: what
