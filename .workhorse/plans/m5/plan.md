@@ -74,7 +74,9 @@ The Canopy path also could not restore from the tests' S3-compatible store: the 
   `canopy_integration` has two real tests of the worklist-driven flow in place of the scaffold.
 - [x] Remove the integration cases that exist only for the Secret path (invalid and missing Secret).
 - [ ] Run the `pgro integration` workflow in CI and fix what it finds.
-  None of the cluster tests, the proxy image build, the broker Service port or the stub could be run where this was written (no kind or docker), so the whole workflow is unverified.
+  None of the cluster tests, the proxy image build, the broker Service port or the stub could be run where this was written (no kind or docker).
+  The first run got through cluster setup, the snapshot fixtures, the stub's worklist, namespace creation and the replica's desired snapshot, and then every job failed in the same place: the fixture proxy image had no CA certificates, so the sidecar panicked before writing its port file.
+  With that fixed, the restore path past the sidecar is still unproven.
   Likeliest to need attention: the store accepting the proxy's signed requests, the sidecar reaching the broker through the Service, and the field names the stub's report assertions read.
 
 ### Specs and conventions
