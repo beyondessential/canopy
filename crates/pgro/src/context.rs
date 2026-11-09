@@ -18,12 +18,10 @@ use crate::{
 
 pub const DEFAULT_KOPIA_IMAGE: &str = "kopia/kopia:0.22.3";
 pub const DEFAULT_DEPLOYMENT_READY_TIMEOUT_SECS: u64 = 30 * 60;
-/// The canopy-proxy sidecar binary ships in the same image as the operator
-/// (Containerfile copies both binaries). By default, use the same image tag;
-/// operators can override with `CANOPY_PROXY_IMAGE` if they want to pin the
-/// sidecar to a different tag from the operator itself.
-pub const DEFAULT_CANOPY_PROXY_IMAGE: &str =
-	"ghcr.io/beyondessential/postgres-restore-operator:latest";
+/// The canopy-proxy sidecar binary ships in Canopy's image, beside pgro itself.
+/// Set `CANOPY_PROXY_IMAGE` to the tag pgro runs from, so the sidecar and pgro
+/// are never different builds; the default follows whatever was published last.
+pub const DEFAULT_CANOPY_PROXY_IMAGE: &str = "ghcr.io/beyondessential/canopy:latest";
 
 pub struct Context {
 	pub client: Client,

@@ -35,27 +35,35 @@ Ordered so the history import is a pure move, and each later step is its own com
   `bestool-canopy` resolves it itself, through Tailscale's DNS and then a hardcoded pair of Canopy's tailnet addresses, and connects to the address through the proxy; in a userspace-networking pod the hardcoded addresses may be what makes that work today.
   The new transport hands the name to the proxy (`socks5h`) unless `CANOPY_TAILNET_ADDR` names an address to connect to instead, so confirm which one the sidecar needs and set the variable in the infra stack if it is the address.
 - [ ] Point the restore-Job proxy sidecar at the same image as the operator.
-  `CANOPY_PROXY_IMAGE` defaults to `ghcr.io/beyondessential/postgres-restore-operator:latest` and infra does not set it, so once images stop being published there the sidecar would run a stale proxy beside a newer operator.
+  `CANOPY_PROXY_IMAGE` defaulted to `ghcr.io/beyondessential/postgres-restore-operator:latest` and infra does not set it; the default is now Canopy's image, and infra should set the variable to the tag pgro runs from, so the sidecar is never a different build from the operator.
   The image is now Canopy's, whose user is `tamanu` (1000) rather than `operator`; check the pod's security context and the sidecar socket permissions against that.
 
 ### Import
 
-- [ ] Rewrite pgro's history under `crates/pgro/` and merge it into Canopy as unrelated history, placing its `.workhorse/specs/` and `.agents`/`.claude` content where Canopy keeps them rather than under the crate.
-- [ ] Add `crates/pgro` to the workspace and get `cargo check` passing with nothing else changed.
+- [x] Rewrite pgro's history under `crates/pgro/` and merge it into Canopy as unrelated history, placing its `.workhorse/specs/` and `.agents`/`.claude` content where Canopy keeps them rather than under the crate.
+  Done with `git filter-branch` on a scratch clone: 889 commits and the merges are kept, and every `#N` in a message now reads `beyondessential/postgres-restore-operator#N`, so GitHub does not autolink pgro's PR numbers to unrelated Canopy ones.
+- [x] Add `crates/pgro` to the workspace and get `cargo check` passing with nothing else changed.
+  The only compile error was `bestool-canopy` drifting past the version pgro pinned; `k8s-openapi` at `v1_32` needed no code change, and the generated CRDs differ only in the descriptions of embedded Kubernetes types.
   Bring the `k8s-openapi` entry to one version feature, with the `schemars` feature pgro's CRD derive needs: pgro enables `latest`, Canopy pins `v1_32`, and only one version feature may be on.
   Confirm the pinned version against the clusters' control-plane version, as Canopy's manifest already asks.
-- [ ] Align the shared dependencies (`kube` with `derive` and `ws`, `reqwest` with `socks`, and the rest) on the workspace entries.
+- [x] Align the shared dependencies (`kube` with `derive` and `ws`, `reqwest` with `socks`, and the rest) on the workspace entries.
 
 ### Client
 
-- [ ] Replace `bestool-canopy` with `bes-canopy-api` by path, and write the transport as one file implementing `CanopyTransport` over `reqwest`.
+- [x] Replace `bestool-canopy` with `bes-canopy-api` by path, and write the transport as one file implementing `CanopyTransport` over `reqwest`.
   It sends `*.ts.net` through the sidecar's SOCKS5 proxy, addresses the tailnet endpoint under the `/public` mount, sets a user agent, refuses redirects and returns the response untouched.
-- [ ] Make the tailnet URL operator configuration; it is hardcoded in `bestool-canopy` today.
-- [ ] Update `canopy-proxy` and the schema-build registration call to the same types.
-- [ ] Check that cargo accepts a path dependency on `crates/canopy-api`, which is its own workspace, and that `just check-generated` and the semver check still pass.
-- [ ] Test the transport against a local server: the `/public` prefix, the proxy rule, no redirects, and a refused tailnet identity surfacing as an error.
+- [x] Make the tailnet URL operator configuration; it is hardcoded in `bestool-canopy` today.
+  It is `CANOPY_TAILNET_URL`, with `CANOPY_SOCKS5_PROXY` and `CANOPY_TAILNET_ADDR` beside it.
+- [x] Update `canopy-proxy` and the schema-build registration call to the same types.
+- [x] Check that cargo accepts a path dependency on `crates/canopy-api`, which is its own workspace, and that `just check-generated` and the semver check still pass.
+  Cargo accepts it and drops 206 lock lines with `bestool-canopy`; `just check-generated` and `just semver-checks` run in CI and were not run here.
+- [x] Test the transport against a local server: the `/public` prefix, the proxy rule, no redirects, and a refused tailnet identity surfacing as an error.
 
 ### Remove standalone mode
+
+Blocked on a finding from the import: every cluster integration test (about 4,000 lines, thirteen modules) builds its replicas through the Secret-based path, because the one Canopy-path test, `canopy_integration`, is an ignored scaffold waiting on a stub Canopy that was never built.
+Removing the path without that stub leaves pgro with unit tests and no cluster coverage of restores, switchovers, redaction, users or migrations.
+Canopy's configuration cannot become required either while those tests start pgro without Canopy.
 
 - [ ] Make Canopy configuration required at operator startup, and a failure to build the client a startup error rather than a legacy-only mode.
 - [ ] Remove the Secret-based Kopia path from the replica controller and CRD types (`kopiaSecretRef`, `snapshotFilter` and what only they use), regenerate `crds.yaml`, and update the README's CRD tables.
@@ -68,24 +76,24 @@ Ordered so the history import is a pure move, and each later step is its own com
   They sit in an area of their own rather than inside RST, which describes Canopy's side of the contract generically and puts a consumer's own behaviour out of scope; RST links to them.
   Their ids do not collide with Canopy's.
 - [x] Remove pgro from the repositories the vulnerabilities spec lists.
-- [ ] Remove pgro from the repositories the vulnerability tracker's source table lists, since its dependencies are now in Canopy's own lockfile.
-- [ ] Delete pgro's `.workhorse/specs/` from the imported tree once the operator specs are the only copy.
-- [ ] Merge pgro's AGENTS.md into Canopy's as a section for `crates/pgro`, so its rules do not read as applying to the whole workspace.
-  Carry: its lessons (TCP keepalives to detect dead Postgres connections, no wall-clock timeouts on long-tailed operations, keepalives on both the operator's sockets and the migration Job's URI); do the work in the operator rather than in a script that runs in a Job; add integration cases to the kind-cluster workflow, tell the user they only run in CI, and keep the README's CRD tables in step with CRD changes; the parser rule (winnow unless trivial), the import grouping, `use` before `mod`, the `foo.rs` and `foo/sub.rs` module layout, and `#[expect]` with a reason instead of `#[allow]`.
-  Drop: the rule against changing `bestool-canopy`'s build behaviour, since the operator no longer depends on it; `cargo test` and `cargo clippy` instructions, which Canopy's `just` recipes replace; and the agent-environment rules about `git --no-pager`, working from a branch and interactive commands.
-  Keep Canopy's own rules where the two overlap (summaries, comments, conventional commits).
-- [ ] Import the `pgro-status` skill as `.agents/skills/pgro-status/`, which `.claude/skills` already points at, and update it for the new shape: drop the legacy `RestoreSchedulingSuspended` row and the cron-schedule wording, since every replica is Canopy-driven and its cadence comes from its intent's parameters; and add a step that checks the operator's link to Canopy, since the operator now has no path to Canopy but the tailnet sidecar.
+- [x] Remove pgro from the repositories the vulnerability tracker's source table lists, since its dependencies are now in Canopy's own lockfile.
+- [x] Delete pgro's `.workhorse/specs/` from the imported tree once the operator specs are the only copy.
+- [x] Keep pgro's agent guidance beside it, in `crates/pgro/AGENTS.md`, trimmed to what only applies to the operator and loaded only when working under it, with a pointer from the root `AGENTS.md`.
+  Kept: its lessons, the operator-in-pgro rule, the integration-test and README rules (paths updated), and its code style rules.
+  Dropped: the `bestool-canopy` rule, the `cargo` and conventional-commit rules the repository's `just` recipes and conventions replace, and the agent-environment rules.
+- [x] Import the `pgro-status` skill as `.agents/skills/pgro-status/`, which `.claude/skills` already points at, and update it for the new shape: drop the legacy `RestoreSchedulingSuspended` row and the cron-schedule wording, since every replica is Canopy-driven and its cadence comes from its intent's parameters; and add a step that checks the operator's link to Canopy, since the operator now has no path to Canopy but the tailnet sidecar.
   Keep its rule against putting site, customer or real data figures in commits and PRs, which Canopy's own anonymity rule matches.
-- [ ] Reconcile the repository tooling pgro brings with Canopy's: pgro's dependabot cargo group folds into Canopy's (the crate is a workspace member, so no new directory), its review-hero `project` and `ignore_patterns` fold into Canopy's single config, and pgro's pull request template, editorconfig, rustfmt, typos and taplo settings give way to Canopy's where Canopy has them and are kept only where it has none.
+- [x] Reconcile the repository tooling pgro brings with Canopy's: pgro's dependabot cargo group folds into Canopy's (the crate is a workspace member, so no new directory), its review-hero `project` and `ignore_patterns` fold into Canopy's single config, and pgro's pull request template, editorconfig, rustfmt, typos and taplo settings give way to Canopy's where Canopy has them and are kept only where it has none.
   Drop pgro's `release.toml`, `Containerfile`, `.node-version` (if only the retired workflows used it) and release and CD workflows with the old repository.
 - [ ] Add the traceability comments (`// spec: PGRO`, `INT`, `PLACE`, `USER`) where the operator code implements them, and the Playwright or integration coverage the specs call for, when the code moves.
 
 ### CI and deploy
 
-- [ ] CI: pgro's unit tests and clippy run under Canopy's existing jobs.
+- [x] CI: pgro's unit tests and clippy run under Canopy's existing jobs.
   Add the CRD generation and manifest lint as a check of generated files.
   Move the kind-cluster integration workflow over, filtered to changes under `crates/pgro/` and `crates/canopy-api/`, so it does not run on every Canopy change.
-- [ ] CD: add the operator and `canopy-proxy` to a build group so they ship in Canopy's single image, and add a deploy job for the pgro stack beside the existing one, with its own stack path variable.
+- [x] CD: add the operator and `canopy-proxy` to a build group so they ship in Canopy's single image, and add a deploy job for the pgro stack beside the existing one, with its own stack path variable.
+  The deploy waits for Canopy's own and is inert until the repository variables `PGRO_PULUMI_PATH`, `PGRO_PULUMI_STACK` and, if the cluster differs, `PGRO_TS_K8S_OPERATOR_HOSTNAME` are set in the `release` environment; the CI Tailscale tag also needs to reach that cluster.
   Every merge then restarts the operator, so confirm its reconcile is restart-safe; if that proves noisy, filter the pgro deploy by path.
 - [ ] Infra: point `pulumi/data/pgro` at the Canopy image with the operator as its command, remove the device-key secret and `canopyBaseUrl`, add the tailnet URL setting, and stop bumping `imageTag` by hand.
 
