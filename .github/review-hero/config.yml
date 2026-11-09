@@ -2,7 +2,8 @@ project: Canopy
 description: >-
   a server discovery, version, and download service for the Tamanu electronic
   health records system, plus the internal fleet view of server status,
-  healthchecks, and backup management. Rust workspace with an embedded React SPA.
+  healthchecks, and backup management. Rust workspace with an embedded React SPA,
+  and the Kubernetes operator that restores backups into replicas.
 
 # Added to the built-in defaults, which already cover lockfiles and *.generated.*
 # by basename. Everything here is written by a generator; review the generator
@@ -13,3 +14,4 @@ ignore_patterns:
   - "crates/public-server/openapi.json"
   - "private-web/openapi.json"
   - "private-web/src/api-types.ts"
+  - "crates/pgro/crds.yaml"

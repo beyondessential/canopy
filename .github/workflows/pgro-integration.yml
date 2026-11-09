@@ -1,11 +1,25 @@
-name: Integration
+name: pgro integration
 
+# The kind-cluster tests take a while and need nothing from the rest of Canopy,
+# so they run only for changes that can affect them.
 on:
   workflow_dispatch:
   pull_request:
+    paths:
+      - crates/pgro/**
+      - crates/canopy-api/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/pgro-integration.yml
   push:
     branches:
       - main
+    paths:
+      - crates/pgro/**
+      - crates/canopy-api/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/pgro-integration.yml
 
 env:
   CARGO_TERM_COLOR: always
@@ -94,7 +108,7 @@ jobs:
               test-extra-user-grants
             needs_non_pg_snapshot: false
 
-          # canopy_integration is a scaffold in tests/canopy_integration.rs
+          # canopy_integration is a scaffold in crates/pgro/tests/it/canopy_integration.rs
           # but no stub-canopy HTTP server exists yet, so the happy-path
           # test times out. Re-add this matrix entry when the stub lands:
           #   - name: canopy_integration
@@ -113,10 +127,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build operator
-        run: cargo build --bin operator
+        run: cargo build -p pgro --bin pgro
 
       - name: Generate CRDs
-        run: cargo run --bin gen-crds > crds.yaml
+        run: cargo run -p pgro --bin gen-crds > crates/pgro/crds.yaml
 
       - name: Install crane
         run: |
@@ -142,7 +156,7 @@ jobs:
           kubectl wait --for=condition=Ready nodes --all --timeout=120s
 
       - name: Apply CRDs
-        run: kubectl apply -f crds.yaml
+        run: kubectl apply -f crates/pgro/crds.yaml
 
       - name: Create operator namespace and config
         run: |
@@ -209,13 +223,13 @@ jobs:
 
       - name: Deploy MinIO
         run: |
-          kubectl apply -f tests/fixtures/minio.yaml
+          kubectl apply -f crates/pgro/tests/fixtures/minio.yaml
           kubectl wait --namespace minio --for=condition=Available deployment/minio --timeout=120s
           echo "MinIO is ready"
 
       - name: Set up test kopia repository (postgres data)
         run: |
-          kubectl apply -f tests/fixtures/setup-kopia-repo.yaml
+          kubectl apply -f crates/pgro/tests/fixtures/setup-kopia-repo.yaml
           for i in $(seq 1 60); do
             STATUS=$(kubectl get job/setup-kopia-repo -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
             FAILED=$(kubectl get job/setup-kopia-repo -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)
@@ -247,7 +261,7 @@ jobs:
       - name: Set up PG-18 kopia snapshot
         if: matrix.needs_pg18_snapshot
         run: |
-          kubectl apply -f tests/fixtures/setup-kopia-repo-pg18.yaml
+          kubectl apply -f crates/pgro/tests/fixtures/setup-kopia-repo-pg18.yaml
           for i in $(seq 1 60); do
             STATUS=$(kubectl get job/setup-kopia-repo-pg18 -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
             FAILED=$(kubectl get job/setup-kopia-repo-pg18 -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)
@@ -275,7 +289,7 @@ jobs:
       - name: Set up non-postgres kopia snapshot
         if: matrix.needs_non_pg_snapshot
         run: |
-          kubectl apply -f tests/fixtures/setup-non-postgres-snapshot.yaml
+          kubectl apply -f crates/pgro/tests/fixtures/setup-non-postgres-snapshot.yaml
           for i in $(seq 1 60); do
             STATUS=$(kubectl get job/setup-non-postgres-snapshot -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
             FAILED=$(kubectl get job/setup-non-postgres-snapshot -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)
@@ -303,7 +317,7 @@ jobs:
       - name: Set up non-C-locale kopia snapshot
         if: matrix.needs_locale_snapshot
         run: |
-          kubectl apply -f tests/fixtures/setup-locale-snapshot.yaml
+          kubectl apply -f crates/pgro/tests/fixtures/setup-locale-snapshot.yaml
           for i in $(seq 1 60); do
             STATUS=$(kubectl get job/setup-locale-snapshot -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
             FAILED=$(kubectl get job/setup-locale-snapshot -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)
@@ -337,7 +351,7 @@ jobs:
         if: matrix.needs_pg18_snapshot
         run: |
           mkdir -p /tmp/manifest-server/v1.0.0
-          cp tests/fixtures/redaction-manifest.json \
+          cp crates/pgro/tests/fixtures/redaction-manifest.json \
             /tmp/manifest-server/v1.0.0/manifest.json
           python3 -m http.server 8099 --bind 127.0.0.1 \
             --directory /tmp/manifest-server > /tmp/manifest-server.log 2>&1 &
@@ -362,7 +376,7 @@ jobs:
           OPERATOR_NAMESPACE=pgro-system \
           OPERATOR_SERVICE_NAME=postgres-restore-operator \
           KUBECONFIG="${HOME}/.kube/config" \
-            ./target/debug/operator > /tmp/operator.log 2>&1 &
+            ./target/debug/pgro > /tmp/operator.log 2>&1 &
           echo $! > /tmp/operator.pid
 
           # Wait for operator to be ready
@@ -381,7 +395,7 @@ jobs:
 
       - name: Run integration tests
         run: |
-          cargo test --test "${{ matrix.name }}" -- --include-ignored --nocapture
+          cargo test -p pgro --test it -- "${{ matrix.name }}::" --include-ignored --nocapture
         env:
           RUST_LOG: info
 

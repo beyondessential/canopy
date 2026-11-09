@@ -247,6 +247,26 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: just check-api-crate
 
+  manifests:
+    name: Kubernetes manifests
+    runs-on: ubuntu-latest
+    # The restore operator's install manifest and CRDs must be valid Kubernetes
+    # objects. The CRDs are what `just check-generated` has already shown the
+    # code produces, so they are linted as committed.
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin kubeconform
+      - name: Lint manifests
+        run: |
+          kubeconform -strict -summary \
+            -kubernetes-version 1.35.0 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/{{ .NormalizedKubernetesVersion }}/{{ .ResourceKind }}{{ .KindSuffix }}.json' \
+            crates/pgro/operator.yaml crates/pgro/crds.yaml
+
   # Dummy job to have a stable name for PR requirements
   tests-pass:
     if: always() # always run even if dependencies fail
@@ -259,6 +279,7 @@ jobs:
       - generated
       - semver
       - api-crate
+      - manifests
     runs-on: ubuntu-latest
     steps:
       - uses: re-actors/alls-green@release/v1
