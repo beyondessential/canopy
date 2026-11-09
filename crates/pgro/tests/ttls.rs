@@ -3,7 +3,7 @@ use std::time::Duration;
 use jiff::Span;
 use k8s_openapi::api::core::v1::Secret;
 use kube::{Api, api::PostParams};
-use postgres_restore_operator::{
+use pgro::{
 	types::{PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase},
 	util::TimeSpan,
 };

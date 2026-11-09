@@ -12,7 +12,7 @@ use kube::{
 	Api,
 	api::{ListParams, ObjectMeta, Patch, PatchParams, PostParams},
 };
-use postgres_restore_operator::types::{
+use pgro::types::{
 	PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase,
 };
 

@@ -19,7 +19,7 @@ use kube::{
 	Api, Client, ResourceExt,
 	api::{ListParams, ObjectMeta, Patch, PatchParams},
 };
-use postgres_restore_operator::{
+use pgro::{
 	types::{
 		ExtraUserSpec, PostgresPhysicalReplica, PostgresPhysicalReplicaSpec,
 		PostgresPhysicalRestore, PostgresPhysicalRestoreSpec, RedactionSpec, ReplicaPhase,

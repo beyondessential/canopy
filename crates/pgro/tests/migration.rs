@@ -1,6 +1,6 @@
 use k8s_openapi::api::{batch::v1::Job, core::v1::Secret};
 use kube::{Api, api::PostParams};
-use postgres_restore_operator::{
+use pgro::{
 	controllers::canopy::intent::DEFAULT_PRE_MIGRATE_SQL,
 	types::{MigrationTarget, PostgresPhysicalReplica, PostgresPhysicalRestore, RestorePhase},
 };

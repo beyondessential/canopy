@@ -15,7 +15,7 @@ use kube::{
 	Api,
 	api::{ObjectMeta, PostParams},
 };
-use postgres_restore_operator::types::{
+use pgro::types::{
 	PostgresPhysicalReplica, PostgresPhysicalRestore, RedactionPhase, RedactionSpec, ReplicaPhase,
 	RestorePhase,
 };

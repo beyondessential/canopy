@@ -31,6 +31,13 @@ Ordered so the history import is a pure move, and each later step is its own com
 - [ ] Confirm the operator pod only schedules on arm64 nodes, or give it a selector that says so.
   Canopy's CD builds arm64 only; the `db-replica` pool is arm64, but pgro's own CD builds both architectures and the workload tier has x86 pools.
 
+- [ ] Settle how the sidecar resolves Canopy's tailnet name before the tailnet-only operator deploys.
+  `bestool-canopy` resolves it itself, through Tailscale's DNS and then a hardcoded pair of Canopy's tailnet addresses, and connects to the address through the proxy; in a userspace-networking pod the hardcoded addresses may be what makes that work today.
+  The new transport hands the name to the proxy (`socks5h`) unless `CANOPY_TAILNET_ADDR` names an address to connect to instead, so confirm which one the sidecar needs and set the variable in the infra stack if it is the address.
+- [ ] Point the restore-Job proxy sidecar at the same image as the operator.
+  `CANOPY_PROXY_IMAGE` defaults to `ghcr.io/beyondessential/postgres-restore-operator:latest` and infra does not set it, so once images stop being published there the sidecar would run a stale proxy beside a newer operator.
+  The image is now Canopy's, whose user is `tamanu` (1000) rather than `operator`; check the pod's security context and the sidecar socket permissions against that.
+
 ### Import
 
 - [ ] Rewrite pgro's history under `crates/pgro/` and merge it into Canopy as unrelated history, placing its `.workhorse/specs/` and `.agents`/`.claude` content where Canopy keeps them rather than under the crate.

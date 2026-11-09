@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use kube::Api;
 use kube::api::PostParams;
-use postgres_restore_operator::types::PostgresPhysicalReplica;
+use pgro::types::PostgresPhysicalReplica;
 
 use helpers::*;
 

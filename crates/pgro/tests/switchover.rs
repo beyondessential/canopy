@@ -3,11 +3,11 @@ use std::time::Duration;
 use jiff::Span;
 use k8s_openapi::api::core::v1::{LocalObjectReference, Secret, Service};
 use kube::{Api, ResourceExt, api::PostParams};
-use postgres_restore_operator::types::{
+use pgro::types::{
 	PostgresPhysicalReplica, PostgresPhysicalRestore, PostgresPhysicalRestoreSpec, ReplicaPhase,
 	RestorePhase,
 };
-use postgres_restore_operator::util::TimeSpan;
+use pgro::util::TimeSpan;
 use tokio::time::{sleep, timeout};
 
 use helpers::*;

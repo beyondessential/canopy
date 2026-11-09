@@ -1,6 +1,6 @@
 use k8s_openapi::api::core::v1::{LocalObjectReference, Secret};
 use kube::{Api, ResourceExt as _, api::PostParams};
-use postgres_restore_operator::types::{
+use pgro::types::{
 	PostgresPhysicalReplica, PostgresPhysicalRestore, PostgresPhysicalRestoreSpec, ReplicaPhase,
 	RestorePhase, SchemaMigrationPhase,
 };

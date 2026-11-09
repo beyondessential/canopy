@@ -1,2 +1,0 @@
-tag-message = "release: {{version}}"
-pre-release-commit-message = "repo: release {{version}}"

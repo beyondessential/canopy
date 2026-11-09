@@ -1,5 +1,5 @@
 use kube::CustomResourceExt;
-use postgres_restore_operator::types::{PostgresPhysicalReplica, PostgresPhysicalRestore};
+use pgro::types::{PostgresPhysicalReplica, PostgresPhysicalRestore};
 
 fn main() {
 	let replica_crd = serde_json::to_value(PostgresPhysicalReplica::crd()).unwrap();

@@ -33,7 +33,7 @@ const MAX_SCHEMA_BODY_BYTES: usize = 32 * 1024 * 1024;
 /// `Context::schema_build_callback_url`.
 const SCHEMA_BUILD_CALLBACK_PREFIX: &str = "/api/v1/schema-build-results/";
 
-use postgres_restore_operator::{
+use pgro::{
 	canopy::{self, DEFAULT_SOCKS5_PROXY},
 	context::{
 		Context, DEFAULT_CANOPY_PROXY_IMAGE, DEFAULT_DEPLOYMENT_READY_TIMEOUT_SECS,
@@ -290,7 +290,7 @@ async fn main() -> anyhow::Result<()> {
 
 	let client = Client::try_default().await?;
 
-	postgres_restore_operator::crd_install::ensure_crds(&client).await?;
+	pgro::crd_install::ensure_crds(&client).await?;
 
 	let namespace = operator_namespace();
 	let (max_concurrent_restores, kopia_image, use_port_forward, pod_placement) =

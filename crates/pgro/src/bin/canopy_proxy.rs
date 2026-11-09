@@ -31,7 +31,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use postgres_restore_operator::canopy::ProgressSample;
+use pgro::canopy::ProgressSample;
 
 /// Refresh creds this far ahead of their `Expiration` (mirrors bestool's
 /// 2-minute margin).
