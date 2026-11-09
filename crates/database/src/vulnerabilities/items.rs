@@ -163,13 +163,13 @@ const FILTERS: &str = concat!(
 	f_suggestion!()
 );
 
-/// How closely an item matches the search, the main fields counting in full
-/// and a match in the advisory's details for less than the weakest match in a
-/// main field: a normalised rank is below 1, and a main field matches from
-/// [`SEARCH_THRESHOLD`].
+/// How closely an item matches the search. The better of its two signals
+/// counts, so a match in the advisory's details ranks below the weakest match
+/// in a main field: a normalised rank is below 1, and a main field matches
+/// from [`SEARCH_THRESHOLD`].
 const RANK: &str = "CASE WHEN $12::text IS NULL THEN 0::float8 \
-	ELSE word_similarity($12, base.search_text) + CASE WHEN $13::text IS NULL THEN 0::float8 \
-	ELSE 0.4 * ts_rank(base.details_search, to_tsquery('english', $13), 32) END END";
+	ELSE greatest(word_similarity($12, base.search_text), CASE WHEN $13::text IS NULL THEN 0::float8 \
+	ELSE 0.4 * ts_rank(base.details_search, to_tsquery('english', $13), 32) END) END";
 
 /// The word similarity a search must reach to match.
 const SEARCH_THRESHOLD: &str = "0.4";
