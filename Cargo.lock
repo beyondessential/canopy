@@ -5203,7 +5203,7 @@ version = "1.0.0"
 dependencies = [
  "aws-config",
  "aws-sdk-kms",
- "base64 0.22.1",
+ "base64 0.23.1",
  "jiff",
  "ring",
  "serde",
