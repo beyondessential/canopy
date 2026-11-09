@@ -58,7 +58,8 @@ An advisory's record is fetched again only when OSV reports it has been revised.
 
 A match is kept only if the advisory's own affected ranges and listed versions do not rule the package version out: a version below where a range starts, or at or above where it ends, files nothing.
 A version number short of three parts, such as `0.65`, is read as its missing parts being zero.
-Where the record gives nothing to check a match against, such as a range of git commits, an event that is not a version, or no entry naming the package, OSV's match stands.
+Where the record gives nothing to check a match against, such as a range of git commits, an event that is not a version, no entry naming the package, or a version the range does not order, OSV's match stands.
+A match is withheld only on a record as current as the answer that reported it, so a revised advisory Canopy could not fetch this pass withholds nothing.
 
 > [!NOTE]
 > Only what the structured ranges say can rule a match out. An advisory whose text gives a first affected version that its ranges leave out, by starting at zero, is still matched; an operator or the suggestion on its page judges that one.
