@@ -41,15 +41,21 @@ jobs:
           BEFORE: ${{ github.event.merge_group.base_sha || github.event.before }}
           AFTER: ${{ github.event.merge_group.head_sha || github.sha }}
         run: |
+          # A diff that cannot be read runs the tests rather than skipping
+          # them, so no API failure passes a change through unexamined. The
+          # last page of a paginated compare carries no files at all, hence
+          # the default.
           case "$EVENT" in
             pull_request)
-              files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')
+              files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename') \
+                || files=crates/pgro/
               ;;
             push | merge_group)
               if [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
                 files=crates/pgro/
               else
-                files=$(gh api --paginate "repos/$REPO/compare/$BEFORE...$AFTER" --jq '.files[].filename')
+                files=$(gh api --paginate "repos/$REPO/compare/$BEFORE...$AFTER" \
+                  --jq '(.files // [])[].filename') || files=crates/pgro/
               fi
               ;;
             *)
