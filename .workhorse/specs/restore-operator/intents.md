@@ -4,9 +4,9 @@ id: INT
 
 # Restore intents
 
-The restore operator advertises four intents to Canopy.
+pgro advertises four intents to Canopy.
 Each names what a replica restored for it is for, the semantics it opts into, and the parameters an operator fills in when declaring a replica (see [RST](../public-server/restore-replicas.md), "Consumer capabilities").
-Canopy dispatches only the intents the operator advertises, and applies the behaviour of the semantics it recognises.
+Canopy dispatches only the intents pgro advertises, and applies the behaviour of the semantics it recognises.
 
 ## The intents
 
@@ -62,23 +62,23 @@ The `analytics` target is the `migrate_to` parameter, a Tamanu version the opera
 Backup health and version readiness stay separate signals: a restore whose backup came up healthy but whose migrations failed reports the failing migration as the verdict, and not a failed restore.
 
 The `analytics` migration outcome is not reported to Canopy.
-An analytics replica migrates to give the operator an upgraded database to work against, not to verify a version, so it carries no version-readiness signal.
+An analytics replica migrates to give an operator an upgraded database to work against, not to verify a version, so it carries no version-readiness signal.
 
 ## Building a reporting schema
 
 A reporting schema follows from a Tamanu version's own schema and from the configuration of the group's database together, so it can only be built against a database of that group at that version (see [RPT](../public-server/reporting-schemas.md)).
-The operator is where such a database exists.
+pgro is where such a database exists.
 
 A `reporting-schema` restore migrates to the version Canopy named, then runs the build against the migrated database, before any switchover.
 The build runs as a Job from the image named by the `builder_image` parameter.
-The operator does not know how a schema is made: it hands the build a database and takes back what the build emits.
+pgro does not know how a schema is made: it hands the build a database and takes back what the build emits.
 It passes the build the connection to the restored database, the version it migrated to, and the group the snapshot came from.
 
-The build returns the schema to the operator over a callback, since the Job's termination message is too small to carry it.
-The operator registers the returned schema with Canopy as an artifact of the exact version, scoped to the group, sending the bytes over the connection it already holds.
+The build returns the schema to pgro over a callback, since the Job's termination message is too small to carry it.
+pgro registers the returned schema with Canopy as an artifact of the exact version, scoped to the group, sending the bytes over the connection it already holds.
 It is issued no credential to any store.
 
-The operator reports the build's outcome to Canopy alongside the replica's own health, as it reports a migration outcome: a replica that came up healthy but whose build failed reports a healthy restore and a failed build.
+pgro reports the build's outcome to Canopy alongside the replica's own health, as it reports a migration outcome: a replica that came up healthy but whose build failed reports a healthy restore and a failed build.
 A build that fails does not fail the restore, since the replica was sound and what failed is the schema, which Canopy grades separately.
 
 ## Migrated analytics replica

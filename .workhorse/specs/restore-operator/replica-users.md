@@ -4,16 +4,16 @@ id: USER
 
 # Replica database users
 
-The login roles the restore operator provisions in each restored database, and how their credentials are exposed for connection.
+The login roles pgro provisions in each restored database, and how their credentials are exposed for connection.
 
 Roles are provisioned once, as part of the restore's initialisation, rather than continuously reconciled.
 A change to a replica's users takes effect on the next restore.
-The operator does not alter roles in a restore that is already running, and never drops a role it previously created, which leaves whatever process uses the database free to make its own user customisations without the operator overwriting them.
+pgro does not alter roles in a restore that is already running, and never drops a role it previously created, which leaves whatever process uses the database free to make its own user customisations without the operator overwriting them.
 
 ## Analytics user
 
 The primary login role is named `analytics`.
-The operator generates its password and stores it, with the username, in the replica's credentials Secret `<replica>-creds`, under the keys `username` and `password`.
+pgro generates its password and stores it, with the username, in the replica's credentials Secret `<replica>-creds`, under the keys `username` and `password`.
 The replica's connection details are surfaced in its status.
 
 The role is reset to a fixed state on every restore, and created first if it does not exist.
@@ -42,7 +42,7 @@ The parameter is a comma-separated list, each entry either `name`, with no schem
 Each named role is reset to a fixed state on every restore, and created first if it does not exist, as the analytics user is, so a role of that name in the source cluster does not keep production's attributes or grants.
 It ends up with `LOGIN` and none of `SUPERUSER`, `CREATEDB`, `CREATEROLE`, `REPLICATION` or `BYPASSRLS`, and every role membership it held is revoked.
 It can connect and read the system catalogues and do nothing else until its own schemas are granted back, or something else grants it more.
-The operator does not decide what these roles may see beyond their schemas, and because every restore is a fresh database, any grant made to one by other means has to be reapplied to the next restore.
+pgro does not decide what these roles may see beyond their schemas, and because every restore is a fresh database, any grant made to one by other means has to be reapplied to the next restore.
 
 An extra user's sessions are read-only whatever the replica's own mode, so a grant made later widens what the role can read without letting it write.
 That applies to the extra user's own sessions only.
@@ -52,7 +52,7 @@ Default privileges also grant `SELECT` on tables the analytics role creates in t
 That covers only objects the analytics role creates, and a table created in the schema by another role needs its own grant.
 These grants are applied last, after the database-wide lockdown below strips each role's inherited ownership and direct grants, because granting first would have the strip revoke the grant immediately.
 
-The operator generates a password for each extra user and stores it in a Secret of its own, named `<replica>-user-<slugged name>-creds`.
+pgro generates a password for each extra user and stores it in a Secret of its own, named `<replica>-user-<slugged name>-creds`.
 The username is slugged to fit Kubernetes object names, and the Secret's `username` key carries the real, unslugged role name.
 The Secret is owned by the replica, so it is cleaned up when the replica is deleted, and it is created before the restore's initialisation runs, so the generated password is available when the role is created.
 Extra users are not surfaced in the replica's status, and each one's Secret name is derived from the replica's name and the username.

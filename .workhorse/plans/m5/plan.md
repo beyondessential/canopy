@@ -15,6 +15,8 @@ The evaluation came out in favour of moving it, on the terms below.
 - **Transport:** tailnet only.
   The mTLS fallback, the device-key secret and the `canopyBaseUrl` setting are dropped.
   An operator whose Tailscale sidecar is down loses its link to Canopy until the sidecar returns; that has happened once in two years of running these clusters, which is acceptable.
+- **Name and shape:** pgro stays the restore operator, a component of its own beside the relay.
+  The source moves into this repository without the two being merged into one binary or one name.
 
 ## Build plan
 
@@ -54,7 +56,8 @@ Ordered so the history import is a pure move, and each later step is its own com
 
 ### Specs and conventions
 
-- [x] Draft the operator's specs under `.workhorse/specs/operator/` in Canopy's prose style: an overview (PGRO) covering the Canopy-only, tailnet-only operator, and pgro's intents (INT), placement (PLACE) and replica-user (USER) specs converted from their checklists.
+- [x] Draft pgro's specs under `.workhorse/specs/restore-operator/` in Canopy's prose style: an overview (PGRO) covering the Canopy-only, tailnet-only restore operator, and pgro's intents (INT), placement (PLACE) and replica-user (USER) specs converted from their checklists.
+  In these specs "operator" means a person, as everywhere else in Canopy's specs, and the software is "pgro".
   They sit in an area of their own rather than inside RST, which describes Canopy's side of the contract generically and puts a consumer's own behaviour out of scope; RST links to them.
   Their ids do not collide with Canopy's.
 - [x] Remove pgro from the repositories the vulnerabilities spec lists.
