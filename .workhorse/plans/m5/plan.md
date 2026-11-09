@@ -20,6 +20,9 @@ Canopy is its only driver in practice, and the restore contract between them is 
   The hand-written, Secret-based path (`kopiaSecretRef`, `snapshotFilter`, running with no Canopy configured) goes; the replica and restore CRDs stay, because Canopy-managed replicas are materialised through the same controllers.
 - **Canopy client:** pgro does not carry `bestool-canopy` into the repo.
   It gets a small client of its own, narrowed to what it uses.
+- **Transport:** tailnet only.
+  The mTLS fallback, the device-key secret and the `canopyBaseUrl` setting are dropped.
+  An operator whose Tailscale sidecar is down loses its link to Canopy until the sidecar returns; sidecar downtime has been rare enough in practice to accept.
 
 ## The narrow client
 
@@ -37,7 +40,7 @@ For:
 Against:
 
 - With mTLS gone, an operator whose Tailscale sidecar is down cannot reach Canopy at all: no worklist, no credentials, no verification reports.
-  pgro's current code keeps the mTLS path reachable without the sidecar on purpose.
+  pgro's current code keeps the mTLS path reachable without the sidecar on purpose; accepted (see Decisions).
 - The tailnet endpoint is hardcoded in `bestool-canopy`; it becomes operator configuration.
 - The tailnet probe and the hardcoded-address fallback disappear; with the SOCKS5 proxy resolving names this should not matter, but it is untested.
 - The transport is a second implementation of something bestool already has.
@@ -52,8 +55,12 @@ Against:
 - The `ghcr.io/beyondessential/postgres-restore-operator` image name is referenced from infra.
 - Open pgro branches and dependabot PRs, and what happens to the old repo.
 
+## Cutover
+
+- [ ] An operator attaches the pgro sidecar's tailnet identity to pgro's existing Canopy device.
+  Canopy authenticates a tailnet node only once it is attached to a device record, and an identity can be held by one device; if `TAILSCALE_REQUIRED_TAG` is set on the server, the node must also carry that tag.
+  This is a precondition to deploying a tailnet-only operator, and it is operator state, not something the repository records.
+
 ## Open
 
-- Confirm the tailnet-only reading above, including losing the mTLS fallback.
-- Whether the pgro tailnet node is already permitted as a Canopy device for the restore role, or only its device key is.
 - Keep pgro's commit history in the merge, or import fresh and link back.
