@@ -245,17 +245,17 @@ impl Record {
 			.filter_map(|event| event.fixed.clone())
 			.collect();
 		let kind = VersionKind::of(ecosystem);
-		let mut fixed: Vec<(Option<Version<'_>>, String)> = fixed
-			.into_iter()
-			.map(|at| (kind.parse(&at).map(Version::into_owned), at))
+		let mut read: Vec<(Option<Version<'_>>, &str)> = fixed
+			.iter()
+			.map(|at| (kind.parse(at), at.as_str()))
 			.collect();
-		fixed.sort_by(|(a, a_at), (b, b_at)| match (a, b) {
+		read.sort_by(|(a, a_at), (b, b_at)| match (a, b) {
 			(Some(a), Some(b)) => a.compare(b).unwrap_or(Ordering::Equal),
 			(Some(_), None) => Ordering::Less,
 			(None, Some(_)) => Ordering::Greater,
 			(None, None) => a_at.cmp(b_at),
 		});
-		let mut fixed: Vec<String> = fixed.into_iter().map(|(_, at)| at).collect();
+		let mut fixed: Vec<String> = read.into_iter().map(|(_, at)| at.to_owned()).collect();
 		fixed.dedup();
 		fixed
 	}
@@ -403,16 +403,6 @@ impl Version<'_> {
 			(Self::Dpkg(a), Self::Dpkg(b)) => Some(dpkg_compare(a, b)),
 			(Self::Pep440(a), Self::Pep440(b)) => Some(a.cmp(b)),
 			_ => None,
-		}
-	}
-
-	fn into_owned(self) -> Version<'static> {
-		match self {
-			Self::Semver(v) => Version::Semver(v),
-			Self::Pep440(v) => Version::Pep440(v),
-			// A Debian version orders by its text, which is compared where it
-			// is read rather than held.
-			Self::Dpkg(_) => Version::Dpkg(""),
 		}
 	}
 }
@@ -800,6 +790,38 @@ mod tests {
 			..Default::default()
 		};
 		assert_eq!(record.fixed_in("npm", "left-pad"), ["1.9.0", "1.10.0"]);
+	}
+
+	#[test]
+	fn fixed_debian_versions_are_listed_in_dpkg_order() {
+		let mut affected = semver_range(&[
+			("introduced", "0"),
+			("fixed", "1.10-1"),
+			("introduced", "2.0"),
+			("fixed", "1.9-1"),
+		]);
+		affected[0].package = Some(Package {
+			ecosystem: "Debian:12".into(),
+			name: "left-pad".into(),
+		});
+		let record = Record {
+			affected,
+			..Default::default()
+		};
+		assert_eq!(
+			record.fixed_in("Debian:12", "left-pad"),
+			["1.9-1", "1.10-1"]
+		);
+	}
+
+	#[test]
+	fn a_listed_version_that_does_not_parse_leaves_the_entry_unread() {
+		let mut affected = semver_range(&[("introduced", "1.2.0"), ("fixed", "1.2.5")]);
+		affected[0].versions = vec!["not-a-version".into()];
+		// Neither the range nor the list can say the version is out: the list
+		// holds a version this cannot tell it from.
+		assert!(!super::rules_out(&affected, "npm", "left-pad", "9.9.9"));
+		assert!(!super::rules_out(&affected, "npm", "left-pad", "1.0.0"));
 	}
 
 	#[test]
