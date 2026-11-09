@@ -30,6 +30,7 @@ Ordered so the history import is a pure move, and each later step is its own com
 - [ ] In each cluster, list `PostgresPhysicalReplica` objects that have no `canopySource` and delete the ones no longer wanted, since removing standalone mode removes the fields they depend on from the CRD.
 - [ ] Confirm the operator pod only schedules on arm64 nodes, or give it a selector that says so.
   Canopy's CD builds arm64 only; the `db-replica` pool is arm64, but pgro's own CD builds both architectures and the workload tier has x86 pools.
+  The restore Jobs' `canopy-proxy` sidecar runs from the same image, so it needs the same check for wherever those Jobs schedule.
 
 - [ ] Settle how the sidecar resolves Canopy's tailnet name before the tailnet-only operator deploys.
   `bestool-canopy` resolves it itself, through Tailscale's DNS and then a hardcoded pair of Canopy's tailnet addresses, and connects to the address through the proxy; in a userspace-networking pod the hardcoded addresses may be what makes that work today.

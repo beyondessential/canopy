@@ -198,7 +198,9 @@ jobs:
     # After Canopy's own deploy, because the operator registers what it can do
     # with Canopy as it starts and a contract change has to be live there first.
     # Inert until the operator's stack is named, so a repository that does not
-    # run one deploys nothing for it.
+    # run one deploys nothing for it. PGRO_PULUMI_PATH is a repository
+    # variable: a job's `if` is evaluated before its environment is bound, so
+    # an environment variable would read as empty here.
     needs: [build-image, deploy]
     if: vars.PGRO_PULUMI_PATH != ''
     environment: release

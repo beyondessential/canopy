@@ -10,6 +10,7 @@ on:
       - crates/canopy-api/**
       - Cargo.toml
       - Cargo.lock
+      - rust-toolchain.toml
       - .github/workflows/pgro-integration.yml
   push:
     branches:
@@ -19,6 +20,7 @@ on:
       - crates/canopy-api/**
       - Cargo.toml
       - Cargo.lock
+      - rust-toolchain.toml
       - .github/workflows/pgro-integration.yml
 
 env:
@@ -53,7 +55,7 @@ jobs:
           - name: ttls
             namespaces: >-
               test-min-ttl
-            needs_non_pg_snapshot: true
+            needs_non_pg_snapshot: false
 
           - name: switchover
             namespaces: >-
@@ -106,10 +108,10 @@ jobs:
               test-extra-user-grants
             needs_non_pg_snapshot: false
 
+          # pgro names these namespaces itself, so the failure dump finds
+          # them by their `int-` prefix.
           - name: canopy_integration
-            namespaces: >-
-              int-test
-              int-denied
+            namespaces: ""
             needs_non_pg_snapshot: false
 
     steps:
@@ -431,8 +433,10 @@ jobs:
           echo "=== Namespaces ==="
           kubectl get ns
 
+          namespaces="${{ matrix.namespaces }} $(kubectl get ns -o name | sed 's|^namespace/||' | grep '^int-' || true)"
+
           echo "=== All resources in test namespaces ==="
-          for ns in ${{ matrix.namespaces }}; do
+          for ns in $namespaces; do
             echo "--- Namespace: $ns ---"
             kubectl get all -n "$ns" 2>/dev/null || true
           done
@@ -453,13 +457,13 @@ jobs:
           kubectl get pvc -A -o wide 2>/dev/null || true
 
           echo "=== Events in test namespaces ==="
-          for ns in ${{ matrix.namespaces }}; do
+          for ns in $namespaces; do
             echo "--- Events in $ns ---"
             kubectl get events -n "$ns" --sort-by=.lastTimestamp 2>/dev/null || true
           done
 
           echo "=== Failed pod logs ==="
-          for ns in ${{ matrix.namespaces }}; do
+          for ns in $namespaces; do
             for pod in $(kubectl get pods -n "$ns" --no-headers -o custom-columns=":metadata.name" 2>/dev/null); do
               echo "--- Pod: $ns/$pod ---"
               kubectl logs -n "$ns" "$pod" --all-containers 2>/dev/null || true
