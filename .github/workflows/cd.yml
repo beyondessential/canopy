@@ -39,6 +39,8 @@ jobs:
             bins: backups monitor relayhub
           - group: jobs-misc
             bins: domains slacker_outbox chrome_versions identity-discovery ai
+          - group: restore-operator
+            bins: pgro canopy-proxy
     env:
       TARGET: aarch64-unknown-linux-gnu
     steps:
@@ -186,6 +188,66 @@ jobs:
         run: |
           cd ops/${{ vars.OPS_PULUMI_PATH }}
           pulumi stack select ${{ vars.PULUMI_STACK }}
+          pulumi config refresh
+          pulumi config set imageTag ${{ needs.build-image.outputs.image-tag }}
+          pulumi up --yes
+
+  deploy-pgro:
+    name: Deploy the restore operator
+    runs-on: ubuntu-24.04
+    # After Canopy's own deploy, because the operator registers what it can do
+    # with Canopy as it starts and a contract change has to be live there first.
+    # Inert until the operator's stack is named, so a repository that does not
+    # run one deploys nothing for it.
+    needs: [build-image, deploy]
+    if: vars.PGRO_PULUMI_PATH != ''
+    environment: release
+    steps:
+      - name: Checkout ops repo
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: beyondessential/infra
+          ref: ${{ vars.OPS_REF }}
+          path: ops
+
+      # Drop ops/.git so pulumi doesn't pick it up as the repo context.
+      - name: Strip ops/.git
+        run: rm -rf ops/.git
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4.2.0
+        with:
+          oauth-client-id: ${{ vars.TS_OAUTH_CLIENT_ID }}
+          audience: api.tailscale.com/${{ vars.TS_OAUTH_CLIENT_ID }}
+          tags: ${{ vars.TS_TAGS }}
+
+      - name: Configure kubeconfig
+        run: |
+          sudo tailscale set --operator=$USER
+          tailscale configure kubeconfig ${{ vars.PGRO_TS_K8S_OPERATOR_HOSTNAME || vars.TS_K8S_OPERATOR_HOSTNAME }}
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: lts/*
+
+      - name: Install pulumi dependencies
+        run: |
+          cd ops/pulumi
+          npm ci
+
+      - name: Install pulumi CLI
+        uses: pulumi/actions@v7
+
+      - name: Authenticate to Pulumi Cloud
+        uses: pulumi/auth-actions@v2.1.0
+        with:
+          organization: bes
+          requested-token-type: urn:pulumi:token-type:access_token:organization
+
+      - name: Pulumi up
+        run: |
+          cd ops/${{ vars.PGRO_PULUMI_PATH }}
+          pulumi stack select ${{ vars.PGRO_PULUMI_STACK }}
           pulumi config refresh
           pulumi config set imageTag ${{ needs.build-image.outputs.image-tag }}
           pulumi up --yes
