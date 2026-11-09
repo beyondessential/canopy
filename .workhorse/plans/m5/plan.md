@@ -1,118 +1,133 @@
-# Evaluate moving pgro into the Canopy repo
+# Move pgro into the Canopy repo
 
 pgro (`beyondessential/postgres-restore-operator`) is a Kubernetes operator that restores Kopia-backed Postgres snapshots into replicas.
 Canopy is its only driver in practice, and the restore contract between them is specified on both sides and evolves together.
+The evaluation came out in favour of moving it, on the terms below.
 
-## Where the coupling is today
+## Decisions
 
-- Canopy decides what to restore (intents, worklist, credentials, verification); pgro executes.
-  The contract lives in Canopy's managed restore replicas spec (RST) and again in pgro's own `canopy/intents.md`.
-- pgro reaches Canopy through `bestool-canopy`, which pins the published `bes-canopy-api`.
-  A restore-API change therefore travels Canopy, `bes-canopy-api`, `bestool-canopy`, pgro: three releases.
-- Canopy's workspace already carries `kube`, `k8s-openapi` and `bestool-kopia`, and its `relay` crate is a precedent for a cluster-resident component.
-- Canopy's CD already builds several images from a list of binaries and deploys by setting `imageTag` on a Pulumi stack in the infra repo.
-  pgro is tag-released and its `imageTag` in infra's `pulumi/data/pgro` is bumped by hand.
-
-## Decisions so far
-
-- **Deploy:** pgro auto-deploys on every merge to `main`, through Canopy's deploy mechanism with its own stack path.
+- **History:** pgro's commit history is kept, imported into the Canopy repo so blame and old references keep resolving.
+- **Deploy:** pgro auto-deploys on every merge to `main`, through Canopy's deploy mechanism with its own stack in the infra repo.
 - **Standalone mode:** removed in the move.
   The hand-written, Secret-based path (`kopiaSecretRef`, `snapshotFilter`, running with no Canopy configured) goes; the replica and restore CRDs stay, because Canopy-managed replicas are materialised through the same controllers.
-- **Canopy client:** pgro does not carry `bestool-canopy` into the repo.
-  It gets a small client of its own, narrowed to what it uses.
-- **History:** pgro's commit history is kept, imported into the Canopy repo so blame and old references keep resolving.
+- **Canopy client:** `bestool-canopy` stays out of this repo.
+  pgro gets a small client of its own on the in-repo `bes-canopy-api`, narrowed to what it uses.
 - **Transport:** tailnet only.
   The mTLS fallback, the device-key secret and the `canopyBaseUrl` setting are dropped.
-  An operator whose Tailscale sidecar is down loses its link to Canopy until the sidecar returns; sidecar downtime has been rare enough in practice to accept.
+  An operator whose Tailscale sidecar is down loses its link to Canopy until the sidecar returns; that has happened once in two years of running these clusters, which is acceptable.
+- **Not part of this move:** relocating `bestool-canopy` into Canopy, and Canopy verifying Kubernetes service-account tokens.
+  Both are independent follow-ups, and neither is blocked by this move: pgro's transport is one file behind `CanopyTransport`, so either can replace it later.
 
-## The narrow client
+## Build plan
+
+Ordered so the history import is a pure move, and each later step is its own commit.
+
+### Before anything deploys
+
+- [ ] Confirm the pgro stack sets `tailscaleAuthKey` and that the pgro tailnet node is attached to its Canopy device, which holds the restore role (and carries `TAILSCALE_REQUIRED_TAG` if the server sets one).
+  An unrecognised tailnet node is refused as plain unauthenticated, not with the tag refusal that triggers the mTLS fallback, so a reachable tailnet with an unattached node fails outright.
+  If pgro already works over the tailnet today, there is nothing to change.
+- [ ] In each cluster, list `PostgresPhysicalReplica` objects that have no `canopySource` and delete the ones no longer wanted, since removing standalone mode removes the fields they depend on from the CRD.
+- [ ] Confirm the operator pod only schedules on arm64 nodes, or give it a selector that says so.
+  Canopy's CD builds arm64 only; the `db-replica` pool is arm64, but pgro's own CD builds both architectures and the workload tier has x86 pools.
+
+### Import
+
+- [ ] Rewrite pgro's history under `crates/pgro/` and merge it into Canopy as unrelated history, placing its `.workhorse/specs/` and `.agents`/`.claude` content where Canopy keeps them rather than under the crate.
+- [ ] Add `crates/pgro` to the workspace and get `cargo check` passing with nothing else changed.
+  Bring the `k8s-openapi` entry to one version feature, with the `schemars` feature pgro's CRD derive needs: pgro enables `latest`, Canopy pins `v1_32`, and only one version feature may be on.
+  Confirm the pinned version against the clusters' control-plane version, as Canopy's manifest already asks.
+- [ ] Align the shared dependencies (`kube` with `derive` and `ws`, `reqwest` with `socks`, and the rest) on the workspace entries.
+
+### Client
+
+- [ ] Replace `bestool-canopy` with `bes-canopy-api` by path, and write the transport as one file implementing `CanopyTransport` over `reqwest`.
+  It sends `*.ts.net` through the sidecar's SOCKS5 proxy, addresses the tailnet endpoint under the `/public` mount, sets a user agent, refuses redirects and returns the response untouched.
+- [ ] Make the tailnet URL operator configuration; it is hardcoded in `bestool-canopy` today.
+- [ ] Update `canopy-proxy` and the schema-build registration call to the same types.
+- [ ] Check that cargo accepts a path dependency on `crates/canopy-api`, which is its own workspace, and that `just check-generated` and the semver check still pass.
+- [ ] Test the transport against a local server: the `/public` prefix, the proxy rule, no redirects, and a refused tailnet identity surfacing as an error.
+
+### Remove standalone mode
+
+- [ ] Make Canopy configuration required at operator startup, and a failure to build the client a startup error rather than a legacy-only mode.
+- [ ] Remove the Secret-based Kopia path from the replica controller and CRD types (`kopiaSecretRef`, `snapshotFilter` and what only they use), regenerate `crds.yaml`, and update the README's CRD tables.
+- [ ] Drop the README quick start and standalone install steps, and the integration cases that exist only for that path (invalid and missing Secret, Secret-backed lifecycle); keep the Canopy-driven integration tests.
+
+### Specs and conventions
+
+- [ ] Fold pgro's `canopy/intents` spec (INT) into the managed restore replicas spec (RST), so the contract is described once.
+- [ ] Move `operator/placement` (PLACE) and `replica/users` (USER) into Canopy's spec tree under an area for the operator, converted to Canopy's prose style: plain sentences, one per line, no checklists.
+  Their ids do not collide with Canopy's.
+- [ ] Merge pgro's AGENTS.md into Canopy's: keep its operator-specific lessons (TCP keepalives, no wall-clock timeouts on long operations) and drop what Canopy's already says.
+- [ ] Remove pgro from the repositories Canopy tracks for vulnerabilities (the list in the vulnerabilities spec and the source table), since its dependencies are now in Canopy's own lockfile.
+
+### CI and deploy
+
+- [ ] CI: pgro's unit tests and clippy run under Canopy's existing jobs.
+  Add the CRD generation and manifest lint as a check of generated files.
+  Move the kind-cluster integration workflow over, filtered to changes under `crates/pgro/` and `crates/canopy-api/`, so it does not run on every Canopy change.
+- [ ] CD: add the operator and `canopy-proxy` to a build group so they ship in Canopy's single image, and add a deploy job for the pgro stack beside the existing one, with its own stack path variable.
+  Every merge then restarts the operator, so confirm its reconcile is restart-safe; if that proves noisy, filter the pgro deploy by path.
+- [ ] Infra: point `pulumi/data/pgro` at the Canopy image with the operator as its command, remove the device-key secret and `canopyBaseUrl`, add the tailnet URL setting, and stop bumping `imageTag` by hand.
+
+### Cutover
+
+- [ ] Deploy and watch one full restore cycle on a staging cluster, then the rest.
+- [ ] Carry across or close pgro's open branches and dependabot PRs, archive the old repository with a pointer to the new location, and retire its release workflow and tags.
+
+## Evaluation
+
+### Where the coupling was
+
+- Canopy decides what to restore (intents, worklist, credentials, verification); pgro executes.
+  The contract lived in Canopy's managed restore replicas spec (RST) and again in pgro's own `canopy/intents.md`.
+- pgro reached Canopy through `bestool-canopy`, which pins the published `bes-canopy-api`, so a restore-API change travelled Canopy, `bes-canopy-api`, `bestool-canopy`, pgro: three releases.
+- pgro was tag-released and its `imageTag` in infra's `pulumi/data/pgro` was bumped by hand; Canopy deploys every push to `main`.
+- Canopy's workspace already carries `kube`, `k8s-openapi` and `bestool-kopia`, and its `relay` crate is a precedent for a cluster-resident component.
+
+### Can pgro talk over the tailnet today
+
+Yes, in code, on both sides.
+
+- **Server:** the whole device API, restore routes included, is nested under the private server's `/public` mount, the one surface that welcomes tagged tailnet nodes (pgro's sidecar is tagged `tag:pgro-operator`).
+  The restore spec (RST) already says either transport satisfies the role.
+- **Client:** `bestool-canopy` probes the tailnet endpoint first and prefers it when reachable; pgro routes `*.ts.net` through the sidecar's SOCKS5 proxy; and the infra stack enables the sidecar whenever `tailscaleAuthKey` is set.
+
+What the repository cannot show is operator state, which is why the first item of the build plan is a check.
+
+### The narrow client
 
 `bes-canopy-api` depends on no HTTP client: a consumer supplies a `CanopyTransport`.
-pgro calls six operations (capabilities, worklist, credentials, backup progress, restore verification, and reporting-schema registration through a raw transport call), so what it needs is one transport over `reqwest` and a SOCKS5 proxy to the tailnet endpoint.
+pgro calls six operations (capabilities, worklist, credentials, backup progress, restore verification, and reporting-schema registration through a raw transport call), so it needs one transport over `reqwest` and a SOCKS5 proxy.
 `bestool-canopy` is about 4,100 lines, most of it for things pgro never does: certificate minting and renewal, registration, the machine store, naming, tailnet discovery with DNS and hardcoded-address fallbacks.
 
 For:
 
-- A restore contract change lands in one PR, with pgro on the in-repo API crate by path and no published crate in between.
-- Drops `bestool-canopy` and what it pulls in (`miette`, `algae-cli`, `hickory-resolver`, `rcgen`, `machine-uid`, `sysinfo`), which Canopy is otherwise moving away from.
+- A restore contract change lands in one PR, with pgro on the in-repo API crate by path.
+- Drops `bestool-canopy` and what it pulls in (`miette`, `algae-cli`, `hickory-resolver`, `rcgen`, `machine-uid`, `sysinfo`).
 - Removes the device-key secret and the `canopyBaseUrl` setting from the pgro stack.
-- Tailnet identity is already an accepted transport for the restore role (RST), so nothing changes on the server.
 
 Against:
 
-- With mTLS gone, an operator whose Tailscale sidecar is down cannot reach Canopy at all: no worklist, no credentials, no verification reports.
-  pgro's current code keeps the mTLS path reachable without the sidecar on purpose; accepted (see Decisions).
-- The tailnet endpoint is hardcoded in `bestool-canopy`; it becomes operator configuration.
-- The tailnet probe and the hardcoded-address fallback disappear; with the SOCKS5 proxy resolving names this should not matter, but it is untested.
-- The transport is a second implementation of something bestool already has.
+- Losing the mTLS fallback (accepted above), the tailnet probe, and the hardcoded-address fallback; the proxy resolves names, so the last should not matter, but it is untested.
+- A second implementation of a transport bestool already has.
 
-## Alternatives to the narrow tailnet client
+### Alternatives considered
 
-The tailnet sidecar stays whichever of these is chosen: pgro reads the tailnet's MagicDNS suffix from it to build the URL of a replica exposed on the tailnet.
-None of the alternatives removes it, so none gains from that.
+The Tailscale sidecar stays whichever is chosen: pgro reads the tailnet's MagicDNS suffix from it to build the URL of a replica exposed on the tailnet.
 
-### Kubernetes OIDC
-
-pgro presents its projected service-account token, and Canopy verifies it against the cluster's issuer.
-Canopy's identity provider (IDP, IDT) runs the other way: it issues tokens for external services to verify, and verifies none.
-This would be a third kind of device identity beside a key and a tailnet node, with per-cluster trust (issuer, keys, audience) and a mapping from a service-account subject to a device.
-
-- For: no long-lived secret and no tailnet identity to attach; the relay and anything else in a cluster could use it too.
-- Against: a new authentication path in the device-auth extractor, with its own spec and security review, to build before the move could use it.
-- It is independent of where pgro's source lives.
-  The transport is one file behind `CanopyTransport`, so it can be swapped later without redoing the move.
-
-### What the relay does
-
-The relay authenticates with a device key in a QUIC client certificate, with proof of possession and Canopy's key pinned by the relay.
-That is the same key-based identity pgro already holds for its mTLS fallback, over a stronger channel than the HTTP path, where TLS ends at an ingress and authentication rests on a header.
-The relay's protocol carries filings and named requests, never Kubernetes objects, so pgro's worklist and credential calls do not fit it without widening it.
-Using the key over the public HTTP path would keep the secret and the certificate minting that tailnet-only removes.
-
-### Moving `bestool-canopy` here, with bestool depending on it
-
-`bestool-canopy` is the device-side half of Canopy's contract: registration, the encrypted machine store, DNS names, backup helpers, certificates and the transport.
-Its three dependents in bestool are `alertd`, `bestool` and `tamanu`.
-It has had 123 commits, 47 of them since August, and its recent history is full of Canopy-driven changes (a new API version, names, backup, tailnet-only default).
-bestool also keeps `canopy/*` specs describing Canopy behaviour from the device side.
-
-- For: one client for every consumer, and every contract change lands atomically for pgro, bestool and the device agent; the device-side specs sit beside the server's.
-- Against: it is a much wider move than pgro's.
-  It carries Windows paths, `algae-cli`, `sysinfo`, `machine-uid` and `miette` into the server's workspace, and bestool's field tooling would wait on Canopy's pipeline to change its own client.
-  Canopy's workspace is all `publish = false`, so it would have to be a second standalone published project like `bes-canopy-api`, or be folded into it, and bestool's release train would need re-pointing.
-  Canopy already depends on `bestool-kopia`, so each repo would depend on the other.
-- Staging loses little: pgro's narrow transport implements the same `CanopyTransport` trait, so if the client moves later pgro swaps it for the shared one.
-  The cost is a small duplicate in the meantime.
-- What decides it is how much of `bestool-canopy`'s churn follows Canopy's contract and how much is device-local; that split has not been measured.
-
-## Frictions to resolve when moving
-
-- `k8s-openapi`: pgro enables `latest`, Canopy pins `v1_32`, and only one version feature may be enabled.
-- pgro's integration tests run in a kind cluster with MinIO; they need a path-filtered CI job so they do not run on every Canopy change.
-- pgro's own AGENTS.md conventions (conventional commits, winnow for parsers, `#[expect]`) need reconciling with Canopy's.
-- pgro's three specs (`canopy/intents`, `operator/placement`, `replica/users`) fold into Canopy's spec tree; the intents spec merges with RST.
-- Canopy's per-commit deploy needs a stack path for pgro and a way to keep operator-only changes from redeploying Canopy, and the reverse.
-- The `ghcr.io/beyondessential/postgres-restore-operator` image name is referenced from infra.
-- Open pgro branches and dependabot PRs, and what happens to the old repo.
-
-## Can pgro talk over the tailnet today
-
-Yes, in code, on both sides, with no further work.
-
-- **Server:** the whole device API, restore routes included, is nested under the private server's `/public` mount, which is the one surface that welcomes tagged tailnet nodes (pgro's sidecar is tagged `tag:pgro-operator`).
-  The restore spec (RST) already says either transport satisfies the role.
-- **Client:** `bestool-canopy` probes the tailnet endpoint first and prefers it when reachable; pgro routes `*.ts.net` through the sidecar's SOCKS5 proxy; and the infra stack enables the sidecar whenever `tailscaleAuthKey` is set.
-  So an operator deployed with the sidecar is already on the tailnet path.
-
-What the repository cannot show is operator state: whether the deployed pgro stack sets `tailscaleAuthKey`, and whether its tailnet node is attached to the device holding the restore role.
-That decides whether this is already how pgro talks to Canopy.
-It matters because an unrecognised tailnet node is refused as unauthenticated, not with the tag refusal that triggers the mTLS fallback, so a reachable tailnet with an unattached node fails outright rather than falling back.
-
-- [ ] Before the tailnet-only operator deploys, confirm the pgro stack sets `tailscaleAuthKey`, and that the pgro node is attached to its Canopy device (and carries `TAILSCALE_REQUIRED_TAG` if the server sets one).
-  If it already works over the tailnet today, there is nothing to do.
-
-## Open
-
-- Whether `bestool-canopy` relocation and Kubernetes OIDC are follow-up decisions that leave this move as it is, or change its shape.
-
-The card ends at this evaluation plus an ordered build plan for the move itself; specs wait for the card that does the move.
+- **Kubernetes OIDC.**
+  pgro presents its projected service-account token and Canopy verifies it against the cluster's issuer.
+  Canopy's identity provider (IDP, IDT) runs the other way, issuing tokens and verifying none, so this is a new device identity kind with per-cluster trust and a subject-to-device mapping, with its own spec and security review.
+  It would remove the long-lived secret and the tailnet identity to attach, and the relay could use it too.
+  It is independent of where pgro's source lives.
+- **What the relay does.**
+  The relay authenticates with a device key in a QUIC client certificate, with proof of possession and Canopy's key pinned.
+  That is the identity pgro already holds for its fallback, over a stronger channel than the HTTP path, but the relay's protocol carries filings and named requests, never Kubernetes objects, so pgro's calls do not fit it without widening it.
+  The key over the public HTTP path would keep the secret and the certificate minting that tailnet-only removes.
+- **Moving `bestool-canopy` here, with bestool depending on it.**
+  It is the device-side half of Canopy's contract, with three dependents in bestool (`alertd`, `bestool`, `tamanu`) and 47 of its 123 commits since August.
+  One client would serve every consumer and the device-side specs would sit beside the server's.
+  But it carries Windows paths, `algae-cli`, `sysinfo`, `machine-uid` and `miette` into the server's workspace, makes bestool's field tooling wait on Canopy's pipeline, needs a second standalone published project because Canopy's workspace is all `publish = false`, and leaves each repo depending on the other since Canopy uses `bestool-kopia`.
+  How much of its churn follows Canopy's contract has not been measured.
