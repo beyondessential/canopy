@@ -236,7 +236,7 @@ impl Record {
 	/// The versions of `name` in `ecosystem` that fix this advisory, from the
 	/// `fixed` events of its ranges.
 	pub fn fixed_in(&self, ecosystem: &str, name: &str) -> Vec<String> {
-		let mut fixed: Vec<String> = self
+		let fixed: Vec<String> = self
 			.affected
 			.iter()
 			.filter(|affected| names(affected, ecosystem, name))
@@ -245,14 +245,17 @@ impl Record {
 			.filter_map(|event| event.fixed.clone())
 			.collect();
 		let kind = VersionKind::of(ecosystem);
-		fixed.sort_by(|a, b| {
-			kind.compare(a, b)
-				.unwrap_or_else(|| match (kind.parses(a), kind.parses(b)) {
-					(true, false) => Ordering::Less,
-					(false, true) => Ordering::Greater,
-					_ => a.cmp(b),
-				})
+		let mut fixed: Vec<(Option<Version<'_>>, String)> = fixed
+			.into_iter()
+			.map(|at| (kind.parse(&at).map(Version::into_owned), at))
+			.collect();
+		fixed.sort_by(|(a, a_at), (b, b_at)| match (a, b) {
+			(Some(a), Some(b)) => a.compare(b).unwrap_or(Ordering::Equal),
+			(Some(_), None) => Ordering::Less,
+			(None, Some(_)) => Ordering::Greater,
+			(None, None) => a_at.cmp(b_at),
 		});
+		let mut fixed: Vec<String> = fixed.into_iter().map(|(_, at)| at).collect();
 		fixed.dedup();
 		fixed
 	}
@@ -267,6 +270,7 @@ pub fn min_fix_version(
 	version: &str,
 ) -> Option<String> {
 	let kind = VersionKind::of(ecosystem);
+	let at = kind.parse(version)?;
 	affected
 		.iter()
 		.filter(|affected| names(affected, ecosystem, name))
@@ -274,9 +278,10 @@ pub fn min_fix_version(
 		.filter(|range| matches!(range.r#type.as_str(), "SEMVER" | "ECOSYSTEM"))
 		.flat_map(|range| &range.events)
 		.filter_map(|event| event.fixed.as_deref())
-		.filter(|fixed| kind.compare(fixed, version) == Some(Ordering::Greater))
-		.min_by(|a, b| kind.compare(a, b).unwrap_or(Ordering::Equal))
-		.map(str::to_owned)
+		.filter_map(|fixed| Some((kind.parse(fixed)?, fixed)))
+		.filter(|(fixed, _)| fixed.compare(&at) == Some(Ordering::Greater))
+		.min_by(|(a, _), (b, _)| a.compare(b).unwrap_or(Ordering::Equal))
+		.map(|(_, fixed)| fixed.to_owned())
 }
 
 fn names(affected: &Affected, ecosystem: &str, name: &str) -> bool {
@@ -291,6 +296,7 @@ fn names(affected: &Affected, ecosystem: &str, name: &str) -> bool {
 /// range whose events put the version inside it.
 pub fn reaches(affected: &[Affected], ecosystem: &str, name: &str, version: &str) -> bool {
 	let kind = VersionKind::of(ecosystem);
+	let at = kind.parse(version);
 	affected
 		.iter()
 		.filter(|affected| names(affected, ecosystem, name))
@@ -298,15 +304,11 @@ pub fn reaches(affected: &[Affected], ecosystem: &str, name: &str, version: &str
 			affected
 				.versions
 				.iter()
-				.any(|listed| same_version(kind, listed, version))
-				|| affected.ranges.iter().any(|range| {
-					let kind = match range.r#type.as_str() {
-						"SEMVER" => VersionKind::Semver,
-						"ECOSYSTEM" => kind,
-						_ => return false,
-					};
-					in_range(&range.events, version, kind)
-				})
+				.any(|listed| same_version(kind, at.as_ref(), listed, version))
+				|| affected
+					.ranges
+					.iter()
+					.any(|range| read_range(range, kind, version).inside)
 		})
 }
 
@@ -318,43 +320,39 @@ pub fn reaches(affected: &[Affected], ecosystem: &str, name: &str, version: &str
 /// parse as the range or the ecosystem orders versions.
 pub fn rules_out(affected: &[Affected], ecosystem: &str, name: &str, version: &str) -> bool {
 	let kind = VersionKind::of(ecosystem);
-	if !kind.parses(version) {
+	let Some(at) = kind.parse(version) else {
 		return false;
-	}
-	let mut named = affected
+	};
+	let named: Vec<&Affected> = affected
 		.iter()
 		.filter(|affected| names(affected, ecosystem, name))
-		.peekable();
-	if named.peek().is_none() {
+		.collect();
+	if named.is_empty() {
 		return false;
 	}
-	let readable = named.all(|affected| {
-		(!affected.ranges.is_empty() || !affected.versions.is_empty())
-			&& affected.ranges.iter().all(|range| {
-				let kind = match range.r#type.as_str() {
-					"SEMVER" => VersionKind::Semver,
-					"ECOSYSTEM" => kind,
-					_ => return false,
-				};
-				// A range orders versions its own way, which an ecosystem's
-				// own version need not parse as: a PEP 440 version in a
-				// `SEMVER` range compares to none of its events, so the range
-				// says nothing about it either way.
-				kind.parses(version)
-					&& range.events.iter().all(|event| {
-						let at = event
-							.introduced
-							.as_deref()
-							.or(event.fixed.as_deref())
-							.or(event.last_affected.as_deref())
-							.or(event.limit.as_deref());
-						at.is_some_and(|at| {
-							(event.introduced.is_some() && at == "0") || kind.parses(at)
-						})
-					})
-			})
-	});
-	readable && !reaches(affected, ecosystem, name, version)
+
+	let mut readable = true;
+	let mut reached = false;
+	for affected in named {
+		readable &= !affected.ranges.is_empty() || !affected.versions.is_empty();
+		for listed in &affected.versions {
+			match kind.parse(listed) {
+				Some(listed) => reached |= listed.compare(&at) == Some(Ordering::Equal),
+				// A listed version the ecosystem does not order is one this
+				// cannot tell the queried version from, however it is spelt.
+				None => {
+					readable = false;
+					reached |= listed == version;
+				}
+			}
+		}
+		for range in &affected.ranges {
+			let read = read_range(range, kind, version);
+			readable &= read.readable;
+			reached |= read.inside;
+		}
+	}
+	readable && !reached
 }
 
 /// How versions of an ecosystem order.
@@ -376,23 +374,45 @@ impl VersionKind {
 		}
 	}
 
-	fn parses(self, version: &str) -> bool {
+	/// The version as this orders them, or `None` where it does not order it.
+	/// Every comparison goes through here, so a version is read from its
+	/// string once however many events it is then held against.
+	fn parse(self, version: &str) -> Option<Version<'_>> {
 		match self {
-			Self::Dpkg => true,
-			Self::Semver => semver(version).is_some(),
-			Self::Pep440 => version.parse::<pep440_rs::Version>().is_ok(),
+			Self::Dpkg => Some(Version::Dpkg(version)),
+			Self::Semver => semver(version).map(Version::Semver),
+			Self::Pep440 => version.parse().ok().map(Version::Pep440),
+		}
+	}
+}
+
+/// A version read as one ecosystem orders them.
+#[derive(Clone, Debug)]
+enum Version<'a> {
+	Semver(node_semver::Version),
+	Dpkg(&'a str),
+	Pep440(pep440_rs::Version),
+}
+
+impl Version<'_> {
+	/// How the two order, or `None` where they are of different ecosystems
+	/// and so of no order to each other.
+	fn compare(&self, other: &Self) -> Option<Ordering> {
+		match (self, other) {
+			(Self::Semver(a), Self::Semver(b)) => Some(a.cmp(b)),
+			(Self::Dpkg(a), Self::Dpkg(b)) => Some(dpkg_compare(a, b)),
+			(Self::Pep440(a), Self::Pep440(b)) => Some(a.cmp(b)),
+			_ => None,
 		}
 	}
 
-	fn compare(self, a: &str, b: &str) -> Option<Ordering> {
+	fn into_owned(self) -> Version<'static> {
 		match self {
-			Self::Dpkg => Some(dpkg_compare(a, b)),
-			Self::Semver => Some(semver(a)?.cmp(&semver(b)?)),
-			Self::Pep440 => {
-				let a = a.parse::<pep440_rs::Version>().ok()?;
-				let b = b.parse::<pep440_rs::Version>().ok()?;
-				Some(a.cmp(&b))
-			}
+			Self::Semver(v) => Version::Semver(v),
+			Self::Pep440(v) => Version::Pep440(v),
+			// A Debian version orders by its text, which is compared where it
+			// is read rather than held.
+			Self::Dpkg(_) => Version::Dpkg(""),
 		}
 	}
 }
@@ -417,86 +437,141 @@ fn semver(version: &str) -> Option<node_semver::Version> {
 	node_semver::Version::parse(padded).ok()
 }
 
-/// Whether two versions are the one version as `kind` orders them, so that a
-/// listed `0.65` is the `0.65.0` a lockfile pins. Versions neither parses are
-/// the same only written the same way.
-fn same_version(kind: VersionKind, a: &str, b: &str) -> bool {
-	a == b || kind.compare(a, b) == Some(Ordering::Equal)
+/// Whether a listed version is the version at `at`, as `kind` orders them, so
+/// that a listed `0.65` is the `0.65.0` a lockfile pins. A listed version the
+/// ecosystem does not order is that version only written the same way.
+fn same_version(kind: VersionKind, at: Option<&Version<'_>>, listed: &str, version: &str) -> bool {
+	listed == version
+		|| at.is_some_and(|at| {
+			kind.parse(listed)
+				.is_some_and(|listed| listed.compare(at) == Some(Ordering::Equal))
+		})
 }
 
+/// What a range says about a version: whether every event of it reads as a
+/// version the range orders, and whether they put the version inside it.
+struct RangeRead {
+	readable: bool,
+	inside: bool,
+}
+
+const UNREADABLE: RangeRead = RangeRead {
+	readable: false,
+	inside: false,
+};
+
 /// OSV's range evaluation: events in version order, `introduced: "0"` first,
-/// each one moving the version in or out of the range.
-fn in_range(events: &[Event], version: &str, kind: VersionKind) -> bool {
+/// each one moving the version in or out of the range. Every version the
+/// range names is read once, and the reading says both whether the range can
+/// be evaluated at all and what it evaluates to.
+fn read_range(range: &Range, ecosystem: VersionKind, version: &str) -> RangeRead {
+	// A range orders versions its own way, which an ecosystem's own version
+	// need not parse as: a PEP 440 version in a `SEMVER` range compares to
+	// none of its events, so the range says nothing about it either way.
+	let kind = match range.r#type.as_str() {
+		"SEMVER" => VersionKind::Semver,
+		"ECOSYSTEM" => ecosystem,
+		_ => return UNREADABLE,
+	};
+	let Some(at) = kind.parse(version) else {
+		return UNREADABLE;
+	};
+
+	/// One event, its versions read as the range orders them.
 	struct Step<'a> {
-		at: &'a str,
 		event: &'a Event,
+		/// The version the event sits at, as written, for ordering events the
+		/// range does not order.
+		raw: &'a str,
+		introduced: Option<Version<'a>>,
+		fixed: Option<Version<'a>>,
+		last_affected: Option<Version<'a>>,
+		limit: Option<Version<'a>>,
 	}
 
-	let mut steps: Vec<Step<'_>> = events
-		.iter()
-		.filter_map(|event| {
-			let at = event
-				.introduced
-				.as_deref()
-				.or(event.fixed.as_deref())
-				.or(event.last_affected.as_deref())
-				.or(event.limit.as_deref())?;
-			Some(Step { at, event })
-		})
-		.collect();
+	impl Step<'_> {
+		/// The version it sits at: OSV holds one of the four per event.
+		fn at(&self) -> Option<&Version<'_>> {
+			self.introduced
+				.as_ref()
+				.or(self.fixed.as_ref())
+				.or(self.last_affected.as_ref())
+				.or(self.limit.as_ref())
+		}
+	}
+
+	let mut readable = true;
+	let mut steps: Vec<Step<'_>> = Vec::with_capacity(range.events.len());
+	for event in &range.events {
+		let Some(raw) = event
+			.introduced
+			.as_deref()
+			.or(event.fixed.as_deref())
+			.or(event.last_affected.as_deref())
+			.or(event.limit.as_deref())
+		else {
+			readable = false;
+			continue;
+		};
+		let step = Step {
+			event,
+			raw,
+			introduced: event.introduced.as_deref().and_then(|at| kind.parse(at)),
+			fixed: event.fixed.as_deref().and_then(|at| kind.parse(at)),
+			last_affected: event.last_affected.as_deref().and_then(|at| kind.parse(at)),
+			limit: event.limit.as_deref().and_then(|at| kind.parse(at)),
+		};
+		// `introduced: "0"` is every version before the next event rather than
+		// a version of its own, so the range still reads without ordering it.
+		readable &= step.at().is_some() || event.introduced.as_deref() == Some("0");
+		steps.push(step);
+	}
+
 	steps.sort_by(|a, b| {
 		let zero = |step: &Step<'_>| step.event.introduced.as_deref() == Some("0");
 		match (zero(a), zero(b)) {
 			(true, false) => Ordering::Less,
 			(false, true) => Ordering::Greater,
 			(true, true) => Ordering::Equal,
-			// Versions that do not parse go last, in a fixed order, so the
-			// order stays total and the ones that parse stay in version order.
-			(false, false) => kind.compare(a.at, b.at).unwrap_or_else(|| {
-				match (kind.parses(a.at), kind.parses(b.at)) {
-					(true, false) => Ordering::Less,
-					(false, true) => Ordering::Greater,
-					_ => a.at.cmp(b.at),
-				}
-			}),
+			// Versions the range does not order go last, in a fixed order, so
+			// the order stays total and the ones it orders stay in version
+			// order.
+			(false, false) => match (a.at(), b.at()) {
+				(Some(a), Some(b)) => a.compare(b).unwrap_or(Ordering::Equal),
+				(Some(_), None) => Ordering::Less,
+				(None, Some(_)) => Ordering::Greater,
+				(None, None) => a.raw.cmp(b.raw),
+			},
 		}
 	});
 
+	let since = |event: &Option<Version<'_>>| {
+		event
+			.as_ref()
+			.and_then(|event| at.compare(event))
+			.unwrap_or(Ordering::Less)
+	};
 	let mut inside = false;
-	for step in steps {
-		let event = step.event;
-		if let Some(introduced) = &event.introduced {
-			if introduced == "0"
-				|| kind
-					.compare(version, introduced)
-					.is_some_and(|ord| ord != Ordering::Less)
-			{
-				inside = true;
-			}
-		}
-		if let Some(fixed) = &event.fixed
-			&& kind
-				.compare(version, fixed)
-				.is_some_and(|ord| ord != Ordering::Less)
+	for step in &steps {
+		if step.event.introduced.as_deref() == Some("0")
+			|| (step.introduced.is_some() && since(&step.introduced) != Ordering::Less)
 		{
+			inside = true;
+		}
+		if step.fixed.is_some() && since(&step.fixed) != Ordering::Less {
 			inside = false;
 		}
-		if let Some(last) = &event.last_affected
-			&& kind
-				.compare(version, last)
-				.is_some_and(|ord| ord == Ordering::Greater)
-		{
+		if step.last_affected.is_some() && since(&step.last_affected) == Ordering::Greater {
 			inside = false;
 		}
-		if let Some(limit) = &event.limit
-			&& kind
-				.compare(version, limit)
-				.is_some_and(|ord| ord != Ordering::Less)
-		{
-			return false;
+		if step.limit.is_some() && since(&step.limit) != Ordering::Less {
+			return RangeRead {
+				readable,
+				inside: false,
+			};
 		}
 	}
-	inside
+	RangeRead { readable, inside }
 }
 
 /// Compares two Debian package versions, `[epoch:]upstream[-revision]`, by
