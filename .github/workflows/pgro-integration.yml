@@ -1,7 +1,9 @@
 name: pgro integration
 
 # The kind-cluster tests take a while and need nothing from the rest of Canopy,
-# so they run only for changes that can affect them.
+# so they run only for changes that can affect them. Keep the path filters in
+# step with pgro-integration-skipped.yml, which reports the same final check
+# for everything else.
 on:
   workflow_dispatch:
   pull_request:
