@@ -16,6 +16,8 @@
 //! (`persistent_schemas=dbt`, exposed): the difference is now operator-set
 //! parameters, not distinct intents.
 
+// spec: INT
+
 use std::collections::{BTreeMap, HashMap};
 
 use bes_canopy_api::schema::{

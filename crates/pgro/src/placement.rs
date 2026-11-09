@@ -11,6 +11,8 @@
 //! and canopy-managed replicas have their spec re-asserted on every tick so a
 //! per-replica field would not survive anyway.
 
+// spec: PLACE
+
 use std::collections::BTreeMap;
 
 use k8s_openapi::api::{

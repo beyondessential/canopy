@@ -7,8 +7,8 @@
 //! forward except the last, which the generated client cannot express; the
 //! wrapper exists as the integration seam tests inject a stub at, and as the
 //! place to hang pgro-specific logging / retry / cache concerns later.
-//!
-//! Spec: `.workhorse/specs/restore-operator/overview.md` (id `PGRO`).
+
+// spec: PGRO#what-drives-it
 
 use bes_canopy_api::{
 	CanopyClient, CanopyTransport,

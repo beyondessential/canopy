@@ -1,3 +1,5 @@
+// spec: USER
+
 use std::{collections::HashSet, time::Duration};
 
 use k8s_openapi::api::core::v1::{Pod, Secret};

@@ -1,11 +1,11 @@
 //! The transport pgro reaches Canopy through.
 //!
-//! Spec: `.workhorse/specs/restore-operator/overview.md` (id `PGRO`).
-//!
 //! pgro's one path to Canopy is the tailnet: the Tailscale sidecar in its pod
 //! carries the connection, and Canopy knows the caller by the sidecar's node.
 //! There is no client certificate and no device key, so nothing here renews or
 //! falls back.
+
+// spec: PGRO#reaching-canopy
 
 use std::{net::IpAddr, time::Duration};
 
