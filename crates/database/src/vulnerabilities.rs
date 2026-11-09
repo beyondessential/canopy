@@ -46,7 +46,7 @@ pub struct Repository {
 }
 
 /// The repositories Canopy tracks.
-pub const REPOSITORIES: [Repository; 9] = [
+pub const REPOSITORIES: [Repository; 8] = [
 	Repository {
 		name: "tamanu",
 		slug: "beyondessential/tamanu",
@@ -81,10 +81,6 @@ pub const REPOSITORIES: [Repository; 9] = [
 	// 	name: "workhorse",
 	// 	slug: "beyondessential/workhorse",
 	// },
-	Repository {
-		name: "pgro",
-		slug: "beyondessential/postgres-restore-operator",
-	},
 	Repository {
 		name: "pollen",
 		slug: "beyondessential/pollen",
