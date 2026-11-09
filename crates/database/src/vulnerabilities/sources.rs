@@ -20,6 +20,7 @@ use crate::packages::RepositoryRead;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[schema(as = VulnerabilitySourceState)]
 pub struct SourceState {
+	/// The source: a tracked repository by name, or Linux.
 	pub source: Source,
 	/// The GitHub repository it is read from, absent for Linux.
 	pub slug: Option<String>,

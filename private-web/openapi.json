@@ -16362,7 +16362,8 @@
             ]
           },
           "source": {
-            "$ref": "#/components/schemas/VulnerabilitySource"
+            "$ref": "#/components/schemas/VulnerabilitySource",
+            "description": "The source: a tracked repository by name, or Linux."
           }
         },
         "required": [

@@ -15363,6 +15363,7 @@ export interface components {
             read_at?: string | null;
             /** @description The GitHub repository it is read from, absent for Linux. */
             slug?: string | null;
+            /** @description The source: a tracked repository by name, or Linux. */
             source: components["schemas"]["VulnerabilitySource"];
         };
         /**
