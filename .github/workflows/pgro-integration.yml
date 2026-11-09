@@ -1,29 +1,15 @@
 name: pgro integration
 
 # The kind-cluster tests take a while and need nothing from the rest of Canopy,
-# so they run only for changes that can affect them. Keep the path filters in
-# step with pgro-integration-skipped.yml, which reports the same final check
-# for everything else.
+# so the `changes` job decides whether a change can affect them, and the
+# matrix is skipped when it cannot. The workflow itself always runs, so the
+# final check is always reported and can be required.
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - crates/pgro/**
-      - crates/canopy-api/**
-      - Cargo.toml
-      - Cargo.lock
-      - rust-toolchain.toml
-      - .github/workflows/pgro-integration.yml
   push:
     branches:
       - main
-    paths:
-      - crates/pgro/**
-      - crates/canopy-api/**
-      - Cargo.toml
-      - Cargo.lock
-      - rust-toolchain.toml
-      - .github/workflows/pgro-integration.yml
 
 env:
   CARGO_TERM_COLOR: always
@@ -34,8 +20,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-slim
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pgro: ${{ steps.filter.outputs.pgro }}
+    steps:
+      - name: Check whether the change can affect pgro
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          case "$EVENT" in
+            pull_request)
+              files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')
+              ;;
+            push)
+              if [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+                files=crates/pgro/
+              else
+                files=$(gh api --paginate "repos/$REPO/compare/$BEFORE...$AFTER" --jq '.files[].filename')
+              fi
+              ;;
+            *)
+              files=crates/pgro/
+              ;;
+          esac
+          echo "$files"
+          if echo "$files" | grep -Eq '^(crates/pgro/|crates/canopy-api/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/pgro-integration\.yml$)'; then
+            echo "pgro=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pgro=false" >> "$GITHUB_OUTPUT"
+          fi
+
   integration:
     name: Integration (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.pgro == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -485,12 +514,12 @@ jobs:
   all-green:
     name: All integrations green
     if: always()
-    needs: [integration]
+    needs: [changes, integration]
     runs-on: ubuntu-slim
     steps:
       - name: Check job results
         run: |
           result='${{ toJSON(needs) }}'
           echo "$result" | jq .
-          echo "$result" | jq -e 'all(.result == "success")'
+          echo "$result" | jq -e '.changes.result == "success" and (.integration.result == "success" or (.changes.outputs.pgro == "false" and .integration.result == "skipped"))'
 
