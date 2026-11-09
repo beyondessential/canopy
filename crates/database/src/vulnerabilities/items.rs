@@ -48,11 +48,16 @@ pub(crate) const EXPOSURE_CTE: &str = "exposure AS ( \
 	WHERE ($1::text[] IS NULL OR m.vulnerability_id = ANY($1)))";
 
 /// The rest of the view, over [`EXPOSURE_CTE`]: one row per item.
-const ITEM_CTES: &str = "agg AS ( \
+///
+/// The aggregates and the decision state are materialised. The planner
+/// misjudges how many rows the exposure gives by orders of magnitude, and with
+/// them inlined it picks nested loops that compute the decision state again
+/// for every item.
+const ITEM_CTES: &str = "agg AS MATERIALIZED ( \
 	  SELECT e.vulnerability_id, e.source, array_agg(DISTINCT e.name) AS packages, \
 	         count(DISTINCT e.machine_id) AS machines \
 	  FROM exposure e GROUP BY 1, 2), \
-	paths AS ( \
+	paths AS MATERIALIZED ( \
 	  SELECT e.vulnerability_id, e.source, array_agg(DISTINCT p.scope) AS scopes, \
 	         bool_or(p.optional) AS any_optional, \
 	         array_agg(DISTINCT p.workspace_package) AS workspace_packages \
@@ -63,11 +68,12 @@ const ITEM_CTES: &str = "agg AS ( \
 	newest AS ( \
 	  SELECT DISTINCT ON (vulnerability_id, source) id, vulnerability_id, source \
 	  FROM vulnerability_decisions \
+	  WHERE ($1::text[] IS NULL OR vulnerability_id = ANY($1)) \
 	  ORDER BY vulnerability_id, source, created_at DESC, id), \
 	/* An item's status: the decision that stands gives it its entries' shared \
 	   outcome, or mixed. `status_of` in decisions.rs is the same rule in Rust, \
 	   for what a decision reports of itself; change them together. */ \
-	state AS ( \
+	state AS MATERIALIZED ( \
 	  SELECT n.vulnerability_id, n.source, n.id AS decision_id, \
 	    EXISTS (SELECT 1 FROM vulnerability_decision_withdrawals w WHERE w.decision_id = n.id) AS withdrawn, \
 	    EXISTS (SELECT 1 FROM vulnerability_lapses l WHERE l.decision_id = n.id) AS lapsed, \
