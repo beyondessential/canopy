@@ -54,11 +54,14 @@ Ordered so the history import is a pure move, and each later step is its own com
 
 ### Specs and conventions
 
-- [ ] Fold pgro's `canopy/intents` spec (INT) into the managed restore replicas spec (RST), so the contract is described once.
-- [ ] Move `operator/placement` (PLACE) and `replica/users` (USER) into Canopy's spec tree under an area for the operator, converted to Canopy's prose style: plain sentences, one per line, no checklists.
+- [x] Draft the operator's specs under `.workhorse/specs/operator/` in Canopy's prose style: an overview (PGRO) covering the Canopy-only, tailnet-only operator, and pgro's intents (INT), placement (PLACE) and replica-user (USER) specs converted from their checklists.
+  They sit in an area of their own rather than inside RST, which describes Canopy's side of the contract generically and puts a consumer's own behaviour out of scope; RST links to them.
   Their ids do not collide with Canopy's.
+- [x] Remove pgro from the repositories the vulnerabilities spec lists.
+- [ ] Remove pgro from the repositories the vulnerability tracker's source table lists, since its dependencies are now in Canopy's own lockfile.
+- [ ] Delete pgro's `.workhorse/specs/` from the imported tree once the operator specs are the only copy.
 - [ ] Merge pgro's AGENTS.md into Canopy's: keep its operator-specific lessons (TCP keepalives, no wall-clock timeouts on long operations) and drop what Canopy's already says.
-- [ ] Remove pgro from the repositories Canopy tracks for vulnerabilities (the list in the vulnerabilities spec and the source table), since its dependencies are now in Canopy's own lockfile.
+- [ ] Add the traceability comments (`// spec: PGRO`, `INT`, `PLACE`, `USER`) where the operator code implements them, and the Playwright or integration coverage the specs call for, when the code moves.
 
 ### CI and deploy
 

@@ -13,7 +13,7 @@ Vulnerabilities are presented on a page of their own and file no checks, so they
 
 There are two kinds of source, and every item belongs to one source.
 
-**A repository** is one of the repositories Canopy tracks: Tamanu, Canopy, bestool, seedling, infra, Tupaia, bliti, pgro and pollen.
+**A repository** is one of the repositories Canopy tracks: Tamanu, Canopy, bestool, seedling, infra, Tupaia, bliti and pollen.
 A repository's dependencies are the packages in its npm, Yarn, Cargo and uv lockfiles on its default branch.
 Only Yarn 2 and later's lockfiles are read: a Yarn classic lockfile counts as a lockfile that cannot be parsed.
 A repository can carry several lockfiles, such as infra's npm dependencies for Pulumi, its Cargo dependencies for pgsnap and its Python dependencies for Ansible, and all of them count.
