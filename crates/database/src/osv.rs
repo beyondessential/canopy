@@ -295,7 +295,10 @@ pub fn reaches(affected: &[Affected], ecosystem: &str, name: &str, version: &str
 		.iter()
 		.filter(|affected| names(affected, ecosystem, name))
 		.any(|affected| {
-			affected.versions.iter().any(|listed| listed == version)
+			affected
+				.versions
+				.iter()
+				.any(|listed| same_version(kind, listed, version))
 				|| affected.ranges.iter().any(|range| {
 					let kind = match range.r#type.as_str() {
 						"SEMVER" => VersionKind::Semver,
@@ -311,8 +314,8 @@ pub fn reaches(affected: &[Affected], ecosystem: &str, name: &str, version: &str
 /// `version` is not affected. OSV does the matching, so this only withholds a
 /// match the record contradicts; it says nothing where it cannot tell: no
 /// entry names the package, an entry has no range or list to read, a range is
-/// of a kind or holds an event this does not evaluate, or the version does
-/// not parse.
+/// of a kind or holds an event this does not evaluate, or the version does not
+/// parse as the range or the ecosystem orders versions.
 pub fn rules_out(affected: &[Affected], ecosystem: &str, name: &str, version: &str) -> bool {
 	let kind = VersionKind::of(ecosystem);
 	if !kind.parses(version) {
@@ -333,17 +336,22 @@ pub fn rules_out(affected: &[Affected], ecosystem: &str, name: &str, version: &s
 					"ECOSYSTEM" => kind,
 					_ => return false,
 				};
-				range.events.iter().all(|event| {
-					let at = event
-						.introduced
-						.as_deref()
-						.or(event.fixed.as_deref())
-						.or(event.last_affected.as_deref())
-						.or(event.limit.as_deref());
-					at.is_some_and(|at| {
-						(event.introduced.is_some() && at == "0") || kind.parses(at)
+				// A range orders versions its own way, which an ecosystem's
+				// own version need not parse as: a PEP 440 version in a
+				// `SEMVER` range compares to none of its events, so the range
+				// says nothing about it either way.
+				kind.parses(version)
+					&& range.events.iter().all(|event| {
+						let at = event
+							.introduced
+							.as_deref()
+							.or(event.fixed.as_deref())
+							.or(event.last_affected.as_deref())
+							.or(event.limit.as_deref());
+						at.is_some_and(|at| {
+							(event.introduced.is_some() && at == "0") || kind.parses(at)
+						})
 					})
-				})
 			})
 	});
 	readable && !reaches(affected, ecosystem, name, version)
@@ -407,6 +415,13 @@ fn semver(version: &str) -> Option<node_semver::Version> {
 	}
 	let padded = format!("{core}{}{rest}", ".0".repeat(3 - numbers));
 	node_semver::Version::parse(padded).ok()
+}
+
+/// Whether two versions are the one version as `kind` orders them, so that a
+/// listed `0.65` is the `0.65.0` a lockfile pins. Versions neither parses are
+/// the same only written the same way.
+fn same_version(kind: VersionKind, a: &str, b: &str) -> bool {
+	a == b || kind.compare(a, b) == Some(Ordering::Equal)
 }
 
 /// OSV's range evaluation: events in version order, `introduced: "0"` first,
@@ -735,6 +750,42 @@ mod tests {
 		assert!(!rules_out("1.2.4"));
 		assert!(!rules_out("not-a-version"));
 		assert!(!super::rules_out(&affected, "npm", "right-pad", "9.9.9"));
+	}
+
+	#[test]
+	fn a_version_the_range_cannot_order_rules_nothing_out() {
+		// A PyPI package in a SEMVER range: PEP 440's own versions compare to
+		// none of its events, so the range says nothing about them.
+		let affected = semver_range(&[("introduced", "0.9.0"), ("fixed", "1.0.5")]);
+		let mut affected = affected;
+		affected[0].package = Some(Package {
+			ecosystem: "PyPI".into(),
+			name: "left-pad".into(),
+		});
+		assert!(!super::rules_out(
+			&affected,
+			"PyPI",
+			"left-pad",
+			"1.0.post1"
+		));
+		// One semver orders is ruled out as before.
+		assert!(super::rules_out(&affected, "PyPI", "left-pad", "0.8.0"));
+	}
+
+	#[test]
+	fn a_listed_version_short_of_three_numbers_names_the_version_it_pads_to() {
+		let affected = vec![Affected {
+			package: Some(Package {
+				ecosystem: "npm".into(),
+				name: "left-pad".into(),
+			}),
+			versions: vec!["0.65".into()],
+			..Default::default()
+		}];
+		assert!(hits(&affected, "0.65.0"));
+		assert!(!hits(&affected, "0.65.1"));
+		assert!(!super::rules_out(&affected, "npm", "left-pad", "0.65.0"));
+		assert!(super::rules_out(&affected, "npm", "left-pad", "0.65.1"));
 	}
 
 	#[test]
