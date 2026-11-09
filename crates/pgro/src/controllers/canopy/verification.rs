@@ -1,0 +1,1060 @@
+//! POST `RestoreVerification` back to canopy on restore success / failure.
+//!
+//! Canopy sees the whole restore cycle as three signals: it dispatches an
+//! entry (signal 1), pgro reports the outcome (signal 3), canopy closes the
+//! loop. This module owns signal 3 — one function called at each terminal
+//! transition (switchover success, restore failure).
+
+use std::collections::BTreeMap;
+
+use bestool_canopy::schema::{
+	MigrationArgs, MigrationTimingArgs, ReportingSchemaArgs, RunOutcome, VerificationArgs,
+};
+use jiff::Timestamp;
+use k8s_openapi::api::core::v1::{Namespace, Secret};
+use kube::{Api, ResourceExt};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use tracing::{info, warn};
+use uuid::Uuid;
+
+use crate::{
+	context::Context,
+	controllers::{canopy::labels, postgres},
+	error::Error,
+	types::{PostgresPhysicalReplica, PostgresPhysicalRestore, SchemaBuildResult},
+};
+
+/// The sidecar posts this JSON shape to `/api/v1/canopy-stats/{ns}/{job}`
+/// on exit; kept in sync with `src/bin/canopy_proxy.rs::StatsFile`.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanopyStats {
+	pub sent_raw_bytes: u64,
+	pub sent_payload_bytes: u64,
+	pub received_raw_bytes: u64,
+	pub received_payload_bytes: u64,
+}
+
+/// Report the outcome of a canopy-managed restore to canopy. No-op for
+/// non-canopy replicas (missing `spec.canopy_source`) and when the canopy
+/// client isn't configured.
+pub async fn report(
+	ctx: &Context,
+	replica: &PostgresPhysicalReplica,
+	restore: &PostgresPhysicalRestore,
+	outcome: RunOutcome,
+	error: Option<&str>,
+) {
+	if replica.spec.canopy_source.is_none() {
+		return;
+	}
+	let Some(canopy) = ctx.canopy.as_ref() else {
+		return;
+	};
+
+	// Canopy made `replica_id` required on VerificationArgs, so a report
+	// without one can no longer be constructed, and inventing one is not an
+	// option — canopy keys worklist state on it.
+	//
+	// The syncer stamps the same label set on the Namespace as on the CR, so
+	// fall back to the namespace when the CR is missing any of the three ids.
+	// Resolved together, before any of them is used: the case worth recovering
+	// is a CR whose labels were stripped wholesale, and checking them one at a
+	// time would return on the first missing one without ever consulting the
+	// namespace. Merged rather than substituted, so a CR that has some of them
+	// keeps its own values.
+	let mut labels = replica.labels().clone();
+	let ids = match canopy_ids(&labels) {
+		Ok(ids) => ids,
+		Err(missing) => {
+			if let Some(ns_labels) = namespace_labels(ctx, replica).await {
+				fill_missing_labels(&mut labels, ns_labels);
+			}
+			match canopy_ids(&labels) {
+				Ok(ids) => {
+					warn!(
+						replica = %replica.name_any(),
+						?missing,
+						"canopy verification: replica CR missing identity labels, recovered from the namespace",
+					);
+					ids
+				}
+				Err(still_missing) => {
+					warn!(
+						replica = %replica.name_any(),
+						?still_missing,
+						"canopy verification: identity labels absent from the replica CR and its namespace, skipping report",
+					);
+					return;
+				}
+			}
+		}
+	};
+	let CanopyIds {
+		group,
+		server_id,
+		replica_id,
+	} = ids;
+	let backup_type = labels
+		.get(labels::TYPE)
+		.map(String::as_str)
+		.unwrap_or_default()
+		.to_string();
+	let intent = labels
+		.get(labels::INTENT)
+		.map(String::as_str)
+		.unwrap_or_default()
+		.to_string();
+
+	let restore_job = format!("{}-restore", restore.name_any());
+	let stats = ctx
+		.canopy_stats
+		.take(&replica.namespace().unwrap_or_default(), &restore_job)
+		.and_then(|raw| match serde_json::from_str::<CanopyStats>(&raw) {
+			Ok(s) => Some(s),
+			Err(err) => {
+				warn!(
+					restore = %restore.name_any(),
+					error = %err,
+					"canopy verification: failed to parse sidecar stats JSON"
+				);
+				None
+			}
+		})
+		.unwrap_or_default();
+
+	let postgres_version = restore
+		.status
+		.as_ref()
+		.and_then(|s| s.postgres_version.clone());
+
+	// The canopy run-uuid minted when this run's Job was created (persisted on
+	// the restore status). Reported so canopy can correlate the report with the
+	// run's credential requests.
+	let run_id = run_id_from_status(restore);
+
+	let (duration_sec, pg) = gather_health_details(ctx, replica, restore).await;
+	let (outcome, error) = verdict(outcome, error, pg.as_ref());
+	let replica_healthy = matches!(outcome, RunOutcome::Success);
+
+	// Send None rather than an empty object when nothing was gathered (e.g.
+	// failure path, postgres unreachable).
+	let mut health = build_health_details(
+		duration_sec,
+		pg,
+		restore
+			.status
+			.as_ref()
+			.and_then(|s| s.schema_build_result.as_ref()),
+	);
+	// `url` semantic: for a replica exposed on the tailnet, attach a link to
+	// it so canopy can surface it to operators alongside the report.
+	if let Some(url) = exposed_replica_url(ctx, replica).await
+		&& let Some(obj) = health.as_object_mut()
+	{
+		obj.insert("url".to_string(), json!(url));
+	}
+	let health_details = health
+		.as_object()
+		.is_some_and(|m| !m.is_empty())
+		.then_some(health);
+
+	// Typed request body generated from canopy's OpenAPI (bestool#628).
+	// Constructing it here means the field set is checked against canopy's
+	// spec at compile time; `health_details` stays free-form by design.
+	let migration = migration_for(&intent, restore);
+	let reporting_schema = reporting_schema_for(&intent, restore);
+
+	let args = VerificationArgs::builder()
+		.maybe_migration(migration)
+		.maybe_reporting_schema(reporting_schema)
+		.replica_id(replica_id)
+		.maybe_run_id(run_id)
+		.group(group)
+		.server_id(server_id)
+		.type_(backup_type.clone())
+		.intent(intent.clone())
+		.snapshot_id(restore.spec.snapshot.clone())
+		.outcome(outcome_wire(outcome).to_string())
+		.maybe_error(error)
+		.replica_healthy(replica_healthy)
+		.maybe_postgres_version(postgres_version)
+		.observed_at(Timestamp::now().to_string())
+		.s3_sent_raw_bytes(stats.sent_raw_bytes as i64)
+		.s3_sent_payload_bytes(stats.sent_payload_bytes as i64)
+		.s3_received_raw_bytes(stats.received_raw_bytes as i64)
+		.s3_received_payload_bytes(stats.received_payload_bytes as i64)
+		.maybe_health_details(health_details)
+		.build();
+
+	match canopy.restore_verification_typed(&args).await {
+		Ok(()) => info!(
+			replica = %replica.name_any(),
+			restore = %restore.name_any(),
+			?outcome,
+			health_details = %args.health_details.as_ref().map(|v| v.to_string()).unwrap_or_default(),
+			"canopy verification reported"
+		),
+		Err(err) => warn!(
+			replica = %replica.name_any(),
+			restore = %restore.name_any(),
+			error = %err,
+			"canopy verification report failed"
+		),
+	}
+}
+
+/// The three identities a verification report cannot be built without.
+#[derive(Debug)]
+struct CanopyIds {
+	group: Uuid,
+	server_id: Uuid,
+	replica_id: Uuid,
+}
+
+/// Parse the identity labels canopy requires, or report which of them are
+/// absent or unparsable.
+///
+/// Pure so the label handling stays testable apart from the namespace lookup
+/// it feeds.
+fn canopy_ids(labels: &BTreeMap<String, String>) -> Result<CanopyIds, Vec<&'static str>> {
+	let id = |key: &str| labels.get(key).and_then(|s| Uuid::parse_str(s).ok());
+	let (group, server_id, replica_id) = (
+		id(labels::GROUP),
+		id(labels::SERVER),
+		id(labels::DECLARATION_ID),
+	);
+
+	let missing: Vec<&'static str> = [
+		(labels::GROUP, group.is_none()),
+		(labels::SERVER, server_id.is_none()),
+		(labels::DECLARATION_ID, replica_id.is_none()),
+	]
+	.into_iter()
+	.filter_map(|(key, absent)| absent.then_some(key))
+	.collect();
+
+	match (group, server_id, replica_id) {
+		(Some(group), Some(server_id), Some(replica_id)) => Ok(CanopyIds {
+			group,
+			server_id,
+			replica_id,
+		}),
+		_ => Err(missing),
+	}
+}
+
+/// Fill gaps in `labels` from `fallback`, leaving existing entries alone.
+///
+/// The CR is the authority on its own identity; the namespace only supplies
+/// what the CR has lost. Overwriting instead would let a stale or hand-set CR
+/// value be replaced silently, and reporting the wrong group misfiles the
+/// result in canopy.
+///
+/// Applies to the whole label set rather than just the three ids. `TYPE` and
+/// `INTENT` come from the same `WorklistEntry`, so *when the fallback runs*
+/// recovering them alongside beats the empty strings they would otherwise
+/// default to — and never loses, since the CR's own values always win. A CR
+/// holding all three ids never reaches here, so one missing `TYPE` on its own
+/// still reports empty rather than costing every successful report an extra
+/// API call.
+///
+/// Copying the namespace's other labels (`MANAGED_BY`, k8s's own
+/// `kubernetes.io/metadata.name`) is inert: `labels` is a local clone read only
+/// by [`canopy_ids`] and the two lookups above, and is never written back.
+fn fill_missing_labels(labels: &mut BTreeMap<String, String>, fallback: BTreeMap<String, String>) {
+	for (key, value) in fallback {
+		labels.entry(key).or_insert(value);
+	}
+}
+
+/// Labels on the replica's Namespace.
+///
+/// `canopy::ensure_namespace` stamps the same label set there as
+/// `ensure_replica_cr` does on the CR, both from one `WorklistEntry`, so this
+/// is a second copy of the same fact rather than a guess. It cannot go stale:
+/// the namespace *name* derives from `replica_id ‖ server_id`, so a changed id
+/// lands in a different namespace and the old one is swept.
+///
+/// Best-effort: a namespaceless replica, a lookup failure or an absent
+/// namespace all read as `None`, and the caller skips the report.
+async fn namespace_labels(
+	ctx: &Context,
+	replica: &PostgresPhysicalReplica,
+) -> Option<BTreeMap<String, String>> {
+	let ns_name = replica.namespace()?;
+	let namespaces: Api<Namespace> = Api::all(ctx.client.clone());
+	match namespaces.get_opt(&ns_name).await {
+		Ok(ns) => Some(ns?.labels().clone()),
+		Err(e) => {
+			warn!(
+				replica = %replica.name_any(),
+				namespace = %ns_name,
+				error = %e,
+				"canopy verification: failed to read namespace for identity label fallback"
+			);
+			None
+		}
+	}
+}
+
+/// The canopy run-uuid persisted on the restore status, parsed to a `Uuid`.
+/// A malformed value is treated as absent rather than failing the report —
+/// canopy still accepts a report without a run_id while the field is optional.
+pub(crate) fn run_id_from_status(restore: &PostgresPhysicalRestore) -> Option<Uuid> {
+	restore
+		.status
+		.as_ref()
+		.and_then(|s| s.run_id.as_deref())
+		.and_then(|s| Uuid::parse_str(s).ok())
+}
+
+/// Wire string canopy expects for the `outcome` field (matches the
+/// lowercase serialization of `bestool_canopy::Outcome`).
+fn outcome_wire(outcome: RunOutcome) -> &'static str {
+	match outcome {
+		RunOutcome::Success => "success",
+		RunOutcome::Failure => "failure",
+	}
+}
+
+/// A cluster holding only postgres' own databases restored no application data.
+fn verdict(
+	outcome: RunOutcome,
+	error: Option<&str>,
+	pg: Option<&PostgresHealth>,
+) -> (RunOutcome, Option<String>) {
+	let empty = pg.is_some_and(|pg| postgres::application_database(&pg.sizes).is_none());
+	if outcome == RunOutcome::Success && empty {
+		return (
+			RunOutcome::Failure,
+			Some(Error::NoApplicationDatabase.to_string()),
+		);
+	}
+	(outcome, error.map(str::to_string))
+}
+
+/// The tailnet URL of a replica exposed via the `url` semantic, or `None` if
+/// it isn't exposed or the MagicDNS suffix can't be resolved. The hostname is
+/// read from the Service's `tailscale.com/hostname` annotation the intent set,
+/// so the reported URL matches exactly what tailscale publishes.
+async fn exposed_replica_url(ctx: &Context, replica: &PostgresPhysicalReplica) -> Option<String> {
+	let annotations = replica.spec.service_annotations.as_ref()?;
+	if annotations.get("tailscale.com/expose").map(String::as_str) != Some("true") {
+		return None;
+	}
+	let hostname = annotations.get("tailscale.com/hostname")?;
+	let suffix = ctx.magic_dns_suffix().await?;
+	Some(crate::tailscale::replica_url(hostname, &suffix))
+}
+
+/// Best-effort gather of the parts of the `health_details` map (snake_case keys):
+/// `{ sizes: {<db>: bytes}, fixes: {reindex, locale}, restore_duration_sec }`.
+///
+/// `sizes` and `fixes` come from a single read-only connection to the
+/// restore's postgres (`sizes` from `pg_database_size`, `fixes` from the
+/// `_pgro.restore_info` flags the init recorded). Any connection or query
+/// failure — expected on the failure path, where postgres may never have
+/// come up — just omits that piece; the verification still sends.
+/// `restore_duration_sec` is the wall-clock from the restore CR's
+/// `createdAt` to now (≈ activation), independent of postgres.
+async fn gather_health_details(
+	ctx: &Context,
+	replica: &PostgresPhysicalReplica,
+	restore: &PostgresPhysicalRestore,
+) -> (Option<u64>, Option<PostgresHealth>) {
+	let duration_sec = restore
+		.status
+		.as_ref()
+		.and_then(|s| s.created_at.as_ref())
+		.map(|created| Timestamp::now().duration_since(created.0).as_secs().max(0) as u64);
+
+	let pg = match gather_from_postgres(ctx, replica, restore).await {
+		Ok(parts) => Some(parts),
+		// Expected on the failure path (postgres may never have come up) and
+		// on ephemeral replicas racing teardown; the verification still sends.
+		Err(err) => {
+			warn!(
+				replica = %replica.name_any(),
+				restore = %restore.name_any(),
+				error = %err,
+				"canopy verification: could not gather sizes/fixes; reporting without them"
+			);
+			None
+		}
+	};
+
+	(duration_sec, pg)
+}
+
+/// Postgres-derived pieces of the health details: per-database sizes and
+/// the `fixes` map the restore init recorded. `fixes` is an arbitrary JSON
+/// object (`{locale, reindex, reset_wal, ...}`) forwarded verbatim, so new
+/// fix flags flow through without operator changes.
+struct PostgresHealth {
+	sizes: Vec<(String, u64)>,
+	fixes: Value,
+}
+
+/// Assemble the `health_details` JSON from already-gathered parts. Pure, so
+/// the snake_case wire shape is unit-testable without a database. Omits any
+/// piece that wasn't gathered.
+fn build_health_details(
+	duration_sec: Option<u64>,
+	pg: Option<PostgresHealth>,
+	schema_build: Option<&SchemaBuildResult>,
+) -> Value {
+	let mut details = serde_json::Map::new();
+	if let Some(secs) = duration_sec {
+		details.insert("restore_duration_sec".into(), json!(secs));
+	}
+	if let Some(pg) = pg {
+		let sizes_obj: serde_json::Map<String, Value> = pg
+			.sizes
+			.into_iter()
+			.map(|(name, bytes)| (name, json!(bytes)))
+			.collect();
+		details.insert("sizes".into(), Value::Object(sizes_obj));
+		details.insert("fixes".into(), pg.fixes);
+	}
+	// Canopy carries no field of its own for a build, and this is what tells it
+	// a replica that came up sound built nothing.
+	if let Some(build) = schema_build {
+		let mut block = serde_json::Map::from_iter([
+			("built".to_string(), json!(build.built)),
+			(
+				"elapsed_sec".to_string(),
+				json!(build.total_elapsed_seconds),
+			),
+		]);
+		if let Some(error) = build.error.as_deref() {
+			block.insert("error".into(), json!(error));
+		}
+		if let Some(bytes) = build.schema_bytes {
+			block.insert("schema_bytes".into(), json!(bytes));
+		}
+		if !build.artifacts.is_empty() {
+			block.insert("artifacts".into(), json!(build.artifacts));
+		}
+		details.insert("schema_build".into(), Value::Object(block));
+	}
+	Value::Object(details)
+}
+
+/// Connect to the restore's postgres (as the replica's reader user) and
+/// read the per-database sizes + fix flags. Returns
+/// `(sizes, (locale_fixed, reindex_done))`.
+async fn gather_from_postgres(
+	ctx: &Context,
+	replica: &PostgresPhysicalReplica,
+	restore: &PostgresPhysicalRestore,
+) -> crate::error::Result<PostgresHealth> {
+	let namespace = replica.namespace().unwrap_or_default();
+	let restore_name = restore.name_any();
+
+	let secrets: Api<Secret> = Api::namespaced(ctx.client.clone(), &namespace);
+	let reader_secret = secrets.get(&replica.creds_secret_name()).await?;
+	let reader_user = postgres::read_secret_field(&reader_secret, "username")?;
+	let reader_password = postgres::read_secret_field(&reader_secret, "password")?;
+
+	let conn = postgres::connect_to_restore(
+		&ctx.client,
+		&namespace,
+		&restore_name,
+		"postgres",
+		&reader_user,
+		&reader_password,
+		ctx.use_port_forward(),
+	)
+	.await?;
+
+	let sizes = postgres::list_database_sizes(&conn.client).await?;
+	let fixes = postgres::read_restore_fixes(&conn.client)
+		.await
+		.unwrap_or_else(|_| json!({}));
+	Ok(PostgresHealth { sizes, fixes })
+}
+
+/// The migration block for a report, if this restore's intent reports one.
+///
+/// Only `upgrade` does: its migration is a version-readiness signal, so canopy
+/// reads the named failing migration as the verdict rather than the report's
+/// outcome, keeping backup health and version readiness separate — the backup
+/// restored fine even when the version's migrations did not. An `analytics`
+/// replica may also migrate (its `migrate_to` param), but that is only to hand
+/// the operator an upgraded database to work against, not to verify a version,
+/// so its outcome is not reported.
+/// What the build produced, for a report under the reporting-schema intent.
+/// Absent on every other intent, and on a restore whose build has not settled.
+fn reporting_schema_for(
+	intent: &str,
+	restore: &PostgresPhysicalRestore,
+) -> Option<ReportingSchemaArgs> {
+	if intent != super::intent::REPORTING_SCHEMA_INTENT {
+		return None;
+	}
+	let result = restore.status.as_ref()?.schema_build_result.as_ref()?;
+	Some(reporting_schema_args(
+		result,
+		restore.spec.migrate_to.as_ref(),
+	))
+}
+
+/// Canopy settles the pair against this, and writes the build row from it. The
+/// free-form `health_details` block is for people reading the report; only this
+/// is read by the worklist.
+fn reporting_schema_args(
+	result: &SchemaBuildResult,
+	target: Option<&crate::types::MigrationTarget>,
+) -> ReportingSchemaArgs {
+	ReportingSchemaArgs::builder()
+		.artifacts(
+			result
+				.artifacts
+				.iter()
+				.filter_map(|id| Uuid::parse_str(id).ok())
+				.collect(),
+		)
+		.built(result.built)
+		.maybe_error(result.error.clone())
+		.maybe_target_version(target.map(|t| t.version.clone()))
+		.maybe_target_version_id(target.and_then(|t| Uuid::parse_str(&t.version_id).ok()))
+		.build()
+}
+
+fn migration_for(intent: &str, restore: &PostgresPhysicalRestore) -> Option<MigrationArgs> {
+	if intent != "upgrade" {
+		return None;
+	}
+	restore
+		.status
+		.as_ref()
+		.and_then(|s| s.migration_result.as_ref())
+		.zip(restore.spec.migrate_to.as_ref())
+		.and_then(|(result, target)| migration_args(result, target))
+}
+
+/// Map the operator's recorded result onto canopy's wire shape.
+///
+/// Returns `None` when the target version's id isn't a uuid, which would mean
+/// canopy sent something it cannot itself join back to a version.
+fn migration_args(
+	result: &crate::types::MigrationResult,
+	target: &crate::types::MigrationTarget,
+) -> Option<MigrationArgs> {
+	let target_version_id = Uuid::parse_str(&target.version_id).ok()?;
+	Some(
+		MigrationArgs::builder()
+			.target_version_id(target_version_id)
+			.total_elapsed_seconds(result.total_elapsed_seconds)
+			.maybe_failed_migration(result.failed_migration.clone())
+			.maybe_error(result.error.clone())
+			.data_bytes_before(result.data_bytes_before)
+			.data_bytes_after(result.data_bytes_after)
+			.timings(
+				result
+					.timings
+					.iter()
+					.map(|t| {
+						MigrationTimingArgs::builder()
+							.name(t.name.clone())
+							.elapsed_seconds(t.elapsed_seconds)
+							.build()
+					})
+					.collect::<Vec<_>>(),
+			)
+			.build(),
+	)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	// Distinct per label, so a field read from the wrong key is caught rather
+	// than passing on a coincidence.
+	const GROUP_ID: &str = "11111111-1111-1111-1111-111111111111";
+	const SERVER_ID: &str = "22222222-2222-2222-2222-222222222222";
+	const REPLICA_ID: &str = "33333333-3333-3333-3333-333333333333";
+
+	fn uuid(s: &str) -> Uuid {
+		Uuid::parse_str(s).expect("valid uuid")
+	}
+
+	fn label_set(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+		pairs
+			.iter()
+			.map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+			.collect()
+	}
+
+	fn full_labels() -> BTreeMap<String, String> {
+		label_set(&[
+			(labels::GROUP, GROUP_ID),
+			(labels::SERVER, SERVER_ID),
+			(labels::DECLARATION_ID, REPLICA_ID),
+		])
+	}
+
+	#[test]
+	fn all_three_ids_parse() {
+		let ids = canopy_ids(&full_labels()).expect("a complete label set parses");
+		assert_eq!(ids.group, uuid(GROUP_ID));
+		assert_eq!(ids.server_id, uuid(SERVER_ID));
+		assert_eq!(ids.replica_id, uuid(REPLICA_ID));
+	}
+
+	#[test]
+	fn every_absent_id_is_reported_at_once() {
+		// The report is skipped on any of the three, so the caller needs to
+		// know all of them in one pass — checking one at a time would return
+		// before the namespace fallback ever ran.
+		let missing = canopy_ids(&BTreeMap::new()).expect_err("an empty label set cannot parse");
+		assert_eq!(missing.len(), 3, "got {missing:?}");
+		for key in [labels::GROUP, labels::SERVER, labels::DECLARATION_ID] {
+			assert!(
+				missing.contains(&key),
+				"{key} should be reported: {missing:?}"
+			);
+		}
+	}
+
+	#[test]
+	fn only_the_absent_id_is_reported() {
+		let mut labels = full_labels();
+		labels.remove(labels::DECLARATION_ID);
+		let missing = canopy_ids(&labels).expect_err("a missing declaration id cannot parse");
+		assert_eq!(missing, vec![labels::DECLARATION_ID]);
+	}
+
+	#[test]
+	fn an_unparsable_id_counts_as_absent() {
+		// A garbage value must not reach canopy as a silently-dropped field.
+		let mut labels = full_labels();
+		labels.insert(labels::SERVER.to_string(), "not-a-uuid".to_string());
+		let missing = canopy_ids(&labels).expect_err("a malformed uuid cannot parse");
+		assert_eq!(missing, vec![labels::SERVER]);
+	}
+
+	#[test]
+	fn fill_missing_labels_only_fills_the_gaps() {
+		// Exercises the merge `report` actually calls, not a copy of it: an
+		// inlined `or_insert` loop here would keep passing if the real one
+		// were changed to overwrite.
+		let other = "99999999-9999-9999-9999-999999999999";
+		let mut cr = label_set(&[(labels::GROUP, other)]);
+		assert!(canopy_ids(&cr).is_err(), "precondition: CR alone is short");
+
+		fill_missing_labels(&mut cr, full_labels());
+
+		let ids = canopy_ids(&cr).expect("the merged set parses");
+		assert_eq!(
+			ids.group,
+			uuid(other),
+			"the CR's own value must survive the merge"
+		);
+		assert_eq!(ids.server_id, uuid(SERVER_ID));
+		assert_eq!(ids.replica_id, uuid(REPLICA_ID));
+	}
+
+	#[test]
+	fn the_fallback_never_overwrites_what_the_cr_already_has() {
+		// Pins the direction on its own, across every key rather than just the
+		// ids: `insert` in place of `or_insert` would let the namespace
+		// silently rewrite a CR's identity, and reporting the wrong group
+		// misfiles the result in canopy.
+		let mut cr = label_set(&[(labels::GROUP, GROUP_ID), (labels::TYPE, "cr-type")]);
+		fill_missing_labels(
+			&mut cr,
+			label_set(&[
+				(labels::GROUP, REPLICA_ID),
+				(labels::TYPE, "ns-type"),
+				(labels::INTENT, "ns-intent"),
+			]),
+		);
+
+		assert_eq!(cr.get(labels::GROUP).map(String::as_str), Some(GROUP_ID));
+		assert_eq!(cr.get(labels::TYPE).map(String::as_str), Some("cr-type"));
+		assert_eq!(
+			cr.get(labels::INTENT).map(String::as_str),
+			Some("ns-intent"),
+			"a key the CR lacks entirely should still be filled"
+		);
+	}
+
+	#[test]
+	fn health_details_shape_is_snake_case() {
+		let v = build_health_details(
+			Some(700),
+			Some(PostgresHealth {
+				sizes: vec![("tamanu".into(), 1_872_782), ("postgres".into(), 12_829)],
+				fixes: json!({ "locale": true, "reindex": false, "reset_wal": false }),
+			}),
+			None,
+		);
+		assert_eq!(v["restore_duration_sec"], json!(700));
+		assert_eq!(v["sizes"]["tamanu"], json!(1_872_782u64));
+		assert_eq!(v["sizes"]["postgres"], json!(12_829u64));
+		// fixes is forwarded verbatim, so new flags pass through untouched.
+		assert_eq!(v["fixes"]["locale"], json!(true));
+		assert_eq!(v["fixes"]["reindex"], json!(false));
+		assert_eq!(v["fixes"]["reset_wal"], json!(false));
+	}
+
+	#[test]
+	fn health_details_omits_ungathered_parts() {
+		// Failure path: no postgres connection, no createdAt.
+		let v = build_health_details(None, None, None);
+		assert_eq!(v, json!({}));
+		// Duration known but postgres unreachable: sizes/fixes omitted.
+		let v = build_health_details(Some(42), None, None);
+		assert_eq!(v, json!({ "restore_duration_sec": 42 }));
+		assert!(v.get("sizes").is_none());
+		assert!(v.get("fixes").is_none());
+	}
+
+	/// A replica can come up sound and still build nothing, and the report is
+	/// where canopy is told so.
+	#[test]
+	fn a_failed_build_is_reported_beside_a_healthy_replica() {
+		let v = build_health_details(
+			Some(700),
+			None,
+			Some(&SchemaBuildResult {
+				built: false,
+				error: Some("canopy did not take the schema in: timed out".to_string()),
+				total_elapsed_seconds: 1_712,
+				schema_bytes: Some(41_002_112),
+				artifacts: Vec::new(),
+			}),
+		);
+
+		assert_eq!(v["schema_build"]["built"], json!(false));
+		assert_eq!(v["schema_build"]["elapsed_sec"], json!(1_712));
+		assert_eq!(v["schema_build"]["schema_bytes"], json!(41_002_112));
+		assert_eq!(
+			v["schema_build"]["error"],
+			json!("canopy did not take the schema in: timed out")
+		);
+	}
+
+	/// The typed report is what canopy settles the pair on: the artifacts the
+	/// build registered, whether a schema came out, and the version it was
+	/// built for, so a failed build is a recorded row rather than a pair the
+	/// worklist re-dispatches on every poll.
+	#[test]
+	fn a_settled_build_is_reported_as_the_typed_args() {
+		let target = crate::types::MigrationTarget {
+			version: "2.60.32".to_string(),
+			version_id: "22222222-2222-2222-2222-222222222222".to_string(),
+		};
+		let args = reporting_schema_args(
+			&SchemaBuildResult {
+				built: true,
+				error: None,
+				total_elapsed_seconds: 1_712,
+				schema_bytes: Some(41_002_112),
+				artifacts: vec![
+					"cccccccc-cccc-cccc-cccc-cccccccccccc".to_string(),
+					"not-an-id".to_string(),
+				],
+			},
+			Some(&target),
+		);
+
+		assert!(args.built);
+		assert_eq!(args.error, None);
+		assert_eq!(
+			args.artifacts,
+			vec![Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap()]
+		);
+		assert_eq!(args.target_version.as_deref(), Some("2.60.32"));
+		assert_eq!(
+			args.target_version_id,
+			Uuid::parse_str("22222222-2222-2222-2222-222222222222").ok()
+		);
+	}
+
+	/// A failed build still reports, carrying what went wrong and no artifacts.
+	#[test]
+	fn a_failed_build_is_reported_with_its_error() {
+		let args = reporting_schema_args(
+			&SchemaBuildResult {
+				built: false,
+				error: Some("canopy did not take the schema in: timed out".to_string()),
+				total_elapsed_seconds: 30,
+				schema_bytes: None,
+				artifacts: Vec::new(),
+			},
+			None,
+		);
+
+		assert!(!args.built);
+		assert_eq!(
+			args.error.as_deref(),
+			Some("canopy did not take the schema in: timed out")
+		);
+		assert!(args.artifacts.is_empty());
+		assert_eq!(args.target_version, None);
+	}
+
+	/// A restore that builds no schema carries no build block at all.
+	#[test]
+	fn a_restore_that_builds_nothing_reports_no_build() {
+		let v = build_health_details(Some(42), None, None);
+		assert!(v.get("schema_build").is_none());
+	}
+
+	fn pg_health(sizes: &[(&str, u64)]) -> PostgresHealth {
+		PostgresHealth {
+			sizes: sizes.iter().map(|(n, s)| ((*n).to_string(), *s)).collect(),
+			fixes: json!({}),
+		}
+	}
+
+	#[test]
+	fn a_restore_of_only_system_databases_is_reported_as_a_failure() {
+		// Postgres coming up proves nothing about a backup with no data in it.
+		let pg = pg_health(&[
+			("postgres", 8_000_000),
+			("template1", 8_000_000),
+			("template0", 8_000_000),
+		]);
+		let (outcome, error) = verdict(RunOutcome::Success, None, Some(&pg));
+		assert_eq!(outcome, RunOutcome::Failure);
+		assert_eq!(
+			error.as_deref(),
+			Some("restore contains no application database")
+		);
+	}
+
+	#[test]
+	fn a_restore_with_an_application_database_keeps_its_success() {
+		let pg = pg_health(&[("myapp", 1_872_782), ("postgres", 12_829)]);
+		assert_eq!(
+			verdict(RunOutcome::Success, None, Some(&pg)),
+			(RunOutcome::Success, None)
+		);
+	}
+
+	#[test]
+	fn a_failure_keeps_the_error_the_caller_named() {
+		// The caller's reason is the specific one; the sizes only add to it.
+		let pg = pg_health(&[("postgres", 8_000_000)]);
+		let (outcome, error) = verdict(
+			RunOutcome::Failure,
+			Some("kopia restore Job failed"),
+			Some(&pg),
+		);
+		assert_eq!(outcome, RunOutcome::Failure);
+		assert_eq!(error.as_deref(), Some("kopia restore Job failed"));
+	}
+
+	#[test]
+	fn an_unreachable_postgres_cannot_downgrade_a_success() {
+		assert_eq!(
+			verdict(RunOutcome::Success, None, None),
+			(RunOutcome::Success, None)
+		);
+	}
+
+	fn restore_with_run_id(run_id: Option<&str>) -> PostgresPhysicalRestore {
+		use k8s_openapi::api::core::v1::LocalObjectReference;
+		use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
+
+		use crate::types::{PostgresPhysicalRestoreSpec, PostgresPhysicalRestoreStatus};
+
+		let mut restore = PostgresPhysicalRestore::new(
+			"r",
+			PostgresPhysicalRestoreSpec {
+				migrate_to: None,
+				builder_image: None,
+				replica: LocalObjectReference {
+					name: "rep".to_string(),
+				},
+				snapshot: "snap".to_string(),
+				snapshot_size: Quantity("1Gi".to_string()),
+				snapshot_time: None,
+				storage_size: Quantity("2Gi".to_string()),
+			},
+		);
+		restore.status = Some(PostgresPhysicalRestoreStatus {
+			run_id: run_id.map(str::to_string),
+			..Default::default()
+		});
+		restore
+	}
+
+	#[test]
+	fn run_id_from_status_parses_valid_uuid() {
+		let id = "44444444-4444-4444-4444-444444444444";
+		assert_eq!(
+			run_id_from_status(&restore_with_run_id(Some(id))),
+			Some(Uuid::parse_str(id).unwrap())
+		);
+	}
+
+	#[test]
+	fn run_id_from_status_absent_or_malformed_is_none() {
+		assert_eq!(run_id_from_status(&restore_with_run_id(None)), None);
+		assert_eq!(
+			run_id_from_status(&restore_with_run_id(Some("not-a-uuid"))),
+			None,
+			"a malformed run_id is tolerated as absent, not a hard error"
+		);
+	}
+
+	fn migration_result() -> crate::types::MigrationResult {
+		use crate::types::MigrationTiming;
+
+		crate::types::MigrationResult {
+			total_elapsed_seconds: 412,
+			failed_migration: None,
+			error: None,
+			data_bytes_before: 1_000,
+			data_bytes_after: 1_200,
+			timings: vec![
+				MigrationTiming {
+					name: "1721000000-addFoo.js".into(),
+					elapsed_seconds: 400,
+				},
+				MigrationTiming {
+					name: "1721000001-addBar.js".into(),
+					elapsed_seconds: 12,
+				},
+			],
+		}
+	}
+
+	fn target(version_id: &str) -> crate::types::MigrationTarget {
+		crate::types::MigrationTarget {
+			version: "2.62.0".into(),
+			version_id: version_id.into(),
+		}
+	}
+
+	#[test]
+	fn migration_args_carries_the_whole_result() {
+		let id = "55555555-5555-5555-5555-555555555555";
+		let args = migration_args(&migration_result(), &target(id)).expect("built");
+
+		assert_eq!(args.target_version_id, Some(Uuid::parse_str(id).unwrap()));
+		assert_eq!(args.total_elapsed_seconds, 412);
+		assert_eq!(args.failed_migration, None);
+		assert_eq!(args.data_bytes_before, 1_000);
+		assert_eq!(args.data_bytes_after, 1_200);
+		// Per-file timings are what canopy attributes a slow upgrade with, so all
+		// of them travel, in order.
+		let names: Vec<_> = args.timings.iter().map(|t| t.name.as_str()).collect();
+		assert_eq!(names, ["1721000000-addFoo.js", "1721000001-addBar.js"]);
+		assert_eq!(args.timings[0].elapsed_seconds, 400);
+	}
+
+	#[test]
+	fn migration_args_reports_the_migration_that_failed() {
+		let mut result = migration_result();
+		result.failed_migration = Some("1721000001-addBar.js".into());
+		let args = migration_args(&result, &target("55555555-5555-5555-5555-555555555555"))
+			.expect("built");
+		assert_eq!(
+			args.failed_migration.as_deref(),
+			Some("1721000001-addBar.js")
+		);
+	}
+
+	#[test]
+	fn migration_args_carries_the_cause_of_the_failure() {
+		// The file name says where it stopped; only this says what to fix.
+		let mut result = migration_result();
+		result.failed_migration = Some("1721000001-addBar.js".into());
+		result.error = Some(
+			"23505: duplicate key value violates unique constraint \"patients_email_key\" \
+			 [patients.email, patients_email_key] DETAIL: Key (email)=(a@example.org) already exists."
+				.into(),
+		);
+		let args = migration_args(&result, &target("55555555-5555-5555-5555-555555555555"))
+			.expect("built");
+
+		assert_eq!(args.error, result.error);
+	}
+
+	#[test]
+	fn migration_args_sends_no_error_for_a_test_that_passed() {
+		let args = migration_args(
+			&migration_result(),
+			&target("55555555-5555-5555-5555-555555555555"),
+		)
+		.expect("built");
+
+		assert_eq!(args.error, None);
+	}
+
+	#[test]
+	fn migration_args_needs_a_parseable_version_id() {
+		// The id round-trips from canopy, so a malformed one means we would report
+		// against the wrong version; dropping the migration beats guessing.
+		assert!(migration_args(&migration_result(), &target("not-a-uuid")).is_none());
+	}
+
+	fn migrated_restore(
+		target: Option<crate::types::MigrationTarget>,
+		result: Option<crate::types::MigrationResult>,
+	) -> PostgresPhysicalRestore {
+		use k8s_openapi::api::core::v1::LocalObjectReference;
+		use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
+
+		use crate::types::{PostgresPhysicalRestoreSpec, PostgresPhysicalRestoreStatus};
+
+		let mut restore = PostgresPhysicalRestore::new(
+			"r",
+			PostgresPhysicalRestoreSpec {
+				migrate_to: target,
+				builder_image: None,
+				replica: LocalObjectReference {
+					name: "rep".to_string(),
+				},
+				snapshot: "snap".to_string(),
+				snapshot_size: Quantity("1Gi".to_string()),
+				snapshot_time: None,
+				storage_size: Quantity("2Gi".to_string()),
+			},
+		);
+		restore.status = Some(PostgresPhysicalRestoreStatus {
+			migration_result: result,
+			..Default::default()
+		});
+		restore
+	}
+
+	#[test]
+	fn upgrade_reports_its_migration() {
+		let id = "55555555-5555-5555-5555-555555555555";
+		let restore = migrated_restore(Some(target(id)), Some(migration_result()));
+		let args = migration_for("upgrade", &restore).expect("upgrade reports its migration");
+		assert_eq!(args.target_version_id, Some(Uuid::parse_str(id).unwrap()));
+	}
+
+	#[test]
+	fn analytics_migration_is_not_reported() {
+		// An analytics replica may migrate (its `migrate_to` param), but the
+		// outcome is a convenience, not a version-readiness signal, so no
+		// migration block goes to canopy. The empty version id it carries could
+		// not be reported against a version anyway.
+		let restore = migrated_restore(Some(target("")), Some(migration_result()));
+		assert!(migration_for("analytics", &restore).is_none());
+	}
+
+	#[test]
+	fn a_non_migrating_intent_reports_no_migration() {
+		let restore = migrated_restore(None, None);
+		assert!(migration_for("verify", &restore).is_none());
+	}
+
+	#[test]
+	fn upgrade_without_a_result_reports_no_migration() {
+		// Nothing to report until the migration Job has run and been read back.
+		let restore = migrated_restore(Some(target("55555555-5555-5555-5555-555555555555")), None);
+		assert!(migration_for("upgrade", &restore).is_none());
+	}
+}

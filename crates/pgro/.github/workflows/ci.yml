@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+
+    name: ${{ matrix.platform }} / test
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+          rustup component add clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --all-features
+
+  gen-crds:
+    name: Generate CRDs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate CRDs
+        run: cargo run --bin gen-crds > crds.yaml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: crds
+          path: crds.yaml
+
+  kubeconform:
+    name: Lint Kubernetes manifests
+    needs: [gen-crds]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8
+        with:
+          name: crds
+      - name: Install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin kubeconform
+      - name: Lint manifests
+        run: |
+          kubeconform -strict -summary \
+            -kubernetes-version 1.35.0 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/{{ .NormalizedKubernetesVersion }}/{{ .ResourceKind }}{{ .KindSuffix }}.json' \
+            operator.yaml crds.yaml
+
+  all-green:
+    name: All CI green
+    if: always()
+    needs: [test, clippy, gen-crds, kubeconform]
+    runs-on: ubuntu-slim
+    steps:
+      - name: Check job results
+        run: |
+          result='${{ toJSON(needs) }}'
+          echo "$result" | jq .
+          echo "$result" | jq -e 'all(.result == "success")'
+
