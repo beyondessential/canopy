@@ -224,10 +224,14 @@ impl Scanner {
 		let answers = self.osv.query(&counted).await?;
 
 		let mut revisions: HashMap<&str, Timestamp> = HashMap::new();
+		// Answers whose `modified` does not read, so there is no telling
+		// whether what is held for them is current.
+		let mut undated: HashSet<&str> = HashSet::new();
 		for VulnRef { id, modified } in answers.iter().flatten() {
-			let modified = modified
-				.parse::<Timestamp>()
-				.unwrap_or(Timestamp::UNIX_EPOCH);
+			let modified = modified.parse::<Timestamp>().unwrap_or_else(|_| {
+				undated.insert(id);
+				Timestamp::UNIX_EPOCH
+			});
 			let latest = revisions.entry(id).or_insert(modified);
 			*latest = (*latest).max(modified);
 		}
@@ -240,7 +244,9 @@ impl Scanner {
 		let mut stale: HashSet<&str> = HashSet::new();
 		let wanted: Vec<&str> = revisions
 			.iter()
-			.filter(|(id, modified)| held.get(**id).is_none_or(|held| *modified > held))
+			.filter(|(id, modified)| {
+				undated.contains(**id) || held.get(**id).is_none_or(|held| *modified > held)
+			})
 			.map(|(id, _)| *id)
 			.collect();
 		let osv = &self.osv;
