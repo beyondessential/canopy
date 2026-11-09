@@ -84,9 +84,14 @@ const ITEM_CTES: &str = "agg AS MATERIALIZED ( \
 	      WHERE en.decision_id = n.id) AS outcome \
 	  FROM newest n \
 	  WHERE EXISTS (SELECT 1 FROM vulnerability_decision_entries en WHERE en.decision_id = n.id)), \
+	/* Over the advisories alone, so the full-text index can serve it. */ \
+	details_hits AS MATERIALIZED ( \
+	  SELECT id FROM vulnerabilities \
+	  WHERE $13::text IS NOT NULL AND details_search @@ to_tsquery('english', $13)), \
 	base AS ( \
 	  SELECT i.vulnerability_id AS id, i.source, i.first_seen_at, i.search_text, \
 	    v.summary, v.aliases, v.severity, v.published_at, v.details_search, \
+	    v.id IN (SELECT id FROM details_hits) AS details_hit, \
 	    CASE v.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 \
 	                    WHEN 'low' THEN 1 ELSE 0 END AS sev, \
 	    coalesce(a.packages, '{}') AS packages, \
@@ -118,8 +123,7 @@ macro_rules! f_common {
 			"AND ($9::bool OR NOT base.closed) ",
 			"AND ($10::text IS NULL OR $10 = ANY(base.packages)) ",
 			"AND ($11::text IS NULL OR $11 = ANY(base.workspace_packages)) ",
-			"AND ($12::text IS NULL OR $12 <% base.search_text ",
-			"OR ($13::text IS NOT NULL AND base.details_search @@ to_tsquery('english', $13)))"
+			"AND ($12::text IS NULL OR $12 <% base.search_text OR base.details_hit)"
 		)
 	};
 }
@@ -168,8 +172,9 @@ const FILTERS: &str = concat!(
 /// in a main field: a normalised rank is below 1, and a main field matches
 /// from [`SEARCH_THRESHOLD`].
 const RANK: &str = "CASE WHEN $12::text IS NULL THEN 0::float8 \
-	ELSE greatest(word_similarity($12, base.search_text), CASE WHEN $13::text IS NULL THEN 0::float8 \
-	ELSE 0.4 * ts_rank(base.details_search, to_tsquery('english', $13), 32) END) END";
+	ELSE greatest(word_similarity($12, base.search_text), CASE WHEN base.details_hit \
+	THEN 0.4 * ts_rank(base.details_search, (SELECT to_tsquery('english', $13)), 32) \
+	ELSE 0::float8 END) END";
 
 /// The word similarity a search must reach to match.
 const SEARCH_THRESHOLD: &str = "0.4";
