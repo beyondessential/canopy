@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use bestool_canopy::schema::{
+use bes_canopy_api::schema::{
 	MigrationArgs, MigrationTimingArgs, ReportingSchemaArgs, RunOutcome, VerificationArgs,
 };
 use jiff::Timestamp;
@@ -311,7 +311,7 @@ pub(crate) fn run_id_from_status(restore: &PostgresPhysicalRestore) -> Option<Uu
 }
 
 /// Wire string canopy expects for the `outcome` field (matches the
-/// lowercase serialization of `bestool_canopy::Outcome`).
+/// lowercase serialization of `RunOutcome`).
 fn outcome_wire(outcome: RunOutcome) -> &'static str {
 	match outcome {
 		RunOutcome::Success => "success",

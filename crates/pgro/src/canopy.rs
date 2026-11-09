@@ -1,17 +1,18 @@
-//! Thin wrapper around `bestool_canopy::CanopyClient`.
+//! Thin wrapper around the generated `bes_canopy_api::CanopyClient`.
 //!
-//! Owns construction (the SOCKS5 proxy wiring to the Tailscale sidecar, plus
-//! optional mTLS fallback) and exposes the endpoints pgro consumes:
+//! Owns construction (the tailnet transport, reached through the Tailscale
+//! sidecar's SOCKS5 proxy) and exposes the endpoints pgro consumes:
 //! `restore_capabilities`, `restore_worklist`, `restore_credentials`,
 //! `restore_verification`, and artifact registration. Each is a one-line
 //! forward except the last, which the generated client cannot express; the
 //! wrapper exists as the integration seam tests inject a stub at, and as the
 //! place to hang pgro-specific logging / retry / cache concerns later.
+//!
+//! Spec: `.workhorse/specs/restore-operator/overview.md` (id `PGRO`).
 
-use bestool_canopy::{
-	CanopyClient, CanopyTransport, TAILSCALE_URL,
+use bes_canopy_api::{
+	CanopyClient, CanopyTransport,
 	bytes::Bytes,
-	connect_to,
 	http::{Method, Request, header::CONTENT_TYPE},
 	schema::{
 		BackupPurpose, IntentDescriptor, ProgressArgs, RestoreCapabilitiesArgs, RestoreCredentials,
@@ -22,6 +23,10 @@ use reqwest::Url;
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
+
+mod transport;
+
+pub use transport::{TailnetEndpoint, TailnetTransport};
 
 /// One cumulative progress sample from a restore run in flight, as the
 /// canopy-proxy sidecar POSTs it to the operator.
@@ -75,65 +80,19 @@ pub const DEFAULT_SOCKS5_PROXY: &str = "socks5://[::1]:1055";
 /// Configuration for the canopy client at startup.
 #[derive(Debug, Clone)]
 pub struct CanopyConfig {
-	/// The public-mTLS base URL. Used by `bestool_canopy::CanopyClient` as
-	/// the fallback endpoint when the tailnet probe fails. The tailnet URL
-	/// itself is hardcoded in `bestool-canopy`.
-	pub base_url: Url,
+	/// Canopy's tailnet URL, the only way pgro reaches it.
+	pub tailnet_url: Url,
 	/// SOCKS5 URL of the Tailscale sidecar's userspace proxy. Empty string
 	/// means no proxy.
 	pub socks5_proxy: String,
-	/// Optional device cert + key (PEM, concatenated). Used only if the
-	/// tailnet probe fails.
-	pub device_key_pem: Option<String>,
+	/// A tailnet address to connect to in place of resolving the URL's host,
+	/// for where the proxy cannot resolve it.
+	pub tailnet_addr: Option<std::net::IpAddr>,
 }
 
-/// Build the inner `bestool_canopy::CanopyClient`. The SOCKS5 proxy URL is
-/// captured into the builder factory and applied **only for tailnet-hosted
-/// URLs** (`*.ts.net`) — the mTLS fallback endpoint must be reachable
-/// directly even when the Tailscale sidecar is down, which is the whole
-/// point of it being a fallback. Without the per-URL predicate, a broken
-/// SOCKS proxy takes down both paths at once.
-async fn build_inner(cfg: &CanopyConfig) -> Result<CanopyClient> {
-	let socks5 = cfg.socks5_proxy.clone();
-	let make_builder = move || {
-		let mut b = reqwest::Client::builder();
-		if !socks5.is_empty() {
-			let socks5 = socks5.clone();
-			let proxy = reqwest::Proxy::custom(move |url| {
-				if url.host_str().is_some_and(|h| h.ends_with(".ts.net")) {
-					Some(socks5.clone())
-				} else {
-					None
-				}
-			});
-			b = b.proxy(proxy);
-		}
-		b
-	};
-
-	let tailscale_url: Url = TAILSCALE_URL
-		.parse()
-		.expect("bestool-canopy TAILSCALE_URL is a valid URL");
-	let inner = connect_to(
-		cfg.base_url.clone(),
-		tailscale_url,
-		cfg.device_key_pem.as_deref(),
-		make_builder,
-	)
-	.await
-	.map_err(|err| Error::Canopy(format!("constructing canopy client: {err}")))?
-	.ok_or_else(|| {
-		Error::Canopy(
-			"canopy client unconfigured: tailnet unreachable and no device cert provided".into(),
-		)
-	})?;
-	Ok(inner)
-}
-
-/// pgro's canopy client wrapper around the live `bestool_canopy::CanopyClient`
-/// (which bakes in the mTLS base URL and the tailnet endpoint at construction).
+/// pgro's canopy client wrapper around the generated `CanopyClient`.
 pub struct Client {
-	inner: CanopyClient,
+	inner: CanopyClient<TailnetTransport>,
 }
 
 impl std::fmt::Debug for Client {
@@ -143,24 +102,25 @@ impl std::fmt::Debug for Client {
 }
 
 impl Client {
-	/// Build a client from operator-level config. Returns `Ok(None)` if no
-	/// canopy integration is configured (no config provided) — the operator
-	/// then runs in legacy-only mode.
-	pub async fn from_config(cfg: Option<CanopyConfig>) -> Result<Option<Self>> {
-		let Some(cfg) = cfg else { return Ok(None) };
-		let inner = build_inner(&cfg).await?;
-		Ok(Some(Self { inner }))
-	}
-
-	/// Mint a fresh client certificate from the device key. The certificate the
-	/// client builds at construction is short-lived, so a process outliving it
-	/// authenticates with an expired one and canopy's edge rejects every call.
-	pub async fn renew(&self) -> Result<()> {
-		self.inner
-			.transport()
-			.renew()
-			.await
-			.map_err(|err| Error::Canopy(format!("renew: {err}")))
+	/// Build a client for the configured tailnet endpoint. Nothing is probed:
+	/// a call that cannot reach Canopy fails when it is made.
+	pub fn from_config(cfg: CanopyConfig) -> anyhow::Result<Self> {
+		let socks5_proxy = match cfg.socks5_proxy.trim() {
+			"" => None,
+			proxy => Some(
+				proxy
+					.parse()
+					.map_err(|err| anyhow::anyhow!("SOCKS5 proxy URL {proxy:?}: {err}"))?,
+			),
+		};
+		let transport = TailnetTransport::new(TailnetEndpoint {
+			url: cfg.tailnet_url,
+			socks5_proxy,
+			resolve_to: cfg.tailnet_addr,
+		})?;
+		Ok(Self {
+			inner: CanopyClient::new(transport),
+		})
 	}
 
 	/// Register the intent descriptors this consumer supports. Replaces the
@@ -220,7 +180,7 @@ impl Client {
 	}
 
 	/// Report a restore outcome (signal 3, restore-verification). `args` is
-	/// the typed [`bestool_canopy::schema::VerificationArgs`], including the
+	/// the typed [`bes_canopy_api::schema::VerificationArgs`], including the
 	/// free-form `health_details`.
 	pub async fn restore_verification_typed(&self, args: &VerificationArgs) -> Result<()> {
 		self.inner

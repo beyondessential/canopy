@@ -5,9 +5,7 @@ use kube::{
 	Api,
 	api::{ListParams, PostParams},
 };
-use pgro::types::{
-	PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase,
-};
+use pgro::types::{PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase};
 use tokio::time::{sleep, timeout};
 
 use helpers::*;

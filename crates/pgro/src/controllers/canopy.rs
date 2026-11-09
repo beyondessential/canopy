@@ -17,7 +17,7 @@ use std::{
 	time::Duration,
 };
 
-use bestool_canopy::schema::WorklistEntry;
+use bes_canopy_api::schema::WorklistEntry;
 use futures::stream::{self, StreamExt};
 use k8s_openapi::{
 	ByteString,

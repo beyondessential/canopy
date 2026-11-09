@@ -57,9 +57,6 @@ const DEFAULT_METRICS_ADDR: &str = "[::]:8080";
 const DEFAULT_METRICS_PORT: u16 = 8080;
 const DEFAULT_BROKER_ADDR: &str = "[::]:9091";
 const DEFAULT_CANOPY_RECONCILE_INTERVAL_SECS: u64 = 30;
-/// The client certificate bestool mints at construction lives six days, so the
-/// operator re-mints well inside that.
-const CANOPY_CERT_RENEW_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const CONFIGMAP_NAME: &str = "postgres-restore-operator-config";
 
 /// Annotate the operator's own pod with the running version.
@@ -363,12 +360,10 @@ async fn main() -> anyhow::Result<()> {
 	}
 	*ctx.pod_placement.write().unwrap() = pod_placement;
 
-	ctx.canopy = load_canopy_client(&client, &namespace)
-		.await
-		.unwrap_or_else(|err| {
-			warn!(error = %err, "canopy client not configured; running in legacy-only mode");
-			None
-		});
+	ctx.canopy = load_canopy_client().unwrap_or_else(|err| {
+		warn!(error = %err, "canopy client not configured; running in legacy-only mode");
+		None
+	});
 	ctx.operator_namespace = namespace.clone();
 	ctx.builder_pull_secret = std::env::var("BUILDER_PULL_SECRET")
 		.ok()
@@ -467,24 +462,6 @@ async fn main() -> anyhow::Result<()> {
 		let register_ctx = ctx.clone();
 		tokio::spawn(async move {
 			register_capabilities(register_ctx).await;
-		});
-
-		let renew_ctx = ctx.clone();
-		tokio::spawn(async move {
-			let mut interval = tokio::time::interval(CANOPY_CERT_RENEW_INTERVAL);
-			interval.tick().await;
-			loop {
-				interval.tick().await;
-				let Some(canopy) = renew_ctx.canopy.as_ref() else {
-					break;
-				};
-				match canopy.renew().await {
-					Ok(()) => info!("renewed the canopy client certificate"),
-					Err(error) => {
-						warn!(error = %error, "renewing the canopy client certificate failed");
-					}
-				}
-			}
 		});
 
 		let interval_secs = std::env::var("CANOPY_RECONCILE_INTERVAL_SECS")
@@ -993,47 +970,35 @@ async fn livez(State(state): State<ServerState>) -> (StatusCode, &'static str) {
 }
 
 /// Try to build the canopy client from env config. `Ok(None)` means the
-/// integration is intentionally not configured (no `CANOPY_BASE_URL`); pgro
+/// integration is intentionally not configured (no `CANOPY_TAILNET_URL`); pgro
 /// runs in legacy-only mode. `Err(_)` means configuration was attempted but
-/// failed — logged and downgraded to `None` at the call site.
-async fn load_canopy_client(
-	client: &Client,
-	operator_namespace: &str,
-) -> anyhow::Result<Option<Arc<canopy::Client>>> {
-	let Ok(base_url_str) = std::env::var("CANOPY_BASE_URL") else {
+/// failed, and is logged and downgraded to `None` at the call site.
+fn load_canopy_client() -> anyhow::Result<Option<Arc<canopy::Client>>> {
+	let Ok(tailnet_url) = std::env::var("CANOPY_TAILNET_URL") else {
 		return Ok(None);
 	};
-	let base_url = reqwest::Url::parse(&base_url_str)
-		.map_err(|e| anyhow::anyhow!("CANOPY_BASE_URL is not a valid URL: {e}"))?;
+	let tailnet_url = reqwest::Url::parse(&tailnet_url)
+		.map_err(|e| anyhow::anyhow!("CANOPY_TAILNET_URL is not a valid URL: {e}"))?;
 
 	let socks5_proxy =
 		std::env::var("CANOPY_SOCKS5_PROXY").unwrap_or_else(|_| DEFAULT_SOCKS5_PROXY.to_string());
 
-	let device_key_pem = if let Ok(secret_name) = std::env::var("CANOPY_DEVICE_CERT_SECRET") {
-		let secrets: Api<k8s_openapi::api::core::v1::Secret> =
-			Api::namespaced(client.clone(), operator_namespace);
-		let sec = secrets.get(&secret_name).await?;
-		let data = sec.data.and_then(|d| d.into_iter().next());
-		match data {
-			Some((_, v)) => Some(String::from_utf8(v.0).map_err(|e| {
-				anyhow::anyhow!("device cert secret {secret_name} not valid UTF-8: {e}")
-			})?),
-			None => {
-				warn!(secret = secret_name, "device cert secret has no data");
-				None
-			}
-		}
-	} else {
-		None
-	};
+	let tailnet_addr = std::env::var("CANOPY_TAILNET_ADDR")
+		.ok()
+		.filter(|addr| !addr.trim().is_empty())
+		.map(|addr| {
+			addr.trim()
+				.parse()
+				.map_err(|e| anyhow::anyhow!("CANOPY_TAILNET_ADDR is not an IP address: {e}"))
+		})
+		.transpose()?;
 
-	let cfg = canopy::CanopyConfig {
-		base_url,
+	let client = canopy::Client::from_config(canopy::CanopyConfig {
+		tailnet_url,
 		socks5_proxy,
-		device_key_pem,
-	};
-	let cli = canopy::Client::from_config(Some(cfg)).await?;
-	Ok(cli.map(Arc::new))
+		tailnet_addr,
+	})?;
+	Ok(Some(Arc::new(client)))
 }
 
 /// POST `/restore-capabilities` to canopy with the intents pgro implements.
@@ -1161,7 +1126,7 @@ async fn post_restore_creds(
 				.expiration
 				.checked_sub(jiff::SignedDuration::from_secs(120))
 				.unwrap_or(resp.credentials.expiration);
-			// bestool-canopy's RestoreCredentials only derives Deserialize; build
+			// The generated RestoreCredentials only derives Deserialize; build
 			// the response JSON manually with the same shape the sidecar expects.
 			let body = serde_json::json!({
 				"credentials": {

@@ -1,8 +1,6 @@
 use kube::Api;
 use kube::api::PostParams;
-use pgro::types::{
-	PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase,
-};
+use pgro::types::{PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase};
 
 use helpers::*;
 

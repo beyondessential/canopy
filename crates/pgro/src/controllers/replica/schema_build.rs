@@ -12,7 +12,7 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
-use bestool_canopy::bytes::Bytes;
+use bes_canopy_api::bytes::Bytes;
 use k8s_openapi::{
 	api::{
 		batch::v1::{Job, JobSpec, JobStatus},

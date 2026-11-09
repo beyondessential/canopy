@@ -18,7 +18,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use bestool_canopy::schema::{
+use bes_canopy_api::schema::{
 	BTreeMap as ParamSchema, BTreeMapValue as ParamSpec, IntentDescriptor, ParamType, WorklistEntry,
 };
 use jiff::Span;

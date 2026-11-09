@@ -451,7 +451,7 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 			&ctx,
 			&replica,
 			switching,
-			bestool_canopy::schema::RunOutcome::Success,
+			bes_canopy_api::schema::RunOutcome::Success,
 			None,
 		)
 		.await;

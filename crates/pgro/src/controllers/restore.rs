@@ -319,7 +319,7 @@ async fn fail_restore(
 			ctx,
 			&replica,
 			&restore,
-			bestool_canopy::schema::RunOutcome::Failure,
+			bes_canopy_api::schema::RunOutcome::Failure,
 			Some(error),
 		)
 		.await;

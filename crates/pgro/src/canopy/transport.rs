@@ -61,9 +61,9 @@ impl TailnetTransport {
 			// resolve; `socks5h` hands the name to the sidecar. An address
 			// override resolves it here on purpose, so it keeps `socks5`.
 			if proxy.scheme() == "socks5" && resolve_to.is_none() {
-				proxy
-					.set_scheme("socks5h")
-					.map_err(|()| anyhow::anyhow!("cannot make the SOCKS5 proxy URL remote-resolving"))?;
+				proxy.set_scheme("socks5h").map_err(|()| {
+					anyhow::anyhow!("cannot make the SOCKS5 proxy URL remote-resolving")
+				})?;
 			}
 			builder = builder.proxy(reqwest::Proxy::all(proxy)?);
 		}
@@ -173,7 +173,11 @@ mod tests {
 	async fn sends_calls_under_the_tailnet_mount_with_query_body_and_headers() {
 		let url = serve(Router::new().fallback(any(echo))).await;
 		let response = direct(url)
-			.call(request(http::Method::POST, "/restore-worklist?a=1&b=two", b"{}"))
+			.call(request(
+				http::Method::POST,
+				"/restore-worklist?a=1&b=two",
+				b"{}",
+			))
 			.await
 			.unwrap();
 
@@ -186,10 +190,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn hands_back_a_refusal_for_the_client_to_read() {
-		let url = serve(Router::new().fallback(any(|| async {
-			(StatusCode::FORBIDDEN, "refused")
-		})))
-		.await;
+		let url =
+			serve(Router::new().fallback(any(|| async { (StatusCode::FORBIDDEN, "refused") })))
+				.await;
 		let response = direct(url)
 			.call(request(http::Method::GET, "/restore-worklist", b""))
 			.await
@@ -201,8 +204,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn does_not_follow_redirects() {
-		let url = serve(Router::new().fallback(any(|| async { Redirect::temporary("/elsewhere") })))
-			.await;
+		let url =
+			serve(Router::new().fallback(any(|| async { Redirect::temporary("/elsewhere") })))
+				.await;
 		let response = direct(url)
 			.call(request(http::Method::GET, "/restore-worklist", b""))
 			.await
@@ -226,7 +230,7 @@ mod tests {
 	}
 
 	#[test]
-	fn a_socks5_proxy_resolves_names_remotely_unless_an_address_is_given() {
+	fn builds_with_a_proxy_and_with_an_address_override() {
 		let endpoint = |resolve_to| TailnetEndpoint {
 			url: "https://canopy.example.ts.net".parse().unwrap(),
 			socks5_proxy: Some("socks5://[::1]:1055".parse().unwrap()),

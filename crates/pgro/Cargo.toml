@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
-bestool-canopy = "0.7.12"
+bes-canopy-api = { path = "../canopy-api" }
 bestool-kopia.workspace = true
 cronexpr = "1.5.0"
 futures.workspace = true
