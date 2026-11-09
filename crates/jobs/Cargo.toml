@@ -46,6 +46,10 @@ tokio = { workspace = true, features = ["macros", "net", "process", "rt-multi-th
 thiserror = "2.0.18"
 tracing.workspace = true
 uuid = { version = "1.23.1", features = ["v4"] }
+toml = "1.2.0"
+cargo-lock = "11.1.0"
+glob = "0.3.4"
+serde-saphyr = "2.1.1"
 
 [dev-dependencies]
 aws-sdk-s3 = { workspace = true, features = ["test-util"] }

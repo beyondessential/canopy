@@ -162,7 +162,13 @@ export function Brand() {
 }
 
 /** The number of open incidents, beside wherever Incidents is offered. */
-export function IncidentCount({ count }: { count: number }) {
+export function IncidentCount({
+	count,
+	colour = "error",
+}: {
+	count: number;
+	colour?: "error" | "warning";
+}) {
 	return (
 		<Box
 			component="span"
@@ -172,8 +178,8 @@ export function IncidentCount({ count }: { count: number }) {
 				height: 20,
 				px: 0.75,
 				borderRadius: "10px",
-				bgcolor: "error.main",
-				color: "error.contrastText",
+				bgcolor: `${colour}.main`,
+				color: `${colour}.contrastText`,
 				fontSize: "0.75rem",
 				lineHeight: "20px",
 				textAlign: "center",
@@ -277,12 +283,15 @@ export function AppSidebar({
 	sections,
 	externalLinks,
 	openIncidents,
+	needsTriage,
 	showModeBand,
 	onNavigate,
 }: {
 	sections: NavSection[];
 	externalLinks: Array<{ label: string; href: string }>;
 	openIncidents: number;
+	/** How many vulnerabilities need triage. */
+	needsTriage: number;
 	showModeBand: boolean;
 	onNavigate?: () => void;
 }) {
@@ -355,6 +364,9 @@ export function AppSidebar({
 										{section.label}
 										{section.to === "/incidents" && openIncidents > 0 && (
 											<IncidentCount count={openIncidents} />
+										)}
+										{section.to === "/vulnerabilities" && needsTriage > 0 && (
+											<IncidentCount count={needsTriage} colour="warning" />
 										)}
 									</ListItemButton>
 								</ListItem>

@@ -1,7 +1,7 @@
 //! Canopy's AI worker: the one process that holds the model provider's
-//! credentials. It looks at each new vulnerability the scan finds, deciding the
-//! plain cases and suggesting an outcome for the rest (see
-//! `jobs::vulnerabilities::ai`).
+//! credentials. It looks at each vulnerability that needs triage and has no
+//! suggestion, and suggests a decision for a person to take or not (see
+//! `jobs::vulnerabilities::ai`); it never decides.
 //!
 //! It is fed through the database: it claims items with no decision and no
 //! suggestion, so it needs nothing from the monitor beyond the rows the scan

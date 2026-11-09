@@ -71,6 +71,7 @@ import Upgrades from "./routes/Upgrades";
 import Versions from "./routes/Versions";
 import VulnerabilityDetail from "./routes/VulnerabilityDetail";
 import Vulnerabilities from "./routes/Vulnerabilities";
+import VulnerabilitySources from "./routes/VulnerabilitySources";
 
 /// Send an address from before the fleet was namespaced to where it lives now.
 ///
@@ -104,6 +105,9 @@ export default function App() {
 	);
 	const openIncidentsCount =
 		openIncidents.status === "ok" ? openIncidents.data.length : 0;
+	const needsTriage = useApi("vulnerabilities", "count", {}, [reloadTick]);
+	const needsTriageCount =
+		needsTriage.status === "ok" ? needsTriage.data.needs_triage : 0;
 	const sections = navSections(
 		sqlAvailable.status === "ok" && !!sqlAvailable.data,
 	);
@@ -128,6 +132,7 @@ export default function App() {
 		sections,
 		externalLinks,
 		openIncidents: openIncidentsCount,
+		needsTriage: needsTriageCount,
 	};
 
 	return (
@@ -232,6 +237,10 @@ export default function App() {
 					/>
 					<Route path="/upgrades" element={<Upgrades />} />
 					<Route path="/vulnerabilities" element={<Vulnerabilities />} />
+					<Route
+						path="/vulnerabilities/sources"
+						element={<VulnerabilitySources />}
+					/>
 					<Route
 						path="/vulnerabilities/:source/:id"
 						element={<VulnerabilityDetail />}

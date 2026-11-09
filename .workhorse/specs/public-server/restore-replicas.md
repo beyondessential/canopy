@@ -30,6 +30,7 @@ Centralising that decision in Canopy eliminates the long-lived AWS keys a restor
 A **restore consumer** is first-party infrastructure that restores backups and reports their health.
 It holds no standing access to any backup repo and stores no list of what to restore: it asks Canopy what replicas should exist, restores them, and reports back.
 It owns only the mechanics of restoration — how a replica is provisioned, where it runs, how much storage it gets, when it is torn down.
+The first-party restore consumer is the [restore operator](../restore-operator/overview.md), and the intents it advertises are in [INT](../restore-operator/intents.md).
 
 An **operator** declares, through Canopy, which replicas should exist and why.
 
@@ -444,7 +445,7 @@ That is for whoever gave out the replica to act on, not for whoever is on call f
 
 ## Out of scope
 
-- How a consumer provisions, runs, names, or tears down a replica, or how it applies migrations or a masking manifest to one.
+- How a consumer provisions, runs, names, or tears down a replica, or how it applies migrations or a masking manifest to one (for the restore operator, see [PGRO](../restore-operator/overview.md)).
 - A consumer's runtime placement, storage sizing, or scheduling.
 - Producing reporting schemas, or any other artifact, from a migrated replica (see [RPT](reporting-schemas.md)).
 - The contents of a masking manifest, and what each masking it names does to a value.

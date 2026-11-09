@@ -1,0 +1,109 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+    name: setup-kopia-repo
+    namespace: default
+spec:
+    backoffLimit: 3
+    template:
+        spec:
+            securityContext:
+                fsGroup: 999
+            initContainers:
+                - name: create-bucket
+                  image: amazon/aws-cli:2.37.3
+                  imagePullPolicy: IfNotPresent
+                  command: ["/bin/sh", "-c"]
+                  env:
+                      - name: AWS_ACCESS_KEY_ID
+                        value: minioadmin
+                      - name: AWS_SECRET_ACCESS_KEY
+                        value: minioadmin
+                      - name: AWS_DEFAULT_REGION
+                        value: us-east-1
+                  args:
+                      - |
+                          set -e
+                          S3="aws --endpoint-url http://minio.minio.svc:9000"
+                          $S3 s3api head-bucket --bucket test-bucket 2>/dev/null || $S3 s3 mb s3://test-bucket
+                          echo "Bucket created"
+                - name: init-pgdata
+                  image: postgres:16
+                  imagePullPolicy: IfNotPresent
+                  securityContext:
+                      runAsUser: 0
+                  command: ["/bin/sh", "-c"]
+                  args:
+                      - |
+                          set -e
+                          echo "Initializing PostgreSQL data directory..."
+                          mkdir -p /pgdata/16/main
+                          chown postgres:postgres /pgdata/16/main
+                          gosu postgres initdb -D /pgdata/16/main --no-locale --encoding=UTF8 --auth=trust
+
+                          echo "Starting temporary PostgreSQL to create application database..."
+                          gosu postgres pg_ctl -D /pgdata/16/main -l /tmp/pg.log start -w
+
+                          gosu postgres psql -d postgres -c "CREATE DATABASE myapp"
+                          gosu postgres psql -d myapp -c "CREATE TABLE test_data (id serial PRIMARY KEY, data text)"
+                          gosu postgres psql -d myapp -c "INSERT INTO test_data (data) SELECT repeat('x', 1000) FROM generate_series(1, 1000)"
+                          gosu postgres psql -d myapp -c "CREATE SCHEMA reporting; CREATE VIEW reporting.test_data_v AS SELECT id, data FROM public.test_data"
+                          gosu postgres psql -d myapp -c "CREATE TABLE local_system_secrets (key text PRIMARY KEY, value text, deleted_at timestamptz); INSERT INTO local_system_secrets (key, value) VALUES ('encrypted', 'S1:aXY=:Y2lwaGVy'), ('plain', 'not-a-secret')"
+                          echo "Application database 'myapp' created with test data"
+
+                          gosu postgres pg_ctl -D /pgdata/16/main stop -w
+
+                          echo "PostgreSQL data directory initialized"
+                          ls -la /pgdata/16/main/
+                          cat /pgdata/16/main/PG_VERSION
+                  volumeMounts:
+                      - name: pgdata
+                        mountPath: /pgdata
+            containers:
+                - name: create-snapshot
+                  image: kopia/kopia:0.22.3
+                  imagePullPolicy: IfNotPresent
+                  command: ["/bin/sh", "-c"]
+                  args:
+                      - |
+                          set -e
+
+                          mkdir -p /tmp/kopia/config /tmp/kopia/logs /tmp/kopia/cache
+
+                          echo "Creating kopia repository..."
+                          kopia repository create s3 \
+                            --bucket=test-bucket \
+                            --endpoint=minio.minio.svc:9000 \
+                            --region=us-east-1 \
+                            --access-key=minioadmin \
+                            --secret-access-key=minioadmin \
+                            --password=test-repo-password \
+                            --disable-tls \
+                            --disable-tls-verification
+
+                          echo "Creating snapshot..."
+                          kopia snapshot create /pgdata
+
+                          echo "Verifying snapshot..."
+                          kopia snapshot list --json --all
+
+                          echo "Done"
+                  env:
+                      - name: KOPIA_CONFIG_PATH
+                        value: /tmp/kopia/config/repository.config
+                      - name: KOPIA_LOG_DIR
+                        value: /tmp/kopia/logs
+                      - name: KOPIA_CACHE_DIRECTORY
+                        value: /tmp/kopia/cache
+                      - name: KOPIA_PASSWORD
+                        value: test-repo-password
+                      - name: USER
+                        value: kopia
+                  volumeMounts:
+                      - name: pgdata
+                        mountPath: /pgdata
+            volumes:
+                - name: pgdata
+                  emptyDir: {}
+            restartPolicy: Never

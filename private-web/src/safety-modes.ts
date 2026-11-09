@@ -258,10 +258,15 @@ export const SAFETY_MODES = {
 	"versions/update_version_changelog": "write",
 	"versions/update_version_status": "write",
 	"versions/upload_artifact": "write",
+	"vulnerabilities/count": "read-only",
 	"vulnerabilities/decide": "write",
+	"vulnerabilities/edit": "write",
 	"vulnerabilities/get": "read-only",
 	"vulnerabilities/list": "read-only",
 	"vulnerabilities/machine_packages": "read-only",
+	"vulnerabilities/rescan": "write",
+	"vulnerabilities/sources": "read-only",
+	"vulnerabilities/withdraw": "write",
 } as const satisfies Record<string, SafetyMode>;
 
 /**

@@ -167,7 +167,7 @@ async function applicationTypeOf(sql: Sql, applicationId: string): Promise<strin
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, migration_test_requests, upgrade_plans, maintenance_windows, ansible_variables, ansible_leases, ansible_catalogue, version_known_issues, recovery_vault_writes, application_names, application_certificate_names, application_certificates, kubernetes_clusters, compromised_keys, relying_parties, identity_keys, vulnerabilities RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, migration_test_requests, upgrade_plans, maintenance_windows, ansible_variables, ansible_leases, ansible_catalogue, version_known_issues, recovery_vault_writes, application_names, application_certificate_names, application_certificates, kubernetes_clusters, compromised_keys, relying_parties, identity_keys, vulnerabilities, repository_reads, repository_packages RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" application with
 	// it; self-alerts attach to that row, so put it back.
@@ -2457,37 +2457,109 @@ export type VulnerabilitySeverity =
 	| "medium"
 	| "low"
 	| "unrated";
-export type VulnerabilitySource = "tamanu" | "linux";
+/** A tracked repository's name, or `linux`. */
+export type VulnerabilitySource = string;
 export type VulnerabilityOutcome = "not_affected" | "accepted_risk" | "will_fix";
+export type VulnerabilityScope =
+	| "runtime"
+	| "build"
+	| "development"
+	| "test"
+	| "design"
+	| "other";
 
-/** One advisory as a source holds it: the cached OSV record, the item for the
- * source, and the matches that tie it to the package versions it hits.
+export interface SeededEntry {
+	/** Absent for the catch-all. */
+	workspacePackages?: string[];
+	outcome: VulnerabilityOutcome;
+	reason?: string;
+	issueUrl?: string;
+}
+
+/** What a repository's default branch carries: the read, the packages, and how
+ * each workspace package reaches them. */
+export async function seedRepositoryPackages(
+	sql: Sql,
+	opts: {
+		repository: string;
+		commit?: string;
+		ecosystem?: string;
+		packages: Array<{
+			name: string;
+			version: string;
+			paths: Array<{
+				workspace: string;
+				scope?: VulnerabilityScope;
+				optional?: boolean;
+				direct?: boolean;
+				chain?: string[];
+			}>;
+		}>;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO repository_reads (repository, commit_sha, read_at)
+		 VALUES ($1, $2, NOW())
+		 ON CONFLICT (repository) DO UPDATE SET commit_sha = EXCLUDED.commit_sha, read_at = NOW()`,
+		[opts.repository, opts.commit ?? "3f9c2abcdef0123456789"],
+	);
+	const ecosystem = opts.ecosystem ?? "npm";
+	for (const p of opts.packages) {
+		await sql.query(
+			`INSERT INTO repository_packages (repository, ecosystem, name, version)
+			 VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+			[opts.repository, ecosystem, p.name, p.version],
+		);
+		for (const path of p.paths) {
+			await sql.query(
+				`INSERT INTO repository_package_paths
+					(repository, ecosystem, name, version, workspace_package, scope, optional, direct, chain)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+				[
+					opts.repository,
+					ecosystem,
+					p.name,
+					p.version,
+					path.workspace,
+					path.scope ?? "runtime",
+					path.optional ?? false,
+					path.direct ?? false,
+					path.chain ?? [p.name],
+				],
+			);
+		}
+	}
+}
+
+/** One advisory: the cached OSV record, the matches that tie it to the package
+ * versions it hits, and an item for each source that carries one.
  *
- * The matches are what exposure is worked out from at read time, so an item is
- * exposed only where the fleet seeded beside it carries one of its packages
- * (see {@link seedTamanuDependencies} and {@link seedMachinePackages}). */
+ * Exposure is worked out from the repositories and machines seeded beside it
+ * (see {@link seedRepositoryPackages} and {@link seedMachinePackages}), so an
+ * item whose source carries none of its versions is closed. */
 export async function seedVulnerability(
 	sql: Sql,
 	opts: {
 		id: string;
-		source: VulnerabilitySource;
+		/** The sources that have an item for it. Defaults to `source`. */
+		sources?: VulnerabilitySource[];
+		source?: VulnerabilitySource;
 		summary?: string;
 		details?: string;
 		aliases?: string[];
 		severity?: VulnerabilitySeverity;
-		/** The ecosystem the matches are in. Defaults to `npm` for Tamanu and
-		 * `Ubuntu:22.04:LTS` for Linux. */
+		/** The ecosystem the matches are in. Defaults to `npm` for a repository
+		 * and `Ubuntu:22.04:LTS` for Linux. */
 		ecosystem?: string;
 		/** The package versions the advisory hits. */
 		matches: Array<{ package: string; version: string }>;
 		/** The package's affected ranges, by its introduced and fixed versions. */
 		fixed?: string;
-		/** Whether anything counts for the item. Defaults to true. */
-		counts?: boolean;
 	},
 ): Promise<void> {
-	const ecosystem =
-		opts.ecosystem ?? (opts.source === "tamanu" ? "npm" : "Ubuntu:22.04:LTS");
+	const sources = opts.sources ?? [opts.source ?? "tamanu"];
+	const linux = sources.includes("linux");
+	const ecosystem = opts.ecosystem ?? (linux ? "Ubuntu:22.04:LTS" : "npm");
 	const affected = opts.matches
 		.map((m) => m.package)
 		.filter((name, index, all) => all.indexOf(name) === index)
@@ -2495,7 +2567,7 @@ export async function seedVulnerability(
 			package: { ecosystem, name },
 			ranges: [
 				{
-					type: opts.source === "tamanu" ? "SEMVER" : "ECOSYSTEM",
+					type: linux ? "ECOSYSTEM" : "SEMVER",
 					events: [
 						{ introduced: "0" },
 						...(opts.fixed ? [{ fixed: opts.fixed }] : []),
@@ -2504,8 +2576,8 @@ export async function seedVulnerability(
 			],
 		}));
 	await sql.query(
-		`INSERT INTO vulnerabilities (id, aliases, summary, details, severity, affected, modified_at)
-		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())`,
+		`INSERT INTO vulnerabilities (id, aliases, summary, details, severity, affected, modified_at, published_at)
+		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW(), NOW())`,
 		[
 			opts.id,
 			opts.aliases ?? [],
@@ -2515,17 +2587,29 @@ export async function seedVulnerability(
 			JSON.stringify(affected),
 		],
 	);
-	await sql.query(
-		`INSERT INTO vulnerability_items (vulnerability_id, source, counts)
-		 VALUES ($1, $2, $3)`,
-		[opts.id, opts.source, opts.counts ?? true],
-	);
 	for (const match of opts.matches) {
 		await sql.query(
-			`INSERT INTO vulnerability_matches
-				(vulnerability_id, source, ecosystem, package, package_version)
-			 VALUES ($1, $2, $3, $4, $5)`,
-			[opts.id, opts.source, ecosystem, match.package, match.version],
+			`INSERT INTO vulnerability_matches (vulnerability_id, ecosystem, package, package_version)
+			 VALUES ($1, $2, $3, $4)`,
+			[opts.id, ecosystem, match.package, match.version],
+		);
+	}
+	for (const source of sources) {
+		await sql.query(
+			`INSERT INTO vulnerability_items (vulnerability_id, source, search_text)
+			 VALUES ($1, $2, concat_ws(' ', $1::text, array_to_string($3::text[], ' '), $4::text, $2::text, $5::text, (
+			   SELECT string_agg(DISTINCT p.workspace_package, ' ')
+			   FROM repository_package_paths p
+			   WHERE p.repository = $2 AND p.name = ANY($6::text[])
+			 )))`,
+			[
+				opts.id,
+				source,
+				opts.aliases ?? [],
+				opts.summary ?? `Advisory ${opts.id}`,
+				opts.matches.map((m) => m.package).join(" "),
+				opts.matches.map((m) => m.package),
+			],
 		);
 	}
 }
@@ -2535,84 +2619,117 @@ export async function seedVulnerabilitySuggestion(
 	sql: Sql,
 	opts: {
 		id: string;
-		source: VulnerabilitySource;
-		outcome: VulnerabilityOutcome;
-		reason: string;
+		source?: VulnerabilitySource;
+		entries: SeededEntry[];
+		basis?:
+			| "dependency_path_only"
+			| "advisory_text_only"
+			| "dependency_path_and_advisory_text"
+			| "insufficient_information";
 		model?: string;
 	},
 ): Promise<void> {
 	await sql.query(
-		`INSERT INTO vulnerability_suggestions (vulnerability_id, source, outcome, reason, model)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		[opts.id, opts.source, opts.outcome, opts.reason, opts.model ?? "e2e-model"],
-	);
-}
-
-/** A decision already taken on an item. */
-export async function seedVulnerabilityDecision(
-	sql: Sql,
-	opts: {
-		id: string;
-		source: VulnerabilitySource;
-		outcome: VulnerabilityOutcome;
-		reason?: string;
-		reviewBy?: string;
-		via?: "ui" | "model" | "mcp";
-		actor?: Record<string, unknown>;
-	},
-): Promise<void> {
-	await sql.query(
-		`INSERT INTO vulnerability_decisions
-			(vulnerability_id, source, outcome, reason, review_by, actor, via,
-			 severity_held, affected_held)
-		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7,
-		         (SELECT severity FROM vulnerabilities WHERE id = $1),
-		         (SELECT affected FROM vulnerabilities WHERE id = $1))`,
+		`INSERT INTO vulnerability_suggestions (vulnerability_id, source, entries, basis, model)
+		 VALUES ($1, $2, $3::jsonb, $4, $5)`,
 		[
 			opts.id,
-			opts.source,
-			opts.outcome,
-			opts.reason ?? (opts.outcome === "will_fix" ? null : "e2e reason"),
-			opts.reviewBy ?? null,
-			JSON.stringify(opts.actor ?? { kind: "operator", login: "seed@example.com" }),
-			opts.via ?? "ui",
+			opts.source ?? "tamanu",
+			JSON.stringify(entryJson(opts.entries)),
+			opts.basis ?? "dependency_path_only",
+			opts.model ?? "e2e-model",
 		],
 	);
 }
 
-/** The packages a Tamanu version's lockfile holds, and the record that it was
- * read. */
-export async function seedTamanuDependencies(
+function entryJson(entries: SeededEntry[]) {
+	return entries.map((e) => ({
+		workspace_packages: e.workspacePackages ?? null,
+		outcome: e.outcome,
+		reason: e.reason ?? null,
+		issue_url: e.issueUrl ?? null,
+	}));
+}
+
+/** A decision already taken on an item. Returns its identifier. */
+export async function seedVulnerabilityDecision(
 	sql: Sql,
 	opts: {
-		versionId: string;
-		packages: Array<{
-			name: string;
-			version: string;
-			workspaces?: string[];
-			direct?: boolean;
-		}>;
+		id: string;
+		source?: VulnerabilitySource;
+		/** A whole decision of this outcome, when `entries` is not given. */
+		outcome?: VulnerabilityOutcome;
+		entries?: SeededEntry[];
+		reason?: string;
+		via?: "ui" | "model" | "mcp";
+		actor?: Record<string, unknown>;
+		/** The workspace packages it covered when made. */
+		coveredHeld?: string[];
 	},
-): Promise<void> {
-	await sql.query(
-		`INSERT INTO version_lockfiles (version_id) VALUES ($1) ON CONFLICT DO NOTHING`,
-		[opts.versionId],
+): Promise<string> {
+	const entries = opts.entries ?? [
+		{
+			outcome: opts.outcome ?? "will_fix",
+			reason:
+				opts.reason ?? (opts.outcome === "will_fix" ? undefined : "e2e reason"),
+		},
+	];
+	const rows = await sql.query<{ id: string }>(
+		`INSERT INTO vulnerability_decisions
+			(vulnerability_id, source, actor, via, severity_held, affected_held, covered_held)
+		 VALUES ($1, $2, $3::jsonb, $4,
+		         (SELECT severity FROM vulnerabilities WHERE id = $1),
+		         (SELECT affected FROM vulnerabilities WHERE id = $1), $5)
+		 RETURNING id`,
+		[
+			opts.id,
+			opts.source ?? "tamanu",
+			JSON.stringify(opts.actor ?? { kind: "operator", login: "seed@example.com" }),
+			opts.via ?? "ui",
+			opts.coveredHeld ?? [],
+		],
 	);
-	for (const p of opts.packages) {
-		const workspaces = p.workspaces ?? ["central-server"];
+	const decisionId = rows[0]!.id;
+	let position = 0;
+	for (const entry of entryJson(entries)) {
 		await sql.query(
-			`INSERT INTO version_packages (version_id, name, version, workspaces, direct, paths)
-			 VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+			`INSERT INTO vulnerability_decision_entries
+				(decision_id, position, workspace_packages, outcome, reason, issue_url)
+			 VALUES ($1, $2, $3, $4, $5, $6)`,
 			[
-				opts.versionId,
-				p.name,
-				p.version,
-				workspaces,
-				p.direct ?? false,
-				JSON.stringify(Object.fromEntries(workspaces.map((w) => [w, [p.name]]))),
+				decisionId,
+				position++,
+				entry.workspace_packages,
+				entry.outcome,
+				entry.reason,
+				entry.issue_url,
 			],
 		);
 	}
+	return decisionId;
+}
+
+/** The newest decision of an item stopped standing. */
+export async function seedVulnerabilityLapse(
+	sql: Sql,
+	opts: {
+		id: string;
+		source?: VulnerabilitySource;
+		reason?: Record<string, unknown>;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO vulnerability_lapses (vulnerability_id, source, decision_id, reason)
+		 SELECT vulnerability_id, source, id, $3::jsonb FROM vulnerability_decisions
+		 WHERE vulnerability_id = $1 AND source = $2 ORDER BY created_at DESC LIMIT 1`,
+		[
+			opts.id,
+			opts.source ?? "tamanu",
+			JSON.stringify(
+				opts.reason ?? { kind: "severity_rose", from: "medium", to: "critical" },
+			),
+		],
+	);
 }
 
 /** A machine's last package report. An `ecosystem` of `null` is a report

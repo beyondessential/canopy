@@ -4,65 +4,123 @@ id: VUL
 
 # Vulnerabilities
 
-Canopy tracks the published vulnerabilities in what the production fleet runs: the dependencies of the Tamanu versions it runs, and the Linux packages installed on its boxes.
+Canopy tracks the published vulnerabilities in the dependencies of the repositories it tracks, and in the Linux packages installed on its production boxes.
 Vulnerability data comes from OSV, the open vulnerability database.
 Each vulnerability is an item for operators to triage (see [VTR](vulnerability-triage.md)).
 Vulnerabilities are presented on a page of their own and file no checks, so they raise no issues and no incidents (see [CHK](../monitoring/checks.md)).
 
 ## Sources
 
-There are two sources of exposure, and every item belongs to one of them.
+There are two kinds of source, and every item belongs to one source.
 
-**Tamanu** is the dependencies of Tamanu versions.
-A Tamanu version's dependencies are the packages in the lockfile at that version's release tag in the Tamanu repository, leaving out those the lockfile marks as development-only.
-Every Tamanu application on a version shares that version's dependencies, whatever its type, so a package used by only one part of Tamanu counts against every Tamanu application on that version.
-For each package Canopy also holds where it sits in Tamanu's dependency tree: which of Tamanu's workspaces reach it, and whether any of them depends on it directly.
-A release tag does not move, so a version's dependencies are read once.
+**A repository** is one of the repositories Canopy tracks: Tamanu, Canopy, bestool, seedling, infra, Tupaia, bliti and pollen.
+A repository's dependencies are the packages in its npm, Yarn, Cargo and uv lockfiles on its default branch.
+Only Yarn 2 and later's lockfiles are read: a Yarn classic lockfile counts as a lockfile that cannot be parsed.
+A repository can carry several lockfiles, such as infra's npm dependencies for Pulumi, its Cargo dependencies for pgsnap and its Python dependencies for Ansible, and all of them count.
+Only the default branch counts, whatever is released or deployed from it.
+A repository that stops being tracked keeps the items scanned from it, with the triage decisions taken on them, but they are out of the item list and out of what it counts, and Canopy forgets the packages and the reads it held for that repository.
 
-**Linux** is the packages installed on machines, as each machine reports them (see [PKG](../public-server/packages.md)).
-A machine that has not reported its packages has no Linux exposure.
-An application on a cluster has no box of its own, so it has Tamanu exposure and no Linux exposure (see [K8S](../monitoring/kubernetes.md)).
+**Linux** and **Windows** mean the packages installed on machines, as each machine reports them (see [PKG](../public-server/packages.md)).
+A machine that has not reported its packages has no Linux or Windows exposure.
+An application on a Kubernetes cluster has no box of its own, so it has no Linux exposure (see [K8S](../monitoring/kubernetes.md)).
 
-## What counts
+Only production boxes count for Linux or Windows: a machine's packages are scanned when it is a live production machine (see [GRP](../servers/groups.md), "Environments").
+Anything at another rank, pending, or archived exposes nothing, and ranking, archiving or moving a machine changes what is exposed without waiting for a rescan.
 
-Only production counts as exposure.
-A Tamanu version is scanned when a live production application runs it, and a machine's packages are scanned when it is a live production machine (see [GRP](../servers/groups.md), "Environments").
-Anything at another rank, pending, or archived exposes nothing.
+## Where a package sits
 
-The newest published Tamanu version is scanned as well, whether or not anything runs it, so what an upgrade would bring can be triaged before production moves to it.
+For each package in a repository, Canopy holds how the default branch reaches it:
 
-Exposure is worked out from the fleet as it stands, so ranking, archiving or moving an application or machine changes what is exposed without waiting for a rescan.
+- the workspace packages that reach it, where a repository is a monorepo (npm and Yarn workspaces, Cargo workspace members, uv workspace members); a repository that is one package has that one;
+- whether each of them depends on it directly;
+- the scopes of the paths by which each reaches it, and for each scope the shortest chain of packages along such a path.
+
+A path's scope names when the package is used, in the terms SPDX gives a dependency's lifecycle: **runtime**, **build**, **development**, **test**, **design** or **other**.
+A path can also be **optional**, meaning the package may not be installed.
+Each ecosystem supplies the scopes it distinguishes, and a path never takes one it does not: npm and Yarn distinguish runtime, development and optional dependencies, so a package only a build tool needs is development there; Cargo distinguishes runtime, build and development dependencies; uv distinguishes runtime dependencies, development dependencies from dependency groups, and optional ones from extras.
+A package reached through paths of different scopes carries each of them.
+Development and build paths count like any other: a flaw in a build tool can corrupt what it builds, so the scope is something to weigh in triage.
+
+A repository's lockfiles are read again whenever its default branch moves, and whenever an operator asks for the repository to be read again.
+Asking for it is an administrator's action, recorded in the audit log, and what Canopy holds for the repository stays in place until the read that replaces it lands.
+A repository asked for is read on the next pass, including one whose last read failed.
+Linux is reported by machines rather than read, so it cannot be asked for.
+
+> [!NOTE]
+> The head of a default branch says what is there, not what Canopy made of it, so a repository whose branch is still keeps whatever an older reading understood. Asking for one is how an operator acts on knowing better: that Canopy has learnt to read an ecosystem it could not before, or that what is held for a repository is not what is in it.
 
 ## Matching
 
 Canopy asks OSV which advisories affect each package version it holds, and keeps each matching advisory's record.
-The question is asked once per distinct package version, however many versions or machines carry it.
-Canopy asks again on a regular schedule, since advisories are published and revised after a version is first scanned, and promptly when a new version comes to count or a machine reports a changed package list.
+The question is asked once per distinct package version, however many repositories or machines carry it.
+Canopy asks again on a regular schedule, since advisories are published and revised after a version is first scanned, and promptly when a repository's default branch moves or a machine reports a changed package list.
 An advisory's record is fetched again only when OSV reports it has been revised.
 
-An item is one advisory within one source, identified by the advisory's OSV identifier and carrying its aliases, such as a CVE identifier.
+A match is kept only if the advisory's own affected ranges and listed versions do not rule the package version out: a version below where a range starts, or at or above where it ends, files nothing.
+A version number short of three parts, such as `0.65`, is read as its missing parts being zero.
+Where the record gives nothing to check a match against, such as a range of git commits, an event that is not a version, no entry naming the package, or a version the range does not order, OSV's match stands.
+A match is withheld only on a record as current as the answer that reported it, so a revised advisory Canopy could not fetch this pass withholds nothing.
+
+> [!NOTE]
+> Only what the structured ranges say can rule a match out. An advisory whose text gives a first affected version that its ranges leave out, by starting at zero, is still matched; an operator or the suggestion on its page judges that one.
+
+An item is one advisory within one source, identified by the advisory's OSV identifier and the source, and carrying the advisory's aliases, such as a CVE identifier.
+The same advisory in two repositories is two items, each triaged for how that repository uses the package.
+An advisory can affect several packages, and its item carries each of them that the source holds.
 
 An item's severity is the qualitative rating the advisory carries, from its CVSS score where it has one and otherwise the rating its database gives: critical, high, medium or low.
 An advisory with neither is unrated, and ranks below low.
 
-## Exposure
+Where the advisory names a version that fixes the flaw, an item carries, for each affected package version, the lowest such version above it: its minimum fix version.
 
-A Tamanu item exposes every live production application on a version whose dependencies include an affected package version.
-A Linux item exposes every live production machine with an affected package version installed.
+## Exposure and closing
 
-An item is listed while something counts for it: an application or machine it exposes, or the newest published Tamanu version carrying an affected package version.
-An item nothing counts for any more leaves the list of open items without needing a decision, and returns if something comes to count for it again.
+A repository item counts while the default branch carries an affected package version.
+A Linux item counts while a live production machine has an affected package version installed, and exposes each such machine.
+
+An item nothing counts for is **closed**.
+Nothing about closing needs a decision: when a fix lands on the default branch, or a machine upgrades past the flaw, the item closes by itself.
+Being closed is apart from triage status: a closed item keeps its status, decisions and history, and is listed only when asked for.
+If something comes to count for it again, it is no longer closed, and its decision stands unless it lapses (see [VTR](vulnerability-triage.md), "When a decision lapses").
+
+A repository that cannot be fetched, that has a lockfile that cannot be parsed, or that has no lockfile Canopy can read, is not read: it leaves its items as they were, and does not close them.
+A repository not read for a day raises a self-alert naming it and why (see [SELF](../private-server/self-alerts.md)).
+
+> [!NOTE]
+> A repository with nothing Canopy can read is a failed read rather than a read of a repository with no dependencies, because the two are indistinguishable from the outside and only one of them is ever true of a repository worth tracking. Taken as an empty read it is silent twice over: the commit is recorded as read, so nothing reads it again, and the repository stays fresh, so no alert names it. That is how Tupaia carried nothing at all for days after its Yarn lockfile came to count.
 
 ## Presentation
 
-Vulnerabilities are a top-level section of the operator interface.
+Vulnerabilities are a top-level section of the operator interface, and the sidebar entry carries how many items need triage, leaving out closed ones.
+The section has a page of its own for the sources, reached from the list.
 
-The list is one row per item, showing its severity, its summary and identifier, the affected package and its source, how many applications or machines it exposes, and its triage status (see [VTR](vulnerability-triage.md)).
-An item that is open and has a suggestion shows the suggested outcome under its status.
-The list shows open items by default, sorted by severity and then by how much each exposes.
-It filters by source and by status, and a switch includes items nothing counts for any more.
+The list is one row per item, showing its severity, its summary and identifier, its affected packages with the source and their scopes, and its triage status (see [VTR](vulnerability-triage.md)).
+A Linux item also shows how many machines it exposes.
+A closed item is marked closed under its status.
+An item that needs triage and has a suggestion shows the suggested outcome under its status.
+
+Every column sorts, ascending or descending.
+Without a sort chosen, the list is ordered by severity and then by how recently the advisory was published.
+
+The list shows the items that need triage by default, leaving out closed ones.
+It filters by source, by status (needs triage, not affected, accepted risk, will fix and mixed), by scope, by severity and by whether it has a suggestion, and a switch includes closed items.
+Filtering by scope gives the items reached through a path of that scope, and optional is one of its choices.
+Each filter's choices show how many items they would give with the other filters, the switch and the search applied.
+The filter bar shows how many items are in the result as it stands, with every filter and the search applied.
+
+A search box matches partially and tolerates small typos, across an advisory's identifier and aliases, summary, affected package names, the workspace packages that reach them, and source name.
+It also searches the advisory's full details, where a match counts for less than one in the fields above.
+While a search is entered, rows are ordered by how well they match until a column is chosen to sort by.
 
 An item's page shows the advisory's summary, details and affected ranges with the versions that fix it.
-A Tamanu item lists the exposed Tamanu versions, each with the version of the package it carries, the workspaces that reach it, and how many applications run it; the newest published version is listed whether or not anything runs it.
-A Linux item lists the exposed machines, each with its group and the version of the package installed.
+A repository item lists the affected packages on the default branch, each with its version, its minimum fix version, and the workspace packages that reach it with the scope and shortest chain of each path and whether directly, and the commit of the default branch they were read at.
+A Linux item lists the exposed machines, each with its group, the version of the package installed and its minimum fix version.
 Below that is the item's triage history, and beside it the decision panel (see [VTR](vulnerability-triage.md), "Presentation").
+
+### The sources page
+
+The sources page lists every source.
+A repository shows the GitHub repository it is read from, when it was last read, the commit it was read at, how many package versions it carries, and why the last read failed where it did.
+Linux shows how many package versions the production fleet carries and across how many machines.
+A repository that has been asked for, and one Canopy has not read yet, is marked due until the read lands.
+An administrator asks for a repository to be read again from its row.

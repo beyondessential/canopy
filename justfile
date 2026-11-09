@@ -177,11 +177,18 @@ gen-openapi:
     cargo run --quiet --bin public-openapi-dump > crates/public-server/openapi.json
     cd private-web && npm run gen:api-types
 
+# Regenerate the restore operator's CRD manifest from its resource definitions.
+# Run this after changing a field of the replica or restore resources; the
+# generated file is committed.
+gen-crds:
+    cargo run --quiet --locked -p pgro --bin gen-crds > crates/pgro/crds.yaml
+
 # Regenerate the published API client (crates/canopy-api) from the public
 # server's OpenAPI document. Run this after `gen-openapi` whenever the public
 # API changes; the generated source is committed alongside the document.
 gen-api:
     cargo run --quiet --locked -p canopy-api-codegen
+    cargo run --quiet --locked -p pgro --bin gen-crds > crates/pgro/crds.yaml
     cargo metadata --manifest-path crates/canopy-api/Cargo.toml --format-version 1 > /dev/null
 
 # Check the published API client depends on no HTTP client: how a request
@@ -198,16 +205,16 @@ check-api-deps:
         fi
     done
 
-# Check the committed OpenAPI document and API client are what the current code
-# generates. CI runs this; a diff means `just gen-openapi && just gen-api`
-# wasn't run (or wasn't committed).
+# Check the committed OpenAPI documents, API client and CRD manifest are what the
+# current code generates. CI runs this; a diff means `just gen-openapi && just
+# gen-api` or `just gen-crds` wasn't run (or wasn't committed).
 check-generated:
     #!/usr/bin/env bash
     set -euo pipefail
     # --locked so what is generated depends only on committed inputs: an
     # unlocked resolve could pick a newer codegen dependency than Cargo.lock
     # records and emit different source here than it does on a dev machine.
-    generated=(crates/public-server/openapi.json private-web/openapi.json private-web/src/safety-modes.ts crates/canopy-api/src/generated.rs crates/canopy-api/Cargo.toml crates/canopy-api/Cargo.lock)
+    generated=(crates/public-server/openapi.json private-web/openapi.json private-web/src/safety-modes.ts crates/canopy-api/src/generated.rs crates/canopy-api/Cargo.toml crates/canopy-api/Cargo.lock crates/pgro/crds.yaml)
     cargo run --quiet --locked --bin public-openapi-dump > crates/public-server/openapi.json
     cargo run --quiet --locked --bin private-openapi-dump > private-web/openapi.json
     # The grade map the interface reads. Node builtins only, so this needs no
@@ -215,11 +222,12 @@ check-generated:
     # server no longer enforces.
     node private-web/scripts/gen-safety-modes.mjs
     cargo run --quiet --locked -p canopy-api-codegen
+    cargo run --quiet --locked -p pgro --bin gen-crds > crates/pgro/crds.yaml
     cargo metadata --manifest-path crates/canopy-api/Cargo.toml --format-version 1 > /dev/null
     # Against HEAD rather than the index: a staged-but-uncommitted regeneration
     # would otherwise make a stale commit look current.
     if ! git diff --quiet HEAD -- "${generated[@]}"; then
-        echo "generated files are out of date; run 'just gen-openapi && just gen-api' and commit the result" >&2
+        echo "generated files are out of date; run 'just gen-openapi && just gen-api && just gen-crds' and commit the result" >&2
         git --no-pager diff --stat HEAD -- "${generated[@]}" >&2
         exit 1
     fi

@@ -192,12 +192,28 @@ export type TagMap = Solidify<Schemas["TagMap"]>;
 export type VulnerabilityItem = Solidify<Schemas["VulnerabilityItem"]>;
 export type VulnerabilityDetail = Solidify<Schemas["VulnerabilityDetail"]>;
 export type VulnerabilityDecision = Solidify<Schemas["VulnerabilityDecision"]>;
+/** The longest a decision's, withdrawal's or edit's reason may be. */
+export const VULNERABILITY_MAX_REASON = 500;
+export type VulnerabilityDecisionEntry = Solidify<Schemas["VulnerabilityDecisionEntry"]>;
+export type VulnerabilityDecisionEdit = Solidify<Schemas["VulnerabilityDecisionEdit"]>;
+export type VulnerabilityWithdrawal = Solidify<Schemas["VulnerabilityWithdrawal"]>;
+export type VulnerabilityLapse = Solidify<Schemas["VulnerabilityLapse"]>;
 export type VulnerabilitySuggestion = Solidify<Schemas["VulnerabilitySuggestion"]>;
 export type VulnerabilityHistoryEntry = Solidify<Schemas["VulnerabilityHistoryEntry"]>;
+export type VulnerabilityAffectedPackage = Solidify<Schemas["VulnerabilityAffectedPackage"]>;
+export type VulnerabilityPackageDetail = Solidify<Schemas["VulnerabilityPackageDetail"]>;
+export type VulnerabilityPackagePath = Solidify<Schemas["VulnerabilityPackagePath"]>;
+export type VulnerabilityListResponse = Solidify<Schemas["VulnerabilityListResponse"]>;
+export type VulnerabilityFacets = Solidify<Schemas["VulnerabilityFacets"]>;
+export type VulnerabilityFacetCount = Solidify<Schemas["VulnerabilityFacetCount"]>;
+export type VulnerabilitySortColumn = Solidify<Schemas["VulnerabilitySortColumn"]>;
 export type VulnerabilitySeverity = Solidify<Schemas["VulnerabilitySeverity"]>;
 export type VulnerabilitySource = Solidify<Schemas["VulnerabilitySource"]>;
+export type VulnerabilitySourceState = Solidify<Schemas["VulnerabilitySourceState"]>;
 export type VulnerabilityStatus = Solidify<Schemas["VulnerabilityStatus"]>;
 export type VulnerabilityOutcome = Solidify<Schemas["VulnerabilityOutcome"]>;
+export type VulnerabilityScope = Solidify<Schemas["VulnerabilityScope"]>;
+export type VulnerabilityBasis = Solidify<Schemas["VulnerabilitySuggestionBasis"]>;
 export type VulnerabilityVia = Solidify<Schemas["VulnerabilityVia"]>;
 export type MachinePackageReport = Solidify<Schemas["MachinePackageReport"]>;
 
@@ -209,16 +225,36 @@ export const VULNERABILITY_SEVERITY_LABEL: Record<VulnerabilitySeverity, string>
 	unrated: "Unrated",
 };
 
+/** What each status is called where it is picked or counted. */
 export const VULNERABILITY_STATUS_LABEL: Record<VulnerabilityStatus, string> = {
-	open: "Open",
+	open: "Needs triage",
+	not_affected: "Not affected",
+	accepted_risk: "Accepted risk",
+	will_fix: "Will fix",
+	mixed: "Mixed",
+};
+
+export const VULNERABILITY_OUTCOME_LABEL: Record<VulnerabilityOutcome, string> = {
 	not_affected: "Not affected",
 	accepted_risk: "Accepted risk",
 	will_fix: "Will fix",
 };
 
-export const VULNERABILITY_SOURCE_LABEL: Record<VulnerabilitySource, string> = {
-	tamanu: "Tamanu",
-	linux: "Linux",
+export const VULNERABILITY_SCOPE_LABEL: Record<string, string> = {
+	runtime: "Runtime",
+	build: "Build",
+	development: "Development",
+	test: "Test",
+	design: "Design",
+	other: "Other",
+	optional: "Optional",
+};
+
+export const VULNERABILITY_BASIS_LABEL: Record<VulnerabilityBasis, string> = {
+	dependency_path_only: "Based on dependency paths only",
+	advisory_text_only: "Based on advisory text only",
+	dependency_path_and_advisory_text: "Based on dependency paths and advisory text",
+	insufficient_information: "Insufficient information",
 };
 
 export type VersionData = Solidify<Schemas["VersionData"]>;

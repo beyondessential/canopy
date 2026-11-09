@@ -11,6 +11,7 @@ members = [
 	"crates/identity-discovery",
 	"crates/jobs",
 	"crates/oidc",
+	"crates/pgro",
 	"crates/private-server",
 	"crates/public-server",
 	"crates/relay",
