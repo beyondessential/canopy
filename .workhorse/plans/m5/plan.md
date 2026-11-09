@@ -95,11 +95,21 @@ bestool also keeps `canopy/*` specs describing Canopy behaviour from the device 
 - The `ghcr.io/beyondessential/postgres-restore-operator` image name is referenced from infra.
 - Open pgro branches and dependabot PRs, and what happens to the old repo.
 
-## Cutover
+## Can pgro talk over the tailnet today
 
-- [ ] An operator attaches the pgro sidecar's tailnet identity to pgro's existing Canopy device.
-  Canopy authenticates a tailnet node only once it is attached to a device record, and an identity can be held by one device; if `TAILSCALE_REQUIRED_TAG` is set on the server, the node must also carry that tag.
-  This is a precondition to deploying a tailnet-only operator, and it is operator state, not something the repository records.
+Yes, in code, on both sides, with no further work.
+
+- **Server:** the whole device API, restore routes included, is nested under the private server's `/public` mount, which is the one surface that welcomes tagged tailnet nodes (pgro's sidecar is tagged `tag:pgro-operator`).
+  The restore spec (RST) already says either transport satisfies the role.
+- **Client:** `bestool-canopy` probes the tailnet endpoint first and prefers it when reachable; pgro routes `*.ts.net` through the sidecar's SOCKS5 proxy; and the infra stack enables the sidecar whenever `tailscaleAuthKey` is set.
+  So an operator deployed with the sidecar is already on the tailnet path.
+
+What the repository cannot show is operator state: whether the deployed pgro stack sets `tailscaleAuthKey`, and whether its tailnet node is attached to the device holding the restore role.
+That decides whether this is already how pgro talks to Canopy.
+It matters because an unrecognised tailnet node is refused as unauthenticated, not with the tag refusal that triggers the mTLS fallback, so a reachable tailnet with an unattached node fails outright rather than falling back.
+
+- [ ] Before the tailnet-only operator deploys, confirm the pgro stack sets `tailscaleAuthKey`, and that the pgro node is attached to its Canopy device (and carries `TAILSCALE_REQUIRED_TAG` if the server sets one).
+  If it already works over the tailnet today, there is nothing to do.
 
 ## Open
 
