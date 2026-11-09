@@ -2,10 +2,12 @@ name: pgro integration
 
 # The kind-cluster tests take a while and need nothing from the rest of Canopy,
 # so the `changes` job decides whether a change can affect them, and the
-# matrix is skipped when it cannot. The workflow itself always runs, so the
-# final check is always reported and can be required.
+# matrix is skipped when it cannot. The workflow itself always runs, on the
+# merge queue as well, because the final check is required and a required check
+# a workflow never reports ejects the pull request from the queue.
 on:
   workflow_dispatch:
+  merge_group:
   pull_request:
   push:
     branches:
@@ -36,14 +38,14 @@ jobs:
           REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
           PR: ${{ github.event.pull_request.number }}
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.sha }}
+          BEFORE: ${{ github.event.merge_group.base_sha || github.event.before }}
+          AFTER: ${{ github.event.merge_group.head_sha || github.sha }}
         run: |
           case "$EVENT" in
             pull_request)
               files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')
               ;;
-            push)
+            push | merge_group)
               if [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
                 files=crates/pgro/
               else
