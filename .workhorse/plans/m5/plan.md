@@ -60,7 +60,14 @@ Ordered so the history import is a pure move, and each later step is its own com
 - [x] Remove pgro from the repositories the vulnerabilities spec lists.
 - [ ] Remove pgro from the repositories the vulnerability tracker's source table lists, since its dependencies are now in Canopy's own lockfile.
 - [ ] Delete pgro's `.workhorse/specs/` from the imported tree once the operator specs are the only copy.
-- [ ] Merge pgro's AGENTS.md into Canopy's: keep its operator-specific lessons (TCP keepalives, no wall-clock timeouts on long operations) and drop what Canopy's already says.
+- [ ] Merge pgro's AGENTS.md into Canopy's as a section for `crates/pgro`, so its rules do not read as applying to the whole workspace.
+  Carry: its lessons (TCP keepalives to detect dead Postgres connections, no wall-clock timeouts on long-tailed operations, keepalives on both the operator's sockets and the migration Job's URI); do the work in the operator rather than in a script that runs in a Job; add integration cases to the kind-cluster workflow, tell the user they only run in CI, and keep the README's CRD tables in step with CRD changes; the parser rule (winnow unless trivial), the import grouping, `use` before `mod`, the `foo.rs` and `foo/sub.rs` module layout, and `#[expect]` with a reason instead of `#[allow]`.
+  Drop: the rule against changing `bestool-canopy`'s build behaviour, since the operator no longer depends on it; `cargo test` and `cargo clippy` instructions, which Canopy's `just` recipes replace; and the agent-environment rules about `git --no-pager`, working from a branch and interactive commands.
+  Keep Canopy's own rules where the two overlap (summaries, comments, conventional commits).
+- [ ] Import the `pgro-status` skill as `.agents/skills/pgro-status/`, which `.claude/skills` already points at, and update it for the new shape: drop the legacy `RestoreSchedulingSuspended` row and the cron-schedule wording, since every replica is Canopy-driven and its cadence comes from its intent's parameters; and add a step that checks the operator's link to Canopy, since the operator now has no path to Canopy but the tailnet sidecar.
+  Keep its rule against putting site, customer or real data figures in commits and PRs, which Canopy's own anonymity rule matches.
+- [ ] Reconcile the repository tooling pgro brings with Canopy's: pgro's dependabot cargo group folds into Canopy's (the crate is a workspace member, so no new directory), its review-hero `project` and `ignore_patterns` fold into Canopy's single config, and pgro's pull request template, editorconfig, rustfmt, typos and taplo settings give way to Canopy's where Canopy has them and are kept only where it has none.
+  Drop pgro's `release.toml`, `Containerfile`, `.node-version` (if only the retired workflows used it) and release and CD workflows with the old repository.
 - [ ] Add the traceability comments (`// spec: PGRO`, `INT`, `PLACE`, `USER`) where the operator code implements them, and the Playwright or integration coverage the specs call for, when the code moves.
 
 ### CI and deploy
