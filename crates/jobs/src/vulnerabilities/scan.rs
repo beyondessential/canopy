@@ -233,6 +233,9 @@ impl Scanner {
 		let held = Advisory::modified_ats(conn, &ids).await?;
 		let mut fetched = Vec::new();
 		let mut unavailable: HashSet<&str> = HashSet::new();
+		// Revised advisories this pass could not fetch, so what is held for
+		// them is behind what OSV answered with.
+		let mut stale: HashSet<&str> = HashSet::new();
 		let wanted: Vec<&str> = revisions
 			.iter()
 			.filter(|(id, modified)| held.get(**id).is_none_or(|held| *modified > held))
@@ -249,7 +252,9 @@ impl Scanner {
 				Ok(record) => fetched.push(record),
 				Err(e) => {
 					warn!("vulnerability scan: fetching {id}: {e}");
-					if !held.contains_key(id) {
+					if held.contains_key(id) {
+						stale.insert(id);
+					} else {
 						unavailable.insert(id);
 					}
 				}
@@ -281,14 +286,17 @@ impl Scanner {
 							.map(|v| v.id.clone())
 							.filter(|id| !unavailable.contains(id.as_str()))
 							.filter(|id| {
-								ranges.get(id).is_none_or(|(_, affected)| {
-									!osv::rules_out(
-										affected,
-										&query.ecosystem,
-										&query.name,
-										&query.version,
-									)
-								})
+								// Only a record as current as the answer can
+								// withhold what the answer reported.
+								stale.contains(id.as_str())
+									|| ranges.get(id).is_none_or(|(_, affected)| {
+										!osv::rules_out(
+											affected,
+											&query.ecosystem,
+											&query.name,
+											&query.version,
+										)
+									})
 							})
 							.collect();
 						(query.clone(), found.into_iter().collect())
