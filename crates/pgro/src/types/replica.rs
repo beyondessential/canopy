@@ -1,11 +1,8 @@
-use std::{
-	borrow::Cow,
-	collections::{BTreeMap, HashMap},
-};
+use std::{borrow::Cow, collections::BTreeMap};
 
 use jiff::Span;
 use k8s_openapi::{
-	api::core::v1::{Affinity, ResourceRequirements, SecretReference, Toleration},
+	api::core::v1::{Affinity, ResourceRequirements, Toleration},
 	apimachinery::pkg::{
 		api::resource::Quantity,
 		apis::meta::v1::{Condition, OwnerReference, Time},
@@ -16,8 +13,6 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 
 use crate::util::{TimeSpan, slug};
-
-use super::HeaderValue;
 
 #[derive(CustomResource, Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -35,33 +30,19 @@ use super::HeaderValue;
 )]
 #[serde(rename_all = "camelCase")]
 pub struct PostgresPhysicalReplicaSpec {
-	/// Reference to a Secret containing kopia repository credentials.
-	/// Mutually exclusive with `canopySource`. Exactly one of the two
-	/// must be set; the reconciler surfaces `KopiaSecretValid=False`
-	/// with reason `SecretRefAndCanopySource` if both (or neither) are
-	/// present.
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub kopia_secret_ref: Option<SecretReference>,
-
-	/// Route kopia through the canopy-mediated proxy sidecar instead of
-	/// a static credentials Secret. Mutually exclusive with
-	/// `kopiaSecretRef`.
+	/// The Canopy group and backup type whose backups this replica restores.
 	///
-	/// When set:
-	/// - the restore + snapshot-list Jobs get the pgro-canopy-proxy
-	///   sidecar and dummy AWS keys (kopia talks to `[::1]:<port>`);
-	/// - the reconciler skips the snapshot-list step and instead reads
-	///   the snapshot to restore from `status.canopyDesiredSnapshotId`
-	///   (populated by the canopy worklist syncer);
-	/// - the replica is treated as pgro-internal state — the canopy
-	///   syncer materialises + tears down these CRs based on canopy's
-	///   worklist. Manual edits to a canopy-managed CR are re-asserted
-	///   on the next tick.
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub canopy_source: Option<CanopySource>,
-
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub snapshot_filter: Option<SnapshotFilter>,
+	/// Kopia reaches the repository through the pgro-canopy-proxy sidecar
+	/// on the restore and snapshot-list Jobs, with dummy AWS keys; the
+	/// sidecar holds the credentials Canopy issues for the run. The
+	/// snapshot to restore is the one named by
+	/// `status.canopyDesiredSnapshotId` (set by the Canopy worklist syncer),
+	/// matched against the snapshot-list Job's output.
+	///
+	/// The replica is pgro-internal state: the Canopy syncer creates and
+	/// tears down these CRs from Canopy's worklist, and re-asserts any
+	/// manual edit on its next tick.
+	pub canopy_source: CanopySource,
 
 	/// Cron expression for scheduled restores
 	pub schedule: String,
@@ -164,10 +145,9 @@ pub struct PostgresPhysicalReplicaSpec {
 	pub read_only: bool,
 
 	/// Ephemeral replica: once a restore reaches `Active` (postgres came up
-	/// healthy and, for canopy replicas, the verification was reported),
-	/// tear the restore down instead of keeping it running. The replica CR
-	/// stays; it only restores again when a new snapshot is offered (canopy
-	/// path) or the schedule next fires (legacy path). Used by the `verify`
+	/// healthy and the verification was reported), tear the restore down
+	/// instead of keeping it running. The replica CR stays; it only
+	/// restores again when Canopy offers a new snapshot. Used by the `verify`
 	/// intent, whose whole job is "prove the snapshot restores" — keeping
 	/// the database idling afterward just wastes cluster resources.
 	#[serde(default)]
@@ -176,9 +156,6 @@ pub struct PostgresPhysicalReplicaSpec {
 	/// Extra lines appended to postgresql.conf (e.g. shared_preload_libraries)
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub postgres_extra_config: Option<String>,
-
-	#[serde(default, skip_serializing_if = "Vec::is_empty")]
-	pub notifications: Vec<NotificationConfig>,
 
 	/// List of schema names to migrate from the previous restore to the new restore on each switchover.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
@@ -298,120 +275,6 @@ pub struct CanopySource {
 	pub r#type: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SnapshotFilter {
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub tags: Option<HashMap<String, String>>,
-
-	/// Glob pattern for filtering snapshot hosts
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub host_pattern: Option<String>,
-
-	/// Glob pattern for filtering snapshot descriptions
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub description_pattern: Option<String>,
-
-	/// Glob pattern for filtering snapshot source paths.
-	/// Windows paths are normalised to Unix style (e.g. `D:\Full` → `/D/Full`).
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub path_pattern: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", tag = "target")]
-pub enum NotificationConfig {
-	Webhook(WebhookConfig),
-	GraphQL(GraphQLConfig),
-}
-
-impl JsonSchema for NotificationConfig {
-	fn inline_schema() -> bool {
-		true
-	}
-
-	fn schema_name() -> Cow<'static, str> {
-		"NotificationConfig".into()
-	}
-
-	fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-		let header_schema = generator.subschema_for::<Option<HashMap<String, HeaderValue>>>();
-		json_schema!({
-			"type": "object",
-			"required": ["target", "url"],
-			"properties": {
-				"target": {
-					"type": "string",
-					"enum": ["webhook", "graphQL"]
-				},
-				"url": { "type": "string" },
-				"method": { "type": "string" },
-				"mutation": { "type": "string" },
-				"variablesTemplate": { "type": "string" },
-				"headers": header_schema,
-				"includePassword": { "type": "boolean" }
-			}
-		})
-	}
-}
-
-impl NotificationConfig {
-	pub fn name(&self) -> String {
-		match self {
-			NotificationConfig::Webhook(WebhookConfig { url, method, .. }) => {
-				format!("{method} {url}")
-			}
-			NotificationConfig::GraphQL(GraphQLConfig { url, .. }) => format!("GraphQL {url}"),
-		}
-	}
-
-	pub fn include_password(&self) -> bool {
-		match self {
-			NotificationConfig::Webhook(WebhookConfig {
-				include_password, ..
-			}) => *include_password,
-			NotificationConfig::GraphQL(GraphQLConfig {
-				include_password, ..
-			}) => *include_password,
-		}
-	}
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct WebhookConfig {
-	pub url: String,
-
-	#[serde(default = "default_method")]
-	pub method: String,
-
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub headers: Option<HashMap<String, HeaderValue>>,
-
-	/// Include password directly in notification payload
-	#[serde(default)]
-	pub include_password: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphQLConfig {
-	pub url: String,
-	pub mutation: String,
-	pub variables_template: String,
-
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub headers: Option<HashMap<String, HeaderValue>>,
-
-	/// Include password directly in notification payload
-	#[serde(default)]
-	pub include_password: bool,
-}
-
-fn default_method() -> String {
-	"POST".to_string()
-}
-
 // Status types
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
@@ -439,9 +302,8 @@ pub struct PostgresPhysicalReplicaStatus {
 	pub latest_available_snapshot: Option<String>,
 
 	/// Snapshot id the canopy worklist syncer wants restored. Populated
-	/// each syncer tick for canopy-sourced replicas (`spec.canopySource`
-	/// is set); unused otherwise. The reconciler triggers a new restore
-	/// when this differs from the current one.
+	/// each syncer tick. The reconciler triggers a new restore when this
+	/// differs from the current one.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub canopy_desired_snapshot_id: Option<String>,
 
@@ -458,9 +320,6 @@ pub struct PostgresPhysicalReplicaStatus {
 
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub queue_position: Option<u32>,
-
-	#[serde(default, skip_serializing_if = "Vec::is_empty")]
-	pub notifications: Vec<NotificationStatus>,
 
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub conditions: Vec<Condition>,
@@ -714,18 +573,6 @@ pub struct ConnectionInfo {
 	pub password_secret: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct NotificationStatus {
-	pub name: String,
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub last_sent_at: Option<Time>,
-	#[serde(default)]
-	pub success: bool,
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub last_error: Option<String>,
-}
-
 impl PostgresPhysicalReplica {
 	pub fn ns(&self) -> String {
 		self.namespace()
@@ -797,31 +644,20 @@ impl PostgresPhysicalReplica {
 
 	/// Name of the operator-materialised Secret that holds the canopy path's
 	/// dummy AWS keys + canopy-provided bucket/region/prefix/repo-password.
-	/// Only meaningful when `spec.canopy_source` is set — the canopy syncer
-	/// creates this Secret before the reconciler spawns a restore Job.
+	/// The canopy syncer creates this Secret before the reconciler spawns a
+	/// restore Job.
 	pub fn canopy_creds_secret_name(&self) -> String {
 		format!("{name}-canopy-creds", name = self.name_any())
 	}
 
-	/// Derive the credential source for kopia Jobs — the reconciler has
-	/// already validated exactly one of `kopia_secret_ref` / `canopy_source`
-	/// is set before we reach any callsite that needs this, so the
-	/// `.expect` never fires in practice.
+	/// The credential source for kopia Jobs: the Canopy proxy sidecar and
+	/// the Secret the syncer materialises beside the replica.
 	pub fn kopia_source(&self) -> crate::kopia::KopiaSource {
-		if let Some(canopy) = &self.spec.canopy_source {
-			crate::kopia::KopiaSource::CanopyProxy {
-				secret_name: self.canopy_creds_secret_name(),
-				group: canopy.group.clone(),
-				backup_type: canopy.r#type.clone(),
-			}
-		} else {
-			let secret_name = self
-				.spec
-				.kopia_secret_ref
-				.as_ref()
-				.and_then(|r| r.name.clone())
-				.expect("kopia_source called with neither kopia_secret_ref nor canopy_source set");
-			crate::kopia::KopiaSource::Secret { secret_name }
+		let canopy = &self.spec.canopy_source;
+		crate::kopia::KopiaSource {
+			secret_name: self.canopy_creds_secret_name(),
+			group: canopy.group.clone(),
+			backup_type: canopy.r#type.clone(),
 		}
 	}
 }

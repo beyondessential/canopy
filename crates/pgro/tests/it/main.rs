@@ -13,5 +13,6 @@ mod migration;
 mod persistent_schemas;
 mod redaction;
 mod schema_build;
+mod stub_canopy;
 mod switchover;
 mod ttls;

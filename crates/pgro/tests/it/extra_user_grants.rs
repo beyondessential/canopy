@@ -26,15 +26,6 @@ async fn extra_user_keeps_schema_grants_across_a_persistent_schema_migration() {
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "eug-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating replica with a persistent schema and a user scoped to it");
 	let mut replica = build_replica(
 		replica_name,
@@ -49,11 +40,7 @@ async fn extra_user_keeps_schema_grants_across_a_persistent_schema_migration() {
 		},
 	);
 	replica.spec.persistent_schemas = Some(vec!["persistent_data".to_string()]);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for the first restore to become Active");
 	let first_restore_name =

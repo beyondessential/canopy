@@ -1,199 +1,166 @@
-//! Canopy-path integration test.
-//!
-//! **STATUS: SCAFFOLD.** The in-cluster stub canopy this test expects
-//! doesn't exist yet. `tests/fixtures/stub-canopy.yaml` is a Namespace +
-//! ConfigMap-with-canned-JSON only — no Deployment, no Service, nothing
-//! that serves HTTP. All three tests below are `#[ignore]d` and will
-//! remain so until a stub-canopy HTTP server is built (small axum/Go
-//! binary that reads the ConfigMap and serves the four `/restore-*`
-//! endpoints).
-//!
-//! What this file provides today:
-//! - The test shape + assertions the future stub-based CI job will run.
-//! - The matrix entry in `.github/workflows/integration.yml` — inert
-//!   until the stub is up.
-//! - Canned JSON in the fixture ConfigMap the stub will eventually serve.
-//!
-//! Do not run this file locally — nothing here works without the CI
-//! setup, and even the CI setup is incomplete.
-
-#![allow(dead_code, reason = "shared helpers may not all be exercised yet")]
+//! Replicas that Canopy declares, end to end: the stub offers a worklist entry,
+//! and pgro provisions what the entry names, restores it, and reports the result.
 
 use std::time::Duration;
 
-use k8s_openapi::{
-	api::{batch::v1::Job, core::v1::Namespace},
-	apimachinery::pkg::apis::meta::v1::Time,
-};
+use bes_canopy_api::schema::WorklistEntry;
+use k8s_openapi::api::core::v1::Namespace;
 use kube::{Api, Client, ResourceExt, api::ListParams};
-use tokio::time::{sleep, timeout};
+use pgro::{
+	controllers::canopy::labels,
+	types::{PostgresPhysicalReplica, ReplicaPhase},
+};
+use serde_json::{Map, Value};
+use tokio::time::{Instant, sleep, timeout};
+use uuid::Uuid;
 
-const POLL_INTERVAL: Duration = Duration::from_secs(2);
-const NAMESPACE_TIMEOUT: Duration = Duration::from_secs(90);
-const JOB_TIMEOUT: Duration = Duration::from_secs(120);
+use crate::{
+	helpers::{LONG_PHASE_TIMEOUT, POLL_INTERVAL, make_client, snapshot_id_for},
+	stub_canopy::{Recorded, stub},
+};
 
-mod helpers {
-	#[allow(unused_imports)]
-	pub use super::*;
+const BUCKET: &str = "test-bucket";
+const NAMESPACE_TIMEOUT: Duration = Duration::from_secs(120);
 
-	pub async fn make_client() -> Client {
-		Client::try_default()
-			.await
-			.expect("expected a valid kubeconfig (kind)")
-	}
+/// A `verify` entry for the fixture repository, which restores the snapshot the
+/// setup Job made, proves it healthy and discards it.
+async fn verify_entry(name: &str, group: Uuid, replica: Uuid) -> WorklistEntry {
+	WorklistEntry::builder()
+		.name(name.to_owned())
+		.intent("verify".to_owned())
+		.replica_id(replica)
+		.group_id(group)
+		.machine_id(Uuid::new_v4())
+		.server_id(Uuid::new_v4())
+		.type_("tamanu-postgres".to_owned())
+		.storage("s3".to_owned())
+		.bucket(BUCKET.to_owned())
+		.region("us-east-1".to_owned())
+		.prefix(String::new())
+		.snapshot_id(snapshot_id_for(BUCKET).await)
+		.params(Map::new())
+		.build()
+}
 
-	/// Wait for at least one namespace labelled `pgro.bes.au/managed-by=pgro-canopy`
-	/// to appear. Returns the first match.
-	pub async fn wait_for_canopy_namespace(client: &Client) -> Namespace {
-		let ns_api: Api<Namespace> = Api::all(client.clone());
-		let params = ListParams::default().labels("pgro.bes.au/managed-by=pgro-canopy");
-		let deadline = tokio::time::Instant::now() + NAMESPACE_TIMEOUT;
-		loop {
-			if let Ok(list) = ns_api.list(&params).await
-				&& let Some(ns) = list.items.into_iter().next()
-			{
-				return ns;
-			}
-			if tokio::time::Instant::now() >= deadline {
-				panic!("no canopy-managed namespace appeared within {NAMESPACE_TIMEOUT:?}");
-			}
-			sleep(POLL_INTERVAL).await;
+/// The namespace pgro made for the declaration `replica`, once it exists.
+async fn wait_for_namespace(client: &Client, replica: Uuid) -> Namespace {
+	let namespaces: Api<Namespace> = Api::all(client.clone());
+	let selector = ListParams::default().labels(&format!("{}={replica}", labels::DECLARATION_ID));
+	let deadline = Instant::now() + NAMESPACE_TIMEOUT;
+	loop {
+		if let Ok(list) = namespaces.list(&selector).await
+			&& let Some(namespace) = list.items.into_iter().next()
+		{
+			return namespace;
 		}
-	}
-
-	/// Wait for the canopy-path restore Job in `ns` to appear. Returns it.
-	pub async fn wait_for_restore_job(client: &Client, ns: &str) -> Job {
-		let job_api: Api<Job> = Api::namespaced(client.clone(), ns);
-		let params = ListParams::default().labels("pgro.bes.au/job-kind=canopy-restore");
-		let deadline = tokio::time::Instant::now() + JOB_TIMEOUT;
-		loop {
-			if let Ok(list) = job_api.list(&params).await
-				&& let Some(job) = list.items.into_iter().next()
-			{
-				return job;
-			}
-			if tokio::time::Instant::now() >= deadline {
-				panic!("no canopy-restore Job appeared in {ns} within {JOB_TIMEOUT:?}");
-			}
-			sleep(POLL_INTERVAL).await;
-		}
-	}
-
-	/// Poll the stub canopy's `/tests/reports` endpoint for the report count.
-	/// The stub exposes captured `RestoreVerification` POSTs as a JSON array
-	/// there — see `tests/fixtures/stub-canopy.yaml`.
-	pub async fn stub_report_count(_client: &Client) -> usize {
-		// TODO(canopy-integration): once the stub-canopy Deployment lands
-		// in tests/fixtures/, port-forward and read /tests/reports. For now
-		// the fixture is a placeholder; this helper is a stub.
-		0
+		assert!(
+			Instant::now() < deadline,
+			"no namespace appeared for declaration {replica} within {NAMESPACE_TIMEOUT:?}"
+		);
+		sleep(POLL_INTERVAL).await;
 	}
 }
 
-/// End-to-end happy path: stub canopy hands out a worklist entry, pgro
-/// provisions a namespace with the expected labels, creates the restore
-/// Job, and (eventually) reports a verification back.
-#[ignore = "requires stub-canopy HTTP server (not yet built — see module docstring)"]
-#[tokio::test]
-async fn worklist_provisions_namespace_and_job() {
-	let client = helpers::make_client().await;
-
-	// The stub returns a fixed WorklistEntry named "int-test" with a canned
-	// snapshot id. pgro's syncer should discover it on the next tick and
-	// create a labelled Namespace.
-	let ns = timeout(
-		NAMESPACE_TIMEOUT,
-		helpers::wait_for_canopy_namespace(&client),
-	)
+/// The reports pgro has made for the declaration `replica`, once there is one.
+async fn wait_for_report(replica: Uuid) -> Recorded {
+	timeout(LONG_PHASE_TIMEOUT, async {
+		loop {
+			let report = stub()
+				.requests_to("/restore-verification")
+				.into_iter()
+				.find(|report| report.body["replica_id"] == Value::String(replica.to_string()));
+			if let Some(report) = report {
+				return report;
+			}
+			sleep(POLL_INTERVAL).await;
+		}
+	})
 	.await
-	.expect("timed out waiting for canopy-managed namespace");
+	.unwrap_or_else(|_| panic!("no report for declaration {replica} within {LONG_PHASE_TIMEOUT:?}"))
+}
+
+/// The happy path: the entry becomes a namespace carrying the entry's identity,
+/// a replica restored for it, and a report of the result back to Canopy.
+#[tokio::test]
+#[ignore = "requires a running Kubernetes cluster with MinIO and kopia"]
+async fn worklist_entry_is_restored_and_reported() {
+	let client = make_client().await;
+	let (group, replica) = (Uuid::new_v4(), Uuid::new_v4());
+	let entry = verify_entry("int-test", group, replica).await;
+	let snapshot = entry.snapshot_id.clone().unwrap();
+	stub().put_entry("int-test", &entry);
+
+	let namespace = wait_for_namespace(&client, replica).await;
 	assert!(
-		ns.name_any().starts_with("int-test-"),
+		namespace.name_any().starts_with("int-test-"),
 		"unexpected namespace name: {}",
-		ns.name_any()
+		namespace.name_any()
+	);
+	let namespace_labels = namespace.labels();
+	for (key, expected) in [
+		(labels::MANAGED_BY, labels::MANAGED_BY_VALUE.to_owned()),
+		(labels::GROUP, group.to_string()),
+		(labels::TYPE, "tamanu-postgres".to_owned()),
+		(labels::INTENT, "verify".to_owned()),
+	] {
+		assert_eq!(
+			namespace_labels.get(key),
+			Some(&expected),
+			"label {key} on the namespace"
+		);
+	}
+
+	let report = wait_for_report(replica).await;
+	assert_eq!(report.body["outcome"], "success", "report: {}", report.body);
+	assert_eq!(report.body["snapshot_id"], snapshot.as_str());
+
+	let credentials = stub().requests_to("/restore-credentials");
+	assert!(
+		credentials
+			.iter()
+			.any(|request| request.body["group"] == group.to_string().as_str()),
+		"credentials were never requested for the group: {credentials:?}"
 	);
 
-	let labels = ns.labels();
-	assert_eq!(
-		labels.get("pgro.bes.au/managed-by").map(String::as_str),
-		Some("pgro-canopy"),
-	);
-	assert!(labels.contains_key("pgro.bes.au/declaration-id"));
-	assert!(labels.contains_key("pgro.bes.au/group"));
-	assert!(labels.contains_key("pgro.bes.au/server"));
-	assert_eq!(
-		labels.get("pgro.bes.au/type").map(String::as_str),
-		Some("tamanu-postgres"),
-	);
-
-	let annos = ns.annotations();
-	assert_eq!(
-		annos.get("pgro.bes.au/restore-state").map(String::as_str),
-		Some("pending"),
-		"restore-state should start at pending; got {:?}",
-		annos.get("pgro.bes.au/restore-state"),
-	);
-	assert!(
-		annos.contains_key("pgro.bes.au/desired-snapshot-id"),
-		"desired-snapshot-id should be set from the worklist entry"
-	);
-
-	// The syncer should then create the restore Job in that namespace.
-	let job = timeout(
-		JOB_TIMEOUT,
-		helpers::wait_for_restore_job(&client, &ns.name_any()),
-	)
-	.await
-	.expect("timed out waiting for canopy-restore Job");
-	let spec = job
-		.spec
-		.as_ref()
-		.and_then(|s| s.template.spec.as_ref())
-		.expect("job pod spec missing");
-	let container_names: Vec<_> = spec.containers.iter().map(|c| c.name.as_str()).collect();
-	assert!(
-		container_names.contains(&"restore"),
-		"expected kopia restore container, got {container_names:?}",
-	);
-	assert!(
-		container_names.contains(&"canopy-proxy"),
-		"expected canopy-proxy sidecar, got {container_names:?}",
-	);
+	stub().remove_entry("int-test");
 }
 
-/// Grant-absent: stub returns 403 on `/restore-credentials`. pgro should
-/// surface a clear failure on the namespace annotation and not crash-loop.
-#[ignore = "requires stub-canopy HTTP server (not yet built — see module docstring)"]
+/// Where Canopy refuses credentials for the group, nothing is restored and pgro
+/// carries on rather than retrying into a crash loop.
 #[tokio::test]
-async fn missing_grant_surfaces_clearly() {
-	let client = helpers::make_client().await;
-	// The stub's `/restore-credentials?scenario=denied` variant returns 403;
-	// wired via a per-worklist-entry flag in the fixture ConfigMap.
-	// TODO(canopy-integration): once the fixture supports the `scenario` knob,
-	// assert that:
-	// - the namespace exists with restore-state != "active" after 60s;
-	// - a Warning event has been emitted on the namespace;
-	// - the operator's restore-Job creation was not retried into a crash loop
-	//   (Job count in the namespace <= 1).
-	let ns_api: Api<Namespace> = Api::all(client.clone());
-	let list = ns_api
-		.list(&ListParams::default().labels("pgro.bes.au/managed-by=pgro-canopy"))
-		.await;
-	assert!(
-		list.is_ok(),
-		"namespace list must succeed even under grant-denied"
+#[ignore = "requires a running Kubernetes cluster with MinIO and kopia"]
+async fn refused_credentials_start_no_restore() {
+	let client = make_client().await;
+	let (group, replica) = (Uuid::new_v4(), Uuid::new_v4());
+	stub().deny_credentials(group);
+	stub().put_entry(
+		"int-denied",
+		&verify_entry("int-denied", group, replica).await,
 	);
-	let _keep_time_import: Option<Time> = None;
-}
 
-/// Verification report emitted after a successful restore lands in the stub.
-#[ignore = "requires stub-canopy HTTP server (not yet built — see module docstring)"]
-#[tokio::test]
-async fn verification_report_arrives_after_success() {
-	let client = helpers::make_client().await;
-	// TODO(canopy-integration): once the stub-canopy Deployment exposes
-	// /tests/reports, assert that a report arrives within the timeout for
-	// the successful namespace and carries the expected snapshot_id / outcome.
-	let _initial = helpers::stub_report_count(&client).await;
-	// placeholder — this test needs the stub-canopy fixture to be complete.
+	let namespace = wait_for_namespace(&client, replica).await;
+	sleep(Duration::from_secs(30)).await;
+
+	let replicas: Api<PostgresPhysicalReplica> =
+		Api::namespaced(client.clone(), &namespace.name_any());
+	let made = replicas.list(&ListParams::default()).await.unwrap().items;
+	assert!(
+		made.iter().all(|replica| {
+			replica
+				.status
+				.as_ref()
+				.and_then(|status| status.phase.as_ref())
+				!= Some(&ReplicaPhase::Ready)
+		}),
+		"a replica was restored without credentials: {made:?}"
+	);
+	assert!(
+		stub()
+			.requests_to("/restore-verification")
+			.iter()
+			.all(|report| report.body["replica_id"] != replica.to_string().as_str()),
+		"a report was made for a declaration that could not be restored"
+	);
+
+	stub().remove_entry("int-denied");
 }

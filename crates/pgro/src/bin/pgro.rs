@@ -285,6 +285,8 @@ async fn main() -> anyhow::Result<()> {
 	let metrics_addr =
 		std::env::var("METRICS_ADDR").unwrap_or_else(|_| DEFAULT_METRICS_ADDR.to_string());
 
+	let canopy_client = load_canopy_client()?;
+
 	let client = Client::try_default().await?;
 
 	pgro::crd_install::ensure_crds(&client).await?;
@@ -338,6 +340,7 @@ async fn main() -> anyhow::Result<()> {
 
 	let mut ctx = Context::new(
 		client.clone(),
+		canopy_client,
 		max_concurrent_restores,
 		kopia_image,
 		use_port_forward,
@@ -360,10 +363,6 @@ async fn main() -> anyhow::Result<()> {
 	}
 	*ctx.pod_placement.write().unwrap() = pod_placement;
 
-	ctx.canopy = load_canopy_client().unwrap_or_else(|err| {
-		warn!(error = %err, "canopy client not configured; running in legacy-only mode");
-		None
-	});
 	ctx.operator_namespace = namespace.clone();
 	ctx.builder_pull_secret = std::env::var("BUILDER_PULL_SECRET")
 		.ok()
@@ -391,7 +390,10 @@ async fn main() -> anyhow::Result<()> {
 			.unwrap_or(9091);
 		format!("http://{svc}.{namespace}.svc:{broker_port}")
 	} else {
-		String::new()
+		anyhow::bail!(
+			"either CANOPY_BROKER_BASE_URL or OPERATOR_SERVICE_NAME must be set so that \
+			 proxy sidecars can reach the credential broker"
+		);
 	};
 	let ctx = Arc::new(ctx);
 
@@ -457,27 +459,25 @@ async fn main() -> anyhow::Result<()> {
 	});
 
 	// Register pgro's supported intents with canopy + start the worklist
-	// syncer. Only runs when a canopy client was successfully constructed.
-	if ctx.canopy.is_some() {
-		let register_ctx = ctx.clone();
-		tokio::spawn(async move {
-			register_capabilities(register_ctx).await;
-		});
+	// syncer.
+	let register_ctx = ctx.clone();
+	tokio::spawn(async move {
+		register_capabilities(register_ctx).await;
+	});
 
-		let interval_secs = std::env::var("CANOPY_RECONCILE_INTERVAL_SECS")
-			.ok()
-			.and_then(|v| v.parse::<u64>().ok())
-			.unwrap_or(DEFAULT_CANOPY_RECONCILE_INTERVAL_SECS);
-		let syncer_ctx = ctx.clone();
-		tokio::spawn(async move {
-			let syncer = controllers::canopy::CanopyController::new(
-				syncer_ctx,
-				Duration::from_secs(interval_secs),
-			);
-			syncer.run_forever().await;
-			warn!("canopy worklist syncer exited");
-		});
-	}
+	let interval_secs = std::env::var("CANOPY_RECONCILE_INTERVAL_SECS")
+		.ok()
+		.and_then(|v| v.parse::<u64>().ok())
+		.unwrap_or(DEFAULT_CANOPY_RECONCILE_INTERVAL_SECS);
+	let syncer_ctx = ctx.clone();
+	tokio::spawn(async move {
+		let syncer = controllers::canopy::CanopyController::new(
+			syncer_ctx,
+			Duration::from_secs(interval_secs),
+		);
+		syncer.run_forever().await;
+		warn!("canopy worklist syncer exited");
+	});
 
 	// Broker HTTP server on a separate listener/port, gated by NetworkPolicy
 	// to accept only the proxy sidecars in canopy-backed Job pods.
@@ -899,11 +899,6 @@ async fn post_canopy_progress(
 			return StatusCode::NO_CONTENT;
 		}
 	};
-	let Some(client) = state.ctx.canopy.as_ref() else {
-		debug!(%namespace, %job, "canopy not configured, dropping progress sample");
-		return StatusCode::NO_CONTENT;
-	};
-
 	debug!(
 		%namespace,
 		%job,
@@ -911,7 +906,7 @@ async fn post_canopy_progress(
 		received_raw_bytes = sample.received_raw_bytes,
 		"relaying canopy progress sample"
 	);
-	if let Err(error) = client.backup_progress(&sample.to_args()).await {
+	if let Err(error) = state.ctx.canopy.backup_progress(&sample.to_args()).await {
 		debug!(%namespace, %job, %error, "posting progress to canopy failed (ignored)");
 	}
 	StatusCode::NO_CONTENT
@@ -969,14 +964,11 @@ async fn livez(State(state): State<ServerState>) -> (StatusCode, &'static str) {
 	(StatusCode::OK, "ok")
 }
 
-/// Try to build the canopy client from env config. `Ok(None)` means the
-/// integration is intentionally not configured (no `CANOPY_TAILNET_URL`); pgro
-/// runs in legacy-only mode. `Err(_)` means configuration was attempted but
-/// failed, and is logged and downgraded to `None` at the call site.
-fn load_canopy_client() -> anyhow::Result<Option<Arc<canopy::Client>>> {
-	let Ok(tailnet_url) = std::env::var("CANOPY_TAILNET_URL") else {
-		return Ok(None);
-	};
+/// Build the canopy client from env config. pgro has nothing to do without
+/// Canopy, so a missing or unusable configuration stops it at startup.
+fn load_canopy_client() -> anyhow::Result<Arc<canopy::Client>> {
+	let tailnet_url = std::env::var("CANOPY_TAILNET_URL")
+		.map_err(|_| anyhow::anyhow!("CANOPY_TAILNET_URL must be set to Canopy's tailnet URL"))?;
 	let tailnet_url = reqwest::Url::parse(&tailnet_url)
 		.map_err(|e| anyhow::anyhow!("CANOPY_TAILNET_URL is not a valid URL: {e}"))?;
 
@@ -998,16 +990,14 @@ fn load_canopy_client() -> anyhow::Result<Option<Arc<canopy::Client>>> {
 		socks5_proxy,
 		tailnet_addr,
 	})?;
-	Ok(Some(Arc::new(client)))
+	Ok(Arc::new(client))
 }
 
 /// POST `/restore-capabilities` to canopy with the intents pgro implements.
 /// Retries on transient failure with exponential-ish backoff up to ~5 min;
 /// past that, gives up and logs — the next operator restart will re-attempt.
 async fn register_capabilities(ctx: Arc<Context>) {
-	let Some(canopy) = ctx.canopy.as_ref() else {
-		return;
-	};
+	let canopy = &ctx.canopy;
 	let descriptors = intent::descriptors();
 	let intent_names: Vec<&str> = descriptors.iter().map(|d| d.intent.as_str()).collect();
 	let mut delay = Duration::from_secs(1);
@@ -1097,14 +1087,7 @@ async fn post_restore_creds(
 	State(state): State<BrokerState>,
 	axum::Json(req): axum::Json<BrokerCredsRequest>,
 ) -> (StatusCode, axum::Json<serde_json::Value>) {
-	let Some(canopy) = state.ctx.canopy.as_ref() else {
-		return (
-			StatusCode::SERVICE_UNAVAILABLE,
-			axum::Json(serde_json::json!({
-				"error": "canopy client not configured on operator",
-			})),
-		);
-	};
+	let canopy = &state.ctx.canopy;
 
 	let key = (req.group.to_string(), req.r#type.clone(), req.run_id);
 	{
@@ -1364,8 +1347,17 @@ mod tests {
 	#[tokio::test]
 	async fn router_is_constructible() {
 		let client = dummy_client();
+		let canopy = Arc::new(
+			canopy::Client::from_config(canopy::CanopyConfig {
+				tailnet_url: "http://canopy.test".parse().unwrap(),
+				socks5_proxy: String::new(),
+				tailnet_addr: None,
+			})
+			.unwrap(),
+		);
 		let ctx = Arc::new(Context::new(
 			client,
+			canopy,
 			DEFAULT_MAX_CONCURRENT_RESTORES,
 			DEFAULT_KOPIA_IMAGE.to_string(),
 			false,

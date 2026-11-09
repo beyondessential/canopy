@@ -46,12 +46,7 @@ pub async fn report(
 	outcome: RunOutcome,
 	error: Option<&str>,
 ) {
-	if replica.spec.canopy_source.is_none() {
-		return;
-	}
-	let Some(canopy) = ctx.canopy.as_ref() else {
-		return;
-	};
+	let canopy = &ctx.canopy;
 
 	// Canopy made `replica_id` required on VerificationArgs, so a report
 	// without one can no longer be constructed, and inventing one is not an

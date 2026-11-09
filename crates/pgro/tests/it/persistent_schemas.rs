@@ -22,15 +22,6 @@ async fn persistent_schemas_migration() {
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "ps-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating PostgresPhysicalReplica with persistent_schemas and readOnly: false");
 	let mut replica = build_replica(
 		replica_name,
@@ -41,11 +32,7 @@ async fn persistent_schemas_migration() {
 		},
 	);
 	replica.spec.persistent_schemas = Some(vec!["persistent_data".to_string()]);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for first restore to become Active");
 	let first_restore_name =
@@ -274,15 +261,6 @@ async fn persistent_schemas_drops_and_replaces_target_copy() {
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "ps-conflict-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	// Configure persistent_schemas with "public", which already exists in
 	// the snapshot's database. The operator should drop the target's
 	// public schema during migration and refill it from the previous
@@ -297,11 +275,7 @@ async fn persistent_schemas_drops_and_replaces_target_copy() {
 		},
 	);
 	replica.spec.persistent_schemas = Some(vec!["public".to_string()]);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for first restore to become Active");
 	let first_restore_name =
@@ -424,15 +398,6 @@ async fn persistent_schemas_skip_missing_on_source() {
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "ps-skip-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	// Configure persistent_schemas with one real schema and one that will
 	// never be created. The operator should skip the missing one.
 	println!(
@@ -450,11 +415,7 @@ async fn persistent_schemas_skip_missing_on_source() {
 		"real_schema".to_string(),
 		"nonexistent_schema".to_string(),
 	]);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for first restore to become Active");
 	let first_restore_name =
@@ -695,15 +656,6 @@ async fn persistent_schemas_all_missing_prunes_previous_restore() {
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "ps-all-missing-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	// Configure persistent_schemas with a single schema that will never be
 	// created on the source. This drives reconcile_schema_migration into the
 	// "all schemas filtered" branch.
@@ -717,11 +669,7 @@ async fn persistent_schemas_all_missing_prunes_previous_restore() {
 		},
 	);
 	replica.spec.persistent_schemas = Some(vec!["never_created".to_string()]);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for first restore to become Active");
 	let first_restore_name =

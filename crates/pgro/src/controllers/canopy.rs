@@ -128,13 +128,8 @@ impl CanopyController {
 		Self { ctx, interval }
 	}
 
-	/// Run the syncer forever with jittered ticks. Returns only if the
-	/// canopy client is not configured on `ctx` (legacy-only mode).
+	/// Run the syncer forever with jittered ticks.
 	pub async fn run_forever(&self) {
-		if self.ctx.canopy.is_none() {
-			info!("canopy client not configured; skipping worklist syncer");
-			return;
-		}
 		loop {
 			tokio::time::sleep(jittered(self.interval)).await;
 			if let Err(err) = self.tick().await {
@@ -147,10 +142,7 @@ impl CanopyController {
 	/// Namespaces, provisions CRs where missing / patches desired-snapshot
 	/// where changed / tears down orphans.
 	pub async fn tick(&self) -> Result<()> {
-		let Some(canopy) = self.ctx.canopy.as_ref() else {
-			return Ok(());
-		};
-		let entries = canopy.worklist().await?;
+		let entries = self.ctx.canopy.worklist().await?;
 		debug!(count = entries.len(), "fetched canopy worklist");
 
 		let ns_api: Api<Namespace> = Api::all(self.ctx.client.clone());
@@ -234,12 +226,10 @@ async fn reconcile_entry(ctx: &Context, ns_name: &str, entry: &WorklistEntry) ->
 	// it alongside chained STS creds; the sidecar refreshes the STS half
 	// out-of-band). Bucket/region/prefix come from the worklist entry
 	// directly.
-	let Some(canopy) = ctx.canopy.as_ref() else {
-		return Ok(());
-	};
 	// This per-tick fetch exists only to read the repo password for the creds
 	// Secret; it is not a restore run, so it carries no run_id.
-	let creds = canopy
+	let creds = ctx
+		.canopy
 		.restore_credentials(&entry.type_, entry.group_id, None)
 		.await?;
 
@@ -356,7 +346,7 @@ async fn ensure_replica_cr(
 	entry: &WorklistEntry,
 	intent: &IntentConfig,
 ) -> Result<()> {
-	let spec = intent.to_replica_spec(entry, Vec::new());
+	let spec = intent.to_replica_spec(entry);
 
 	let mut labels_map = BTreeMap::new();
 	labels_map.insert(labels::MANAGED_BY.into(), labels::MANAGED_BY_VALUE.into());

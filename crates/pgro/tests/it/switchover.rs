@@ -26,32 +26,18 @@ async fn second_restore_and_switchover() {
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 	let services: Api<Service> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "switchover-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating PostgresPhysicalReplica (no schedule, manual trigger)");
 	// A long grace period keeps the outgoing restore alive after the
 	// switchover, so its post-switchover state can be inspected before the
 	// sweep removes it. Nothing here waits on the sweep, so this costs no time.
 	let mut replica = build_replica(
 		"switchover-replica",
-		"switchover-kopia-creds",
 		ReplicaOpts {
 			switchover_grace_period: Some(TimeSpan(Span::new().seconds(120))),
 			..Default::default()
 		},
 	);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for first restore to complete");
 	wait_for_replica_phase(

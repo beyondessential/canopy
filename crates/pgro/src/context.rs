@@ -36,13 +36,11 @@ pub struct Context {
 	/// pre-existing "no placement intent at all" behaviour.
 	pub pod_placement: Arc<RwLock<PodPlacement>>,
 	pub http_client: reqwest::Client,
-	/// Canopy integration client — `None` when the operator is running in
-	/// legacy-only mode (no canopy config provided). Populated at startup
-	/// by [`crate::canopy::Client::from_config`].
-	pub canopy: Option<Arc<crate::canopy::Client>>,
-	/// Base URL the canopy-path proxy sidecar hits for STS creds, e.g.
-	/// `http://postgres-restore-operator.pgro-system.svc:9091`. Empty when
-	/// canopy is not configured.
+	/// The connection to Canopy, built at startup by
+	/// [`crate::canopy::Client::from_config`].
+	pub canopy: Arc<crate::canopy::Client>,
+	/// Base URL the canopy-proxy sidecar hits for STS creds, e.g.
+	/// `http://postgres-restore-operator.pgro-system.svc:9091`.
 	pub canopy_broker_base_url: String,
 	/// Namespace the operator runs in, where its own configuration Secrets live.
 	pub operator_namespace: String,
@@ -96,6 +94,7 @@ pub struct Context {
 impl Context {
 	pub fn new(
 		client: Client,
+		canopy: Arc<crate::canopy::Client>,
 		max_concurrent_restores: usize,
 		kopia_image: String,
 		use_port_forward: bool,
@@ -115,7 +114,7 @@ impl Context {
 			use_port_forward: Arc::new(AtomicBool::new(use_port_forward)),
 			pod_placement: Arc::new(RwLock::new(PodPlacement::default())),
 			http_client: reqwest::Client::new(),
-			canopy: None,
+			canopy,
 			canopy_broker_base_url: String::new(),
 			operator_namespace: "default".to_string(),
 			builder_pull_secret: None,

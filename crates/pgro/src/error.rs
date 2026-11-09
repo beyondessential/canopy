@@ -8,9 +8,6 @@ pub enum Error {
 	#[error("Missing namespace on resource {0}")]
 	MissingNamespace(String),
 
-	#[error("Kopia secret {secret} invalid: {reason}")]
-	InvalidKopiaSecret { secret: String, reason: String },
-
 	#[error("Kopia error: {0}")]
 	Kopia(String),
 
@@ -19,9 +16,6 @@ pub enum Error {
 
 	#[error("Invalid cron expression: {0}")]
 	InvalidCron(String),
-
-	#[error("Notification error: {0}")]
-	Notification(String),
 
 	#[error("Serialization error: {0}")]
 	Serialization(#[from] serde_json::Error),

@@ -421,6 +421,7 @@ mod tests {
 	) -> PostgresPhysicalReplica {
 		let spec = serde_json::json!({
 			"schedule": "0 */6 * * *",
+			"canopySource": { "group": "00000000-0000-0000-0000-000000000000", "type": "tamanu-postgres" },
 			"readOnly": read_only,
 			"persistentSchemas": persistent_schemas,
 			"redaction": { "manifestUrl": "https://x/m.json" },

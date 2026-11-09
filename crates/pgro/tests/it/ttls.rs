@@ -24,19 +24,9 @@ async fn minimum_ttl_prevents_premature_restore() {
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "ttl-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating PostgresPhysicalReplica with schedule and long minimum_ttl");
 	let mut replica = build_replica(
 		"ttl-replica",
-		"ttl-kopia-creds",
 		ReplicaOpts {
 			schedule: "* * * * *".into(),                       // every minute
 			minimum_ttl: Some(TimeSpan(Span::new().hours(24))), // 24 hours - won't expire during test
@@ -44,11 +34,7 @@ async fn minimum_ttl_prevents_premature_restore() {
 			..Default::default()
 		},
 	);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for first restore to complete");
 	wait_for_replica_phase(

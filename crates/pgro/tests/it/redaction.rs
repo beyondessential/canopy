@@ -42,21 +42,14 @@ async fn redaction_applies_masks_to_restored_data() {
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), NS);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), NS);
 
-	println!("--- creating kopia secret (PG-18 bucket)");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_pg18_kopia_secret(NS, "redaction-kopia-creds"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating PostgresPhysicalReplica with redaction config");
-	let replica = build_redaction_replica(REPLICA_NAME, "redaction-kopia-creds");
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	start_replica(
+		&client,
+		NS,
+		build_redaction_replica(REPLICA_NAME),
+		"test-bucket-pg18",
+	)
+	.await;
 
 	println!("--- waiting for first restore to become Active");
 	let restore_name = wait_for_restore_phase(
@@ -257,33 +250,9 @@ async fn redaction_applies_masks_to_restored_data() {
 	println!("--- all redaction assertions passed");
 }
 
-fn build_pg18_kopia_secret(ns: &str, name: &str) -> Secret {
-	Secret {
-		metadata: ObjectMeta {
-			name: Some(name.into()),
-			namespace: Some(ns.into()),
-			..Default::default()
-		},
-		data: Some(BTreeMap::from([
-			("bucket".into(), ByteString("test-bucket-pg18".into())),
-			("region".into(), ByteString("us-east-1".into())),
-			("accessKeyId".into(), ByteString("minioadmin".into())),
-			("secretAccessKey".into(), ByteString("minioadmin".into())),
-			(
-				"repositoryPassword".into(),
-				ByteString("test-repo-password".into()),
-			),
-			("endpoint".into(), ByteString("minio.minio.svc:9000".into())),
-			("disableTls".into(), ByteString("true".into())),
-		])),
-		..Default::default()
-	}
-}
-
-fn build_redaction_replica(name: &str, secret_ref: &str) -> PostgresPhysicalReplica {
-	let mut replica = build_replica(
+fn build_redaction_replica(name: &str) -> PostgresPhysicalReplica {
+	build_replica(
 		name,
-		secret_ref,
 		ReplicaOpts {
 			redaction: Some(RedactionSpec {
 				manifest_url: MANIFEST_URL.to_string(),
@@ -295,9 +264,7 @@ fn build_redaction_replica(name: &str, secret_ref: &str) -> PostgresPhysicalRepl
 			}),
 			..Default::default()
 		},
-	);
-	replica.metadata.namespace = Some(NS.into());
-	replica
+	)
 }
 
 async fn query_one_value(ns: &str, deploy: &str, sql: &str) -> String {

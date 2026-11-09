@@ -18,10 +18,6 @@ pub struct Metrics {
 	pub restores_completed_total: IntCounter,
 	pub restores_failed_total: IntCounter,
 	pub switchovers_total: IntCounter,
-
-	// Notification metrics
-	pub notifications_sent_total: IntCounterVec,
-	pub notifications_failed_total: IntCounterVec,
 }
 
 impl Metrics {
@@ -88,24 +84,6 @@ impl Metrics {
 		)
 		.unwrap();
 
-		let notifications_sent_total = IntCounterVec::new(
-			Opts::new(
-				"postgres_restore_notifications_sent_total",
-				"Total notifications sent",
-			),
-			&["name", "event"],
-		)
-		.unwrap();
-
-		let notifications_failed_total = IntCounterVec::new(
-			Opts::new(
-				"postgres_restore_notifications_failed_total",
-				"Total notifications that failed",
-			),
-			&["name", "event"],
-		)
-		.unwrap();
-
 		registry
 			.register(Box::new(reconciliations_total.clone()))
 			.unwrap();
@@ -131,12 +109,6 @@ impl Metrics {
 		registry
 			.register(Box::new(switchovers_total.clone()))
 			.unwrap();
-		registry
-			.register(Box::new(notifications_sent_total.clone()))
-			.unwrap();
-		registry
-			.register(Box::new(notifications_failed_total.clone()))
-			.unwrap();
 
 		Self {
 			registry,
@@ -149,8 +121,6 @@ impl Metrics {
 			restores_completed_total,
 			restores_failed_total,
 			switchovers_total,
-			notifications_sent_total,
-			notifications_failed_total,
 		}
 	}
 }

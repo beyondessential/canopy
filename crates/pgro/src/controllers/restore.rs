@@ -309,9 +309,9 @@ async fn fail_restore(
 		warn!(replica = replica_name, error = %e, "failed to publish RestoreFailed event");
 	}
 
-	// Canopy verification (signal 3, failure) — no-op unless the replica
-	// has spec.canopy_source. The caller passes a short reason so
-	// operators see it on canopy's UI without having to trawl k8s events.
+	// Canopy verification (signal 3, failure). The caller passes a short
+	// reason so operators see it on canopy's UI without having to trawl k8s
+	// events.
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(ctx.client.clone(), namespace);
 	if let (Ok(restore), Ok(replica)) = (restores.get(name).await, replicas.get(replica_name).await)
 	{
@@ -508,49 +508,39 @@ async fn reconcile_restoring(
 		None => {
 			info!(restore = name, job = job_name, "creating restore job");
 
-			// Look up the parent replica to get the kopia secret ref
+			// Look up the parent replica for its Canopy source
 			let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), namespace);
 			let replica = replicas.get(replica_name).await?;
 
 			// Mint (or reuse) the canopy run-uuid for this restore run before
 			// creating the Job, so the sidecar's credential requests and the
 			// eventual verification report carry the same id and canopy can
-			// correlate them. Only canopy-backed restores are a "run"; the
-			// legacy kopia path has no canopy report. Persist it to status
-			// first so it survives a crash between here and Job creation.
-			let run_id = if replica.spec.canopy_source.is_some() {
-				let id = match restore.status.as_ref().and_then(|s| s.run_id.clone()) {
-					Some(existing) => existing,
-					None => {
-						let minted = uuid::Uuid::new_v4().to_string();
-						update_restore_status(
-							client,
-							namespace,
-							name,
-							serde_json::json!({ "runId": minted }),
-						)
-						.await?;
-						minted
-					}
-				};
-				Some(id)
-			} else {
-				None
+			// correlate them. Persist it to status first so it survives a
+			// crash between here and Job creation.
+			let run_id = match restore.status.as_ref().and_then(|s| s.run_id.clone()) {
+				Some(existing) => existing,
+				None => {
+					let minted = uuid::Uuid::new_v4().to_string();
+					update_restore_status(
+						client,
+						namespace,
+						name,
+						serde_json::json!({ "runId": minted }),
+					)
+					.await?;
+					minted
+				}
 			};
 
 			let cache_pressure_url = ctx.cache_pressure_callback_url(namespace, name);
 			let stats_callback_url = ctx.canopy_stats_callback_url(namespace, &job_name);
 			let progress_callback_url = ctx.canopy_progress_callback_url(namespace, &job_name);
-			let canopy_proxy = if replica.spec.canopy_source.is_some() {
-				Some(builders::CanopyProxyArgs {
-					image: &ctx.canopy_proxy_image,
-					broker_base_url: &ctx.canopy_broker_base_url,
-					stats_callback_url: &stats_callback_url,
-					progress_callback_url: Some(&progress_callback_url),
-					run_id: run_id.as_deref(),
-				})
-			} else {
-				None
+			let canopy_proxy = builders::CanopyProxyArgs {
+				image: &ctx.canopy_proxy_image,
+				broker_base_url: &ctx.canopy_broker_base_url,
+				stats_callback_url: &stats_callback_url,
+				progress_callback_url: Some(&progress_callback_url),
+				run_id: Some(&run_id),
 			};
 			let job = build_restore_job(
 				restore,
@@ -559,7 +549,7 @@ async fn reconcile_restoring(
 				&replica,
 				&ctx.kopia_image(),
 				&cache_pressure_url,
-				canopy_proxy.as_ref(),
+				&canopy_proxy,
 				&ctx.pod_placement(),
 			)?;
 			jobs.create(&PostParams::default(), &job).await?

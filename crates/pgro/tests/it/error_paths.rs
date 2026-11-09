@@ -24,21 +24,9 @@ async fn restore_fails_for_non_postgres_data() {
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
 	println!("--- creating kopia secret pointing to non-postgres bucket");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "non-pg-kopia-creds", "non-postgres-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating PostgresPhysicalReplica");
-	let mut replica = build_replica("non-pg-replica", "non-pg-kopia-creds", Default::default());
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let mut replica = build_replica("non-pg-replica", Default::default());
+	let replica = start_replica(&client, ns, replica, "non-postgres-bucket").await;
 
 	println!("--- waiting for replica to start restoring");
 	wait_for_replica_phase(
@@ -103,28 +91,19 @@ async fn snapshot_job_fails_for_wrong_bucket() {
 	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret pointing to non-existent bucket");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "wrong-bucket-creds", "bucket-that-does-not-exist"),
-		)
-		.await
-		.expect("failed to create secret");
+	println!("--- creating PostgresPhysicalReplica whose repository bucket does not exist");
+	let replica = build_replica("wrong-bucket-replica", Default::default());
+	let snapshot = snapshot_id_for("test-bucket").await;
+	let replica = start_replica_at(
+		&client,
+		ns,
+		replica,
+		"bucket-that-does-not-exist",
+		&snapshot,
+	)
+	.await;
 
-	println!("--- creating PostgresPhysicalReplica");
-	let mut replica = build_replica(
-		"wrong-bucket-replica",
-		"wrong-bucket-creds",
-		Default::default(),
-	);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
-
-	// The kopia secret is structurally valid, so the condition should be True
+	// The credentials Secret is structurally valid, so the condition should be True
 	println!("--- waiting for KopiaSecretValid=True condition");
 	wait_for_replica_condition(
 		&client,

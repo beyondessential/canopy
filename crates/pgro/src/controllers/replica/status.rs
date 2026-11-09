@@ -1,19 +1,11 @@
 use jiff::Timestamp;
-use k8s_openapi::{
-	api::core::v1::Secret,
-	apimachinery::pkg::apis::meta::v1::{Condition, Time},
-};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{Condition, Time};
 use kube::{
 	Api, Client, ResourceExt,
 	api::{Patch, PatchParams},
 };
-use tracing::warn;
 
-use crate::{
-	error::Result,
-	notifications::{self, ConnectionInfoPayload, NotificationPayload, ReplicaRef, RestoreRef},
-	types::*,
-};
+use crate::{error::Result, types::*};
 
 impl PostgresPhysicalReplica {
 	/// Atomically update `nextScheduledRestore` and `scheduleInputHash` in a
@@ -191,101 +183,6 @@ impl PostgresPhysicalReplica {
 			)
 			.await?;
 		Ok(())
-	}
-
-	pub async fn send_notifications(
-		&self,
-		client: &Client,
-		http_client: &reqwest::Client,
-		restore: &PostgresPhysicalRestore,
-		metrics: &crate::metrics::Metrics,
-	) {
-		let replica_name = self.name_any();
-
-		let mut statuses: Vec<NotificationStatus> = Vec::new();
-
-		for notif_config in &self.spec.notifications {
-			// Resolve password if includePassword is true
-			let password = if notif_config.include_password() {
-				let secrets: Api<Secret> = Api::namespaced(client.clone(), &self.ns());
-				secrets
-					.get(&self.creds_secret_name())
-					.await
-					.ok()
-					.and_then(|s| s.data)
-					.and_then(|d| d.get("password").cloned())
-					.map(|b| String::from_utf8(b.0).unwrap_or_default())
-			} else {
-				None
-			};
-
-			let payload = NotificationPayload {
-				timestamp: Timestamp::now(),
-				replica: ReplicaRef {
-					name: replica_name.clone(),
-					namespace: self.ns(),
-				},
-				restore: RestoreRef {
-					name: restore.name_any(),
-					snapshot: restore.spec.snapshot.clone(),
-					postgres_version: restore
-						.status
-						.as_ref()
-						.and_then(|s| s.postgres_version.clone())
-						.unwrap_or_default(),
-				},
-				connection_info: ConnectionInfoPayload::from_connection_info(
-					&self.conn_info(),
-					password,
-				),
-			};
-
-			let status = notifications::send_notification(
-				client,
-				http_client,
-				&self.ns(),
-				notif_config,
-				&payload,
-			)
-			.await;
-
-			if status.success {
-				metrics
-					.notifications_sent_total
-					.with_label_values(&[notif_config.name()])
-					.inc();
-			} else {
-				metrics
-					.notifications_failed_total
-					.with_label_values(&[notif_config.name()])
-					.inc();
-			}
-
-			statuses.push(status);
-		}
-
-		if !statuses.is_empty() {
-			let replicas: Api<PostgresPhysicalReplica> =
-				Api::namespaced(client.clone(), &self.ns());
-			let patch = serde_json::json!({
-				"status": {
-					"notifications": statuses,
-				}
-			});
-			if let Err(e) = replicas
-				.patch_status(
-					self.metadata
-						.name
-						.as_deref()
-						.expect("cannot be called on new resource"),
-					&PatchParams::apply("postgres-restore-operator"),
-					&Patch::Merge(&patch),
-				)
-				.await
-			{
-				warn!(replica = replica_name, error = %e, "failed to update notification status");
-			}
-		}
 	}
 }
 

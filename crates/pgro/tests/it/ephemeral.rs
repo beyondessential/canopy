@@ -21,32 +21,18 @@ async fn ephemeral_replica_tears_down_after_verify() {
 	let secrets: Api<k8s_openapi::api::core::v1::Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "ephemeral-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating ephemeral PostgresPhysicalReplica");
 	// Long schedule so the only restore we observe is the initial one; after
 	// teardown it must NOT restore again within the test window.
 	let mut replica = build_replica(
 		"ephemeral-replica",
-		"ephemeral-kopia-creds",
 		ReplicaOpts {
 			schedule: "0 0 1 1 *".into(), // once a year
 			ephemeral: true,
 			..Default::default()
 		},
 	);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	// Don't wait for the `Ready` phase: on an ephemeral replica it's
 	// transient — the switchover sets Ready and the very next reconcile

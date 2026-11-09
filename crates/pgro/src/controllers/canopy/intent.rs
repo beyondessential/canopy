@@ -620,11 +620,7 @@ impl IntentConfig {
 	/// replica, merging the entry's resolved params over the intent defaults.
 	/// The syncer patches the CR with this spec on Provision / re-asserts it
 	/// on subsequent ticks so drift from manual edits is self-healing.
-	pub fn to_replica_spec(
-		&self,
-		entry: &WorklistEntry,
-		notifications: Vec<crate::types::NotificationConfig>,
-	) -> PostgresPhysicalReplicaSpec {
+	pub fn to_replica_spec(&self, entry: &WorklistEntry) -> PostgresPhysicalReplicaSpec {
 		let p = &entry.params;
 
 		let minimum_ttl = param_i64(p, params::MINIMUM_TTL)
@@ -690,16 +686,13 @@ impl IntentConfig {
 			.or(self.deployment_ready_timeout);
 
 		PostgresPhysicalReplicaSpec {
-			kopia_secret_ref: None,
-			canopy_source: Some(CanopySource {
+			canopy_source: CanopySource {
 				group: entry.group_id.to_string(),
 				r#type: entry.type_.to_string(),
-			}),
-			snapshot_filter: None,
-			// Long cadence — the actual restore trigger on the canopy path is
-			// a change to `status.canopyDesiredSnapshotId` written by the
-			// worklist syncer. The cron is a belt-and-braces fallback (e.g.
-			// missed status watch).
+			},
+			// Long cadence — the actual restore trigger is a change to
+			// `status.canopyDesiredSnapshotId` written by the worklist
+			// syncer. The cron is a fallback (e.g. missed status watch).
 			schedule: "H * * * *".to_string(),
 			schedule_jitter: TimeSpan(Span::new().minutes(10)),
 			minimum_ttl,
@@ -720,7 +713,6 @@ impl IntentConfig {
 			read_only: self.read_only,
 			ephemeral: self.ephemeral,
 			postgres_extra_config: None,
-			notifications,
 			persistent_schemas,
 			pre_migrate_drop_schemas,
 			pre_migrate_sql,
@@ -826,15 +818,16 @@ mod tests {
 		// intent, so nothing here matches on the intent's name.
 		let spec = config_for("upgrade")
 			.unwrap()
-			.to_replica_spec(&entry_with_target("upgrade"), vec![]);
+			.to_replica_spec(&entry_with_target("upgrade"));
 		let target = spec.migrate_to.expect("a named target migrates");
 		assert_eq!(target.version, "2.63.0");
 		assert_eq!(target.version_id, "44444444-4444-4444-4444-444444444444");
 
 		for intent in ["verify", "analytics"] {
-			let spec = config_for(intent)
-				.unwrap()
-				.to_replica_spec(&entry(intent, "site", json!({})), vec![]);
+			let spec =
+				config_for(intent)
+					.unwrap()
+					.to_replica_spec(&entry(intent, "site", json!({})));
 			assert!(
 				spec.migrate_to.is_none(),
 				"{intent} names no target, so it must not migrate"
@@ -845,14 +838,11 @@ mod tests {
 	#[test]
 	fn pre_migrate_drop_schemas_parses_on_every_migrating_intent() {
 		for intent in ["analytics", "upgrade", "reporting-schema"] {
-			let spec = config_for(intent).unwrap().to_replica_spec(
-				&entry(
-					intent,
-					"site",
-					json!({ "pre_migrate_drop_schemas": "reporting, dbt" }),
-				),
-				vec![],
-			);
+			let spec = config_for(intent).unwrap().to_replica_spec(&entry(
+				intent,
+				"site",
+				json!({ "pre_migrate_drop_schemas": "reporting, dbt" }),
+			));
 			assert_eq!(
 				spec.pre_migrate_drop_schemas.as_deref(),
 				Some(["reporting".to_string(), "dbt".to_string()].as_slice()),
@@ -863,31 +853,31 @@ mod tests {
 
 	#[test]
 	fn pre_migrate_drop_schemas_is_unset_when_absent() {
-		let spec = config_for("analytics")
-			.unwrap()
-			.to_replica_spec(&entry("analytics", "site", json!({})), vec![]);
+		let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+			"analytics",
+			"site",
+			json!({}),
+		));
 		assert!(spec.pre_migrate_drop_schemas.is_none());
 	}
 
 	#[test]
 	fn pre_migrate_sql_reaches_the_replica_spec() {
-		let spec = config_for("upgrade").unwrap().to_replica_spec(
-			&entry(
-				"upgrade",
-				"site",
-				json!({ "pre_migrate_sql": " SELECT 1; " }),
-			),
-			vec![],
-		);
+		let spec = config_for("upgrade").unwrap().to_replica_spec(&entry(
+			"upgrade",
+			"site",
+			json!({ "pre_migrate_sql": " SELECT 1; " }),
+		));
 		assert_eq!(spec.pre_migrate_sql.as_deref(), Some("SELECT 1;"));
 	}
 
 	#[test]
 	fn empty_pre_migrate_sql_runs_nothing() {
-		let spec = config_for("upgrade").unwrap().to_replica_spec(
-			&entry("upgrade", "site", json!({ "pre_migrate_sql": "  " })),
-			vec![],
-		);
+		let spec = config_for("upgrade").unwrap().to_replica_spec(&entry(
+			"upgrade",
+			"site",
+			json!({ "pre_migrate_sql": "  " }),
+		));
 		assert!(spec.pre_migrate_sql.is_none());
 	}
 
@@ -913,14 +903,11 @@ mod tests {
 	#[test]
 	fn builder_image_param_reaches_the_replica_spec() {
 		let cfg = config_for("reporting-schema").expect("reporting-schema is a supported intent");
-		let spec = cfg.to_replica_spec(
-			&entry(
-				"reporting-schema",
-				"site",
-				json!({ "builder_image": "ghcr.io/beyondessential/tamanu-dbt:1" }),
-			),
-			vec![],
-		);
+		let spec = cfg.to_replica_spec(&entry(
+			"reporting-schema",
+			"site",
+			json!({ "builder_image": "ghcr.io/beyondessential/tamanu-dbt:1" }),
+		));
 		assert_eq!(
 			spec.builder_image.as_deref(),
 			Some("ghcr.io/beyondessential/tamanu-dbt:1")
@@ -931,14 +918,11 @@ mod tests {
 	fn a_blank_builder_image_builds_nothing() {
 		let cfg = config_for("reporting-schema").expect("reporting-schema is a supported intent");
 		for value in ["", "   "] {
-			let spec = cfg.to_replica_spec(
-				&entry(
-					"reporting-schema",
-					"site",
-					json!({ "builder_image": value }),
-				),
-				vec![],
-			);
+			let spec = cfg.to_replica_spec(&entry(
+				"reporting-schema",
+				"site",
+				json!({ "builder_image": value }),
+			));
 			assert!(
 				spec.builder_image.is_none(),
 				"a blank image leaves the replica building nothing, not building with an empty image"
@@ -960,10 +944,11 @@ mod tests {
 		// The operator-chosen version turns an analytics replica into a
 		// persistent, upgraded query replica. It carries no canopy version id —
 		// analytics migrations aren't reported — so the id is built empty.
-		let spec = config_for("analytics").unwrap().to_replica_spec(
-			&entry("analytics", "site", json!({ "migrate_to": "2.41.0" })),
-			vec![],
-		);
+		let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+			"analytics",
+			"site",
+			json!({ "migrate_to": "2.41.0" }),
+		));
 		let target = spec
 			.migrate_to
 			.expect("migrate_to param names a target to migrate to");
@@ -977,10 +962,11 @@ mod tests {
 	#[test]
 	fn blank_migrate_to_param_leaves_the_replica_unmigrated() {
 		for value in [json!(""), json!("  "), Value::Null] {
-			let spec = config_for("analytics").unwrap().to_replica_spec(
-				&entry("analytics", "site", json!({ "migrate_to": value })),
-				vec![],
-			);
+			let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+				"analytics",
+				"site",
+				json!({ "migrate_to": value }),
+			));
 			assert!(
 				spec.migrate_to.is_none(),
 				"{value:?} must leave the replica a plain query replica"
@@ -1227,7 +1213,7 @@ mod tests {
 	fn analytics_spec(params: Value) -> PostgresPhysicalReplicaSpec {
 		config_for("analytics")
 			.unwrap()
-			.to_replica_spec(&entry("analytics", "site", params), vec![])
+			.to_replica_spec(&entry("analytics", "site", params))
 	}
 
 	fn quantity(side: &Option<BTreeMap<String, Quantity>>, key: &str) -> Option<String> {
@@ -1332,17 +1318,20 @@ mod tests {
 	#[test]
 	fn analytics_leaves_shm_to_the_resource_derivation() {
 		assert!(config_for("analytics").unwrap().shm_size_floor.is_none());
-		let spec = config_for("analytics")
-			.unwrap()
-			.to_replica_spec(&entry("analytics", "site", json!({})), vec![]);
+		let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+			"analytics",
+			"site",
+			json!({}),
+		));
 		assert!(spec.shm_size_floor.is_none());
 	}
 
 	#[test]
 	fn verify_spec_uses_defaults_and_is_ephemeral() {
-		let spec = config_for("verify")
-			.unwrap()
-			.to_replica_spec(&entry("verify", "site", json!({})), vec![]);
+		let spec =
+			config_for("verify")
+				.unwrap()
+				.to_replica_spec(&entry("verify", "site", json!({})));
 		assert!(spec.ephemeral);
 		assert!(spec.minimum_ttl.is_none());
 		assert!(spec.persistent_schemas.is_none());
@@ -1352,9 +1341,11 @@ mod tests {
 
 	#[test]
 	fn analytics_spec_defaults_when_params_unset() {
-		let spec = config_for("analytics")
-			.unwrap()
-			.to_replica_spec(&entry("analytics", "site", json!({})), vec![]);
+		let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+			"analytics",
+			"site",
+			json!({}),
+		));
 		assert!(!spec.ephemeral);
 		// Defaults from the intent config (2h TTL, 2m grace).
 		assert!(spec.minimum_ttl.is_some());
@@ -1372,18 +1363,15 @@ mod tests {
 
 	#[test]
 	fn redaction_params_build_the_spec() {
-		let spec = config_for("analytics").unwrap().to_replica_spec(
-			&entry(
-				"analytics",
-				"site",
-				json!({
-					"redaction_manifest_url": "https://docs.example.org/v{version}/manifest.json",
-					"redaction_version_query": "SELECT value FROM local_system_facts WHERE key = 'currentVersion'",
-					"redaction_version_fallback_to_base": true,
-				}),
-			),
-			vec![],
-		);
+		let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+			"analytics",
+			"site",
+			json!({
+				"redaction_manifest_url": "https://docs.example.org/v{version}/manifest.json",
+				"redaction_version_query": "SELECT value FROM local_system_facts WHERE key = 'currentVersion'",
+				"redaction_version_fallback_to_base": true,
+			}),
+		));
 		let redaction = spec.redaction.expect("manifest URL turns redaction on");
 		assert_eq!(
 			redaction.manifest_url,
@@ -1404,18 +1392,15 @@ mod tests {
 	/// canopy sends unset text params as null or "".
 	#[test]
 	fn redaction_spec_without_a_version_query() {
-		let spec = config_for("analytics").unwrap().to_replica_spec(
-			&entry(
-				"analytics",
-				"site",
-				json!({
-					"redaction_manifest_url": "https://docs.example.org/v2.41.0/manifest.json",
-					"redaction_version_query": "",
-					"redaction_version_fallback_to_base": false,
-				}),
-			),
-			vec![],
-		);
+		let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+			"analytics",
+			"site",
+			json!({
+				"redaction_manifest_url": "https://docs.example.org/v2.41.0/manifest.json",
+				"redaction_version_query": "",
+				"redaction_version_fallback_to_base": false,
+			}),
+		));
 		let redaction = spec.redaction.expect("manifest URL turns redaction on");
 		assert!(redaction.version_query.is_none());
 		assert!(!redaction.version_fallback_to_base);
@@ -1424,14 +1409,11 @@ mod tests {
 	#[test]
 	fn blank_redaction_manifest_url_leaves_redaction_off() {
 		for url in [json!(""), json!("   "), Value::Null] {
-			let spec = config_for("analytics").unwrap().to_replica_spec(
-				&entry(
-					"analytics",
-					"site",
-					json!({ "redaction_manifest_url": url }),
-				),
-				vec![],
-			);
+			let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+				"analytics",
+				"site",
+				json!({ "redaction_manifest_url": url }),
+			));
 			assert!(
 				spec.redaction.is_none(),
 				"{url:?} must not enable redaction"
@@ -1442,18 +1424,15 @@ mod tests {
 	#[test]
 	fn analytics_dbt_via_params() {
 		// The old analytics-dbt: persistent schema + exposed + size cap.
-		let spec = config_for("analytics").unwrap().to_replica_spec(
-			&entry(
-				"analytics",
-				"example-site",
-				json!({
-					"persistent_schemas": "dbt",
-					"storage_size_maximum": 107374182400i64,
-					"expose": true,
-				}),
-			),
-			vec![],
-		);
+		let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+			"analytics",
+			"example-site",
+			json!({
+				"persistent_schemas": "dbt",
+				"storage_size_maximum": 107374182400i64,
+				"expose": true,
+			}),
+		));
 		assert_eq!(
 			spec.persistent_schemas.as_deref(),
 			Some(&["dbt".to_string()][..])
@@ -1474,14 +1453,11 @@ mod tests {
 
 	#[test]
 	fn extra_users_param_parses_into_the_list() {
-		let spec = config_for("analytics").unwrap().to_replica_spec(
-			&entry(
-				"analytics",
-				"site",
-				json!({ "extra_users": "reporting, etl ,dashboards:dbt+staging" }),
-			),
-			vec![],
-		);
+		let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+			"analytics",
+			"site",
+			json!({ "extra_users": "reporting, etl ,dashboards:dbt+staging" }),
+		));
 		assert_eq!(
 			spec.extra_users,
 			vec![
@@ -1503,28 +1479,28 @@ mod tests {
 
 	#[test]
 	fn unset_extra_users_leaves_the_list_empty() {
-		let spec = config_for("analytics")
-			.unwrap()
-			.to_replica_spec(&entry("analytics", "site", json!({})), vec![]);
+		let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+			"analytics",
+			"site",
+			json!({}),
+		));
 		assert!(spec.extra_users.is_empty());
 
-		let spec = config_for("analytics").unwrap().to_replica_spec(
-			&entry("analytics", "site", json!({ "extra_users": "  , " })),
-			vec![],
-		);
+		let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+			"analytics",
+			"site",
+			json!({ "extra_users": "  , " }),
+		));
 		assert!(spec.extra_users.is_empty());
 	}
 
 	#[test]
 	fn duration_params_map_to_seconds() {
-		let spec = config_for("analytics").unwrap().to_replica_spec(
-			&entry(
-				"analytics",
-				"site",
-				json!({ "minimum_ttl": 3600, "switchover_grace": 30 }),
-			),
-			vec![],
-		);
+		let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+			"analytics",
+			"site",
+			json!({ "minimum_ttl": 3600, "switchover_grace": 30 }),
+		));
 		let ttl = spec.minimum_ttl.expect("minimum_ttl set from param");
 		assert_eq!(ttl.0.get_seconds(), 3600);
 		assert_eq!(spec.switchover_grace_period.0.get_seconds(), 30);
@@ -1587,10 +1563,11 @@ mod tests {
 
 	#[test]
 	fn empty_persistent_schemas_param_is_treated_as_unset() {
-		let spec = config_for("analytics").unwrap().to_replica_spec(
-			&entry("analytics", "site", json!({ "persistent_schemas": "" })),
-			vec![],
-		);
+		let spec = config_for("analytics").unwrap().to_replica_spec(&entry(
+			"analytics",
+			"site",
+			json!({ "persistent_schemas": "" }),
+		));
 		assert!(spec.persistent_schemas.is_none());
 	}
 
@@ -1611,11 +1588,11 @@ mod tests {
 
 	#[test]
 	fn to_replica_spec_sets_canopy_source_from_entry() {
-		let spec = config_for("verify")
-			.unwrap()
-			.to_replica_spec(&entry("verify", "site", json!({})), vec![]);
-		assert!(spec.kopia_secret_ref.is_none());
-		let cs = spec.canopy_source.expect("canopy_source must be set");
+		let spec =
+			config_for("verify")
+				.unwrap()
+				.to_replica_spec(&entry("verify", "site", json!({})));
+		let cs = spec.canopy_source;
 		assert_eq!(cs.r#type, "tamanu-postgres");
 	}
 }

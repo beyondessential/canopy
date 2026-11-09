@@ -23,19 +23,9 @@ async fn extra_user_provisioned_without_privileges() {
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "extra-users-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating replica with extra users (readOnly: true)");
 	let mut replica = build_replica(
 		"extra-users-replica",
-		"extra-users-kopia-creds",
 		ReplicaOpts {
 			read_only: true,
 			extra_users: vec![
@@ -51,11 +41,7 @@ async fn extra_user_provisioned_without_privileges() {
 			..Default::default()
 		},
 	);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for restore Active and replica Ready");
 	let restore_name = wait_for_restore_phase(

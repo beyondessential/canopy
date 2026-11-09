@@ -19,9 +19,7 @@ use tracing::warn;
 
 use super::restore_owner_reference;
 use crate::{
-	controllers::{
-		READY_FOR_TRAFFIC_LABEL, env_from_secret, env_from_secret_optional, kopia_writable_env,
-	},
+	controllers::{READY_FOR_TRAFFIC_LABEL, env_from_secret, kopia_writable_env},
 	error::{Error, Result},
 	kopia::KopiaSource,
 	placement::PodPlacement,
@@ -42,7 +40,7 @@ pub struct ExtraUser {
 	pub schemas: Vec<String>,
 }
 
-/// Extra inputs the canopy path needs on top of the legacy args.
+/// What the canopy-proxy sidecar on a kopia Job needs from the operator.
 pub struct CanopyProxyArgs<'a> {
 	/// Image of the canopy-proxy sidecar (same image as the operator; the
 	/// container runs the `canopy-proxy` binary instead of `operator`).
@@ -550,6 +548,98 @@ pub fn build_kopia_cache_pvc(
 	}
 }
 
+/// The in-memory volume the canopy-proxy sidecar shares with the main
+/// container, through which it publishes the loopback port it bound.
+pub fn proxy_shared_volume() -> Volume {
+	Volume {
+		name: "proxy-shared".to_string(),
+		empty_dir: Some(EmptyDirVolumeSource {
+			medium: Some("Memory".to_string()),
+			..Default::default()
+		}),
+		..Default::default()
+	}
+}
+
+/// The canopy-proxy sidecar, run as a native sidecar (an init container with
+/// `restartPolicy: Always`) so that when the main container exits the kubelet
+/// SIGTERMs the proxy and the Pod completes on the main container's exit
+/// code. A plain sidecar container would keep the Pod Running forever and the
+/// Job would never succeed.
+pub fn canopy_proxy_sidecar(source: &KopiaSource, proxy: &CanopyProxyArgs<'_>) -> Container {
+	let mut env = vec![
+		EnvVar {
+			name: "PGRO_BROKER_URL".to_string(),
+			value: Some(proxy.broker_base_url.to_string()),
+			..Default::default()
+		},
+		EnvVar {
+			name: "PGRO_GROUP".to_string(),
+			value: Some(source.group.clone()),
+			..Default::default()
+		},
+		EnvVar {
+			name: "PGRO_TYPE".to_string(),
+			value: Some(source.backup_type.clone()),
+			..Default::default()
+		},
+		// Region comes from the canopy-creds Secret the syncer materialises
+		// alongside the Job; the sidecar signs S3 requests for it before
+		// forwarding upstream.
+		crate::controllers::jobs::env_from_secret_name(
+			"PGRO_REGION",
+			&source.secret_name,
+			"region",
+		),
+		EnvVar {
+			name: "PGRO_STATS_CALLBACK_URL".to_string(),
+			value: Some(proxy.stats_callback_url.to_string()),
+			..Default::default()
+		},
+	];
+	if let Some(run_id) = proxy.run_id {
+		env.push(EnvVar {
+			name: "PGRO_RUN_ID".to_string(),
+			value: Some(run_id.to_string()),
+			..Default::default()
+		});
+	}
+	if let Some(url) = proxy.progress_callback_url {
+		env.push(EnvVar {
+			name: "PGRO_PROGRESS_CALLBACK_URL".to_string(),
+			value: Some(url.to_string()),
+			..Default::default()
+		});
+	}
+
+	Container {
+		name: "canopy-proxy".to_string(),
+		image: Some(proxy.image.to_string()),
+		restart_policy: Some("Always".to_string()),
+		// Same image as the operator; run the `canopy-proxy` binary instead
+		// of the default `operator` entrypoint.
+		command: Some(vec!["canopy-proxy".to_string()]),
+		env: Some(env),
+		volume_mounts: Some(vec![VolumeMount {
+			name: "proxy-shared".to_string(),
+			mount_path: "/var/run/pgro".to_string(),
+			..Default::default()
+		}]),
+		resources: Some(ResourceRequirements {
+			requests: Some(BTreeMap::from([
+				("cpu".to_string(), Quantity("50m".to_string())),
+				("memory".to_string(), Quantity("64Mi".to_string())),
+			])),
+			limits: Some(BTreeMap::from([
+				("cpu".to_string(), Quantity("500m".to_string())),
+				("memory".to_string(), Quantity("256Mi".to_string())),
+			])),
+			..Default::default()
+		}),
+		..Default::default()
+	}
+}
+
 #[expect(
 	clippy::too_many_arguments,
 	reason = "internal builder with tightly-coupled params"
@@ -561,22 +651,20 @@ pub fn build_restore_job(
 	replica: &PostgresPhysicalReplica,
 	kopia_image: &str,
 	cache_pressure_callback_url: &str,
-	canopy_proxy: Option<&CanopyProxyArgs<'_>>,
+	proxy: &CanopyProxyArgs<'_>,
 	placement: &PodPlacement,
 ) -> Result<Job> {
 	let source = replica.kopia_source();
 	let kopia_secret = SecretReference {
-		name: Some(source.secret_name().to_string()),
+		name: Some(source.secret_name.clone()),
 		namespace: None,
 	};
 	let pvc_name = format!("{}-data", restore.name_any());
 	let cache_pvc_name = kopia_cache_pvc_name(&restore.spec.replica.name);
 
-	// Canopy prelude waits for the sidecar to bind, then exports the
-	// loopback endpoint/disable-tls so the main script's connect step
-	// picks them up via ENDPOINT_ARGS. No-op on the legacy path.
-	let canopy_prelude = if source.is_canopy_proxy() {
-		r#"PORT_FILE="/var/run/pgro/proxy-port"
+	// Wait for the sidecar to bind, then export the loopback endpoint the
+	// main script connects kopia to.
+	let canopy_prelude = r#"PORT_FILE="/var/run/pgro/proxy-port"
 for _ in $(seq 1 30); do
   [ -f "$PORT_FILE" ] && break
   sleep 1
@@ -586,13 +674,9 @@ if [ ! -f "$PORT_FILE" ]; then
   exit 1
 fi
 export KOPIA_ENDPOINT="[::1]:$(cat "$PORT_FILE")"
-export KOPIA_DISABLE_TLS=true
 echo "kopia connecting via canopy proxy at ${KOPIA_ENDPOINT}"
 
-"#
-	} else {
-		""
-	};
+"#;
 
 	let restore_script_body = r#"set -e
 
@@ -618,14 +702,6 @@ if [ -n "$USAGE_PCT" ] && [ "$USAGE_PCT" -ge 85 ]; then
   fi
 fi
 
-ENDPOINT_ARGS=""
-if [ -n "$KOPIA_ENDPOINT" ]; then
-  ENDPOINT_ARGS="--endpoint=$KOPIA_ENDPOINT"
-fi
-if [ "$KOPIA_DISABLE_TLS" = "true" ]; then
-  ENDPOINT_ARGS="$ENDPOINT_ARGS --disable-tls --disable-tls-verification"
-fi
-
 # Global kopia flags applied to every invocation: rotate CLI logs so
 # they don't fill the cache PVC. Cap at 20 most-recent files and
 # 24 hours, plenty for debugging a current restore without growing
@@ -647,7 +723,9 @@ kopia $KOPIA_GLOBAL_FLAGS repository connect s3 \
   --content-cache-size-limit-mb="$KOPIA_CONTENT_CACHE_MB" \
   --metadata-cache-size-mb="$KOPIA_METADATA_CACHE_MB" \
   --metadata-cache-size-limit-mb="$KOPIA_METADATA_CACHE_MB" \
-  $ENDPOINT_ARGS
+  --endpoint="$KOPIA_ENDPOINT" \
+  --disable-tls \
+  --disable-tls-verification
 
 echo "Starting restore..."
 kopia $KOPIA_GLOBAL_FLAGS snapshot restore --parallel="$KOPIA_PARALLEL" "$SNAPSHOT_ID" /pgdata/postgres
@@ -695,11 +773,9 @@ echo -n "$VERSION" > /dev/termination-log
 
 	let restore_script = format!("{canopy_prelude}{restore_script_body}");
 
-	// Base env: shared between legacy and canopy. env_from_secret uses the
-	// same key names in both Secrets (bucket, region, accessKeyId,
-	// secretAccessKey, repositoryPassword); the canopy path just fills
-	// AWS creds with dummy values because the proxy re-signs upstream.
-	let mut env: Vec<EnvVar> = [
+	// The creds Secret holds dummy AWS keys, because the proxy re-signs
+	// upstream.
+	let env: Vec<EnvVar> = [
 		vec![
 			EnvVar {
 				name: "SNAPSHOT_ID".to_string(),
@@ -738,23 +814,6 @@ echo -n "$VERSION" > /dev/termination-log
 	]
 	.concat();
 
-	// Legacy Secrets may carry KOPIA_ENDPOINT / KOPIA_DISABLE_TLS as an
-	// escape hatch (e.g. for MinIO); canopy sets them via the shell prelude
-	// after the proxy binds, so we skip these optional keys on the canopy
-	// path to avoid a needless lookup.
-	if !source.is_canopy_proxy() {
-		env.push(env_from_secret_optional(
-			"KOPIA_ENDPOINT",
-			&kopia_secret,
-			"endpoint",
-		));
-		env.push(env_from_secret_optional(
-			"KOPIA_DISABLE_TLS",
-			&kopia_secret,
-			"disableTls",
-		));
-	}
-
 	let volume_mounts = vec![
 		VolumeMount {
 			name: "pgdata".to_string(),
@@ -766,8 +825,13 @@ echo -n "$VERSION" > /dev/termination-log
 			mount_path: "/tmp/kopia".to_string(),
 			..Default::default()
 		},
+		VolumeMount {
+			name: "proxy-shared".to_string(),
+			mount_path: "/var/run/pgro".to_string(),
+			..Default::default()
+		},
 	];
-	let mut volumes = vec![
+	let volumes = vec![
 		Volume {
 			name: "pgdata".to_string(),
 			persistent_volume_claim: Some(
@@ -788,24 +852,22 @@ echo -n "$VERSION" > /dev/termination-log
 			),
 			..Default::default()
 		},
+		proxy_shared_volume(),
 	];
 
-	let mut pod_labels = BTreeMap::from([
+	let pod_labels = BTreeMap::from([
 		(
 			"pgro.bes.au/replica".to_string(),
 			restore.spec.replica.name.clone(),
 		),
 		("pgro.bes.au/restore".to_string(), restore.name_any()),
+		(
+			PROXY_SIDECAR_POD_LABEL.0.to_string(),
+			PROXY_SIDECAR_POD_LABEL.1.to_string(),
+		),
 	]);
 
-	let mut containers = Vec::with_capacity(1);
-	// The canopy-proxy runs as a native sidecar (an init container with
-	// restartPolicy: Always) so that when the main `restore` container
-	// exits the kubelet SIGTERMs the proxy and the Pod completes on the
-	// main container's exit code. A plain sidecar container would keep the
-	// Pod Running forever and the Job would never succeed.
-	let mut init_containers: Vec<Container> = Vec::new();
-	containers.push(Container {
+	let containers = vec![Container {
 		name: "restore".to_string(),
 		image: Some(kopia_image.to_string()),
 		command: Some(vec!["/bin/sh".to_string(), "-c".to_string()]),
@@ -814,126 +876,16 @@ echo -n "$VERSION" > /dev/termination-log
 		volume_mounts: Some(volume_mounts),
 		resources: Some(restore_job_resources(&restore.spec.snapshot_size)),
 		..Default::default()
-	});
-
-	if let KopiaSource::CanopyProxy {
-		group, backup_type, ..
-	} = &source
-	{
-		let proxy = canopy_proxy.expect(
-			"build_restore_job called with canopy_source but no CanopyProxyArgs; caller must \
-			 thread proxy config from Context when replica.spec.canopy_source is set",
-		);
-
-		containers[0]
-			.volume_mounts
-			.as_mut()
-			.unwrap()
-			.push(VolumeMount {
-				name: "proxy-shared".to_string(),
-				mount_path: "/var/run/pgro".to_string(),
-				..Default::default()
-			});
-
-		init_containers.push(Container {
-			name: "canopy-proxy".to_string(),
-			image: Some(proxy.image.to_string()),
-			// Native sidecar: an init container that never exits on its
-			// own. `restartPolicy: Always` tells the kubelet to keep it
-			// running alongside the main containers and to SIGTERM it once
-			// they complete.
-			restart_policy: Some("Always".to_string()),
-			// Same image as the operator; run the `canopy-proxy` binary
-			// instead of the default `operator` entrypoint.
-			command: Some(vec!["canopy-proxy".to_string()]),
-			env: Some({
-				let mut env = vec![
-					EnvVar {
-						name: "PGRO_BROKER_URL".to_string(),
-						value: Some(proxy.broker_base_url.to_string()),
-						..Default::default()
-					},
-					EnvVar {
-						name: "PGRO_GROUP".to_string(),
-						value: Some(group.clone()),
-						..Default::default()
-					},
-					EnvVar {
-						name: "PGRO_TYPE".to_string(),
-						value: Some(backup_type.clone()),
-						..Default::default()
-					},
-					// Region comes from the canopy-creds Secret the syncer
-					// materialises alongside this Job; the sidecar signs S3
-					// requests for it before forwarding upstream.
-					crate::controllers::jobs::env_from_secret_name(
-						"PGRO_REGION",
-						source.secret_name(),
-						"region",
-					),
-					EnvVar {
-						name: "PGRO_STATS_CALLBACK_URL".to_string(),
-						value: Some(proxy.stats_callback_url.to_string()),
-						..Default::default()
-					},
-				];
-				if let Some(run_id) = proxy.run_id {
-					env.push(EnvVar {
-						name: "PGRO_RUN_ID".to_string(),
-						value: Some(run_id.to_string()),
-						..Default::default()
-					});
-				}
-				if let Some(url) = proxy.progress_callback_url {
-					env.push(EnvVar {
-						name: "PGRO_PROGRESS_CALLBACK_URL".to_string(),
-						value: Some(url.to_string()),
-						..Default::default()
-					});
-				}
-				env
-			}),
-			volume_mounts: Some(vec![VolumeMount {
-				name: "proxy-shared".to_string(),
-				mount_path: "/var/run/pgro".to_string(),
-				..Default::default()
-			}]),
-			resources: Some(ResourceRequirements {
-				requests: Some(BTreeMap::from([
-					("cpu".to_string(), Quantity("50m".to_string())),
-					("memory".to_string(), Quantity("64Mi".to_string())),
-				])),
-				limits: Some(BTreeMap::from([
-					("cpu".to_string(), Quantity("500m".to_string())),
-					("memory".to_string(), Quantity("256Mi".to_string())),
-				])),
-				..Default::default()
-			}),
-			..Default::default()
-		});
-
-		volumes.push(Volume {
-			name: "proxy-shared".to_string(),
-			empty_dir: Some(EmptyDirVolumeSource {
-				medium: Some("Memory".to_string()),
-				..Default::default()
-			}),
-			..Default::default()
-		});
-
-		pod_labels.insert(
-			PROXY_SIDECAR_POD_LABEL.0.to_string(),
-			PROXY_SIDECAR_POD_LABEL.1.to_string(),
-		);
-	}
+	}];
+	// The canopy-proxy runs as a native sidecar (an init container with
+	// restartPolicy: Always) so that when the main `restore` container
+	// exits the kubelet SIGTERMs the proxy and the Pod completes on the
+	// main container's exit code.
+	let init_containers = vec![canopy_proxy_sidecar(&source, proxy)];
 
 	// Canopy's proxy refreshes creds so long restores aren't
-	// credential-bounded, only reachability-bounded — bump to 4 h.
-	let active_deadline_seconds = if source.is_canopy_proxy() {
-		14400
-	} else {
-		7200
-	};
+	// credential-bounded, only reachability-bounded, hence 4 h.
+	let active_deadline_seconds = 14400;
 
 	let mut job = Job {
 		metadata: ObjectMeta {
@@ -960,11 +912,7 @@ echo -n "$VERSION" > /dev/termination-log
 						fs_group: Some(999),
 						..Default::default()
 					}),
-					init_containers: if init_containers.is_empty() {
-						None
-					} else {
-						Some(init_containers)
-					},
+					init_containers: Some(init_containers),
 					// Give the native sidecar time to flush its final stats
 					// on SIGTERM before the kubelet SIGKILLs it.
 					termination_grace_period_seconds: Some(30),

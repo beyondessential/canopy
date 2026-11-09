@@ -29,15 +29,6 @@ async fn migration_target_drives_a_migration_job() {
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 	let jobs: Api<Job> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "mig-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	// read_only stays true: lifting it for the migration is the operator's job,
 	// and asserting the DDL below is what proves it did.
 	println!("--- creating PostgresPhysicalReplica with a migration target");
@@ -51,11 +42,7 @@ async fn migration_target_drives_a_migration_job() {
 	replica.spec.pre_migrate_drop_schemas =
 		Some(vec!["reporting".to_string(), "public".to_string()]);
 	replica.spec.pre_migrate_sql = Some(DEFAULT_PRE_MIGRATE_SQL.to_string());
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for a restore to reach Migrating");
 	let restore_name = wait_for_restore_phase(

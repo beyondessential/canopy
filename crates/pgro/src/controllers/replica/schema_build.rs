@@ -551,41 +551,35 @@ pub(super) async fn reconcile_schema_build(
 			// registration that failed on the way to canopy is answered while
 			// the schema is still held rather than recorded against a build
 			// that produced one.
-			let (registration, registered) = match ctx.canopy.as_ref() {
-				None => (
-					Some("no canopy client to register the schema with".to_owned()),
-					Vec::new(),
+			let (registration, registered) = match ctx
+				.canopy
+				.register_reporting_schema(
+					target,
+					group,
+					crate::controllers::canopy::verification::run_id_from_status(restore),
+					sql.clone(),
+				)
+				.await
+			{
+				Ok(artifact) => (
+					None,
+					artifact.map(|id| id.to_string()).into_iter().collect(),
 				),
-				Some(canopy) => match canopy
-					.register_reporting_schema(
-						target,
-						group,
-						crate::controllers::canopy::verification::run_id_from_status(restore),
-						sql.clone(),
-					)
-					.await
-				{
-					Ok(artifact) => (
-						None,
-						artifact.map(|id| id.to_string()).into_iter().collect(),
-					),
-					Err(err) => {
-						let attempts = attempts_so_far(restore) + 1;
-						warn!(%target, %group, attempts, "registering the reporting schema failed: {err}");
+				Err(err) => {
+					let attempts = attempts_so_far(restore) + 1;
+					warn!(%target, %group, attempts, "registering the reporting schema failed: {err}");
 
-						if attempts < BUILD_ATTEMPTS {
-							keep_schema(ctx, namespace, &replica_name, &sql);
-							record_build_attempt(client, namespace, &restore_name, attempts)
-								.await?;
-							return Ok(false);
-						}
-
-						(
-							Some(format!("canopy did not take the schema in: {err}")),
-							Vec::new(),
-						)
+					if attempts < BUILD_ATTEMPTS {
+						keep_schema(ctx, namespace, &replica_name, &sql);
+						record_build_attempt(client, namespace, &restore_name, attempts).await?;
+						return Ok(false);
 					}
-				},
+
+					(
+						Some(format!("canopy did not take the schema in: {err}")),
+						Vec::new(),
+					)
+				}
 			};
 
 			let result = completed_build_result(
@@ -839,11 +833,8 @@ const UNMIGRATED: &str =
 /// The spec is what the syncer always writes; the label is a second copy of the
 /// same fact, and a CR that has lost it would otherwise build nothing.
 fn build_group(replica: &PostgresPhysicalReplica) -> Option<Uuid> {
-	replica
-		.spec
-		.canopy_source
-		.as_ref()
-		.and_then(|source| Uuid::parse_str(&source.group).ok())
+	Uuid::parse_str(&replica.spec.canopy_source.group)
+		.ok()
 		.or_else(|| {
 			replica
 				.labels()
@@ -1037,7 +1028,10 @@ mod tests {
 			"apiVersion": "pgro.bes.au/v1alpha1",
 			"kind": "PostgresPhysicalReplica",
 			"metadata": { "name": "kamaka", "namespace": "pgro", "uid": "0000-1111" },
-			"spec": { "schedule": "0 3 * * *" },
+			"spec": {
+				"schedule": "0 3 * * *",
+				"canopySource": { "group": "unassigned", "type": "tamanu-postgres" },
+			},
 		}))
 		.expect("a replica")
 	}
@@ -1555,10 +1549,10 @@ mod tests {
 
 		// The spec is what the syncer writes; a build reads it rather than the
 		// label, which a CR can have lost.
-		replica.spec.canopy_source = Some(crate::types::CanopySource {
+		replica.spec.canopy_source = crate::types::CanopySource {
 			group: group.into(),
 			r#type: "tamanu-postgres".into(),
-		});
+		};
 		assert_eq!(
 			build_to_do(&replica, &restore),
 			BuildToDo::Build {

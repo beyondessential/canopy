@@ -147,109 +147,18 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 
 	let client = &ctx.client;
 
-	// Validate the credential source: exactly one of kopiaSecretRef or
-	// canopySource must be set. Legacy replicas take the Secret path;
-	// canopy-managed ones take the proxy-sidecar path and get their
-	// creds via the operator's in-cluster broker at Job time.
-	match (&replica.spec.kopia_secret_ref, &replica.spec.canopy_source) {
-		(Some(_), Some(_)) => {
-			warn!(
-				replica = name,
-				"kopiaSecretRef and canopySource are mutually exclusive"
-			);
-			replica
-				.update_condition(
-					client,
-					"KopiaSecretValid",
-					"False",
-					"SecretRefAndCanopySource",
-					"kopiaSecretRef and canopySource are mutually exclusive; set exactly one",
-				)
-				.await?;
-			return Ok(Action::requeue(Duration::from_secs(60)));
-		}
-		(None, None) => {
-			warn!(
-				replica = name,
-				"neither kopiaSecretRef nor canopySource set"
-			);
-			replica
-				.update_condition(
-					client,
-					"KopiaSecretValid",
-					"False",
-					"NoCredentialSource",
-					"one of kopiaSecretRef or canopySource must be set",
-				)
-				.await?;
-			return Ok(Action::requeue(Duration::from_secs(60)));
-		}
-		(Some(secret_ref), None) => {
-			let secret_name = secret_ref.name.as_deref().unwrap_or_default();
-			let secrets: Api<Secret> = Api::namespaced(client.clone(), &namespace);
-			let secret = match secrets.get(secret_name).await {
-				Ok(s) => s,
-				Err(e) => {
-					warn!(
-						replica = name,
-						secret = ?secret_ref,
-						error = %e,
-						"kopia secret not found"
-					);
-					replica
-						.update_condition(
-							client,
-							"KopiaSecretValid",
-							"False",
-							"SecretNotFound",
-							&format!("Secret {secret_name} not found: {e}"),
-						)
-						.await?;
-					return Ok(Action::requeue(Duration::from_secs(60)));
-				}
-			};
-			match kopia::validate_kopia_secret(&secret) {
-				Ok(_) => {
-					replica
-						.update_condition(
-							client,
-							"KopiaSecretValid",
-							"True",
-							"SecretValid",
-							"All required keys present",
-						)
-						.await?;
-				}
-				Err(e) => {
-					warn!(replica = name, error = %e, "kopia secret invalid");
-					replica
-						.update_condition(
-							client,
-							"KopiaSecretValid",
-							"False",
-							"SecretInvalid",
-							&e.to_string(),
-						)
-						.await?;
-					return Ok(Action::requeue(Duration::from_secs(60)));
-				}
-			}
-		}
-		(None, Some(_canopy_source)) => {
-			// Nothing to pre-validate at this stage — the proxy sidecar
-			// fetches short-lived creds at Job time via the operator's
-			// broker; any auth failure surfaces there.
-			replica
-				.update_condition(
-					client,
-					"KopiaSecretValid",
-					"True",
-					"CanopySourced",
-					"canopy-managed replica; credentials issued by canopy at Job time",
-				)
-				.await?;
-		}
-	}
+	// Nothing to pre-validate: the proxy sidecar fetches short-lived creds
+	// at Job time via the operator's broker, and any auth failure surfaces
+	// there.
+	replica
+		.update_condition(
+			client,
+			"KopiaSecretValid",
+			"True",
+			"CanopySourced",
+			"canopy-managed replica; credentials issued by canopy at Job time",
+		)
+		.await?;
 
 	replica.ensure_credentials_secret(client).await?;
 
@@ -440,13 +349,7 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 			warn!(replica = name, error = %e, "failed to publish RestoreCompleted event");
 		}
 
-		// Send notifications
-		replica
-			.send_notifications(client, &ctx.http_client, switching, &ctx.metrics)
-			.await;
-
-		// Canopy verification (signal 3) — no-op unless the replica has
-		// spec.canopy_source.
+		// Canopy verification (signal 3).
 		crate::controllers::canopy::verification::report(
 			&ctx,
 			&replica,
@@ -729,10 +632,8 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 		}
 	}
 
-	// Snapshot-list runs on both paths. Canopy-sourced replicas fetch the
-	// same snapshot metadata but the result handler filters by
-	// `status.canopyDesiredSnapshotId` instead of the CR's snapshot_filter.
-	let is_canopy = replica.spec.canopy_source.is_some();
+	// The snapshot-list Job fetches the repository's snapshot metadata; the
+	// result handler picks the one named by `status.canopyDesiredSnapshotId`.
 	let snapshot_job_name = format!("{name}-snapshot-list");
 	let jobs: Api<Job> = Api::namespaced(client.clone(), &namespace);
 	let snapshot_job = jobs.get_opt(&snapshot_job_name).await?;
@@ -773,26 +674,14 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 
 				match kopia::parse_snapshot_list_output(raw) {
 					Ok(all_snapshots) => {
-						// Canopy path: canopy already picked a specific
-						// snapshot; select the metadata for that ID
-						// instead of applying snapshot_filter + "latest".
-						// Legacy path: filter by snapshot_filter, pick
-						// latest.
-						let picked = if is_canopy {
-							let desired = replica
-								.status
-								.as_ref()
-								.and_then(|s| s.canopy_desired_snapshot_id.as_deref());
-							desired
-								.and_then(|id| all_snapshots.iter().find(|s| s.id == id))
-								.cloned()
-						} else {
-							let filtered = kopia::filter_snapshots(
-								&all_snapshots,
-								replica.spec.snapshot_filter.as_ref(),
-							);
-							kopia::latest_snapshot(&filtered).cloned()
-						};
+						// Canopy already picked a specific snapshot; select
+						// the metadata for that ID.
+						let picked = replica
+							.status
+							.as_ref()
+							.and_then(|s| s.canopy_desired_snapshot_id.as_deref())
+							.and_then(|id| all_snapshots.iter().find(|s| s.id == id))
+							.cloned();
 
 						if let Some(ref snap) = picked {
 							let size = snap.total_size_bytes();
@@ -881,7 +770,7 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 									warn!(replica = name, error = %e, "failed to publish RestoreCreationBlocked event");
 								}
 							}
-						} else if is_canopy {
+						} else {
 							let desired = replica
 								.status
 								.as_ref()
@@ -903,20 +792,6 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 										 kopia snapshot list — canopy may be pointing at a \
 										 snapshot that hasn't been indexed yet"
 									),
-								)
-								.await?;
-						} else {
-							warn!(
-								replica = name,
-								"snapshot list job returned no matching snapshots"
-							);
-							replica
-								.update_condition(
-									client,
-									"SnapshotAvailable",
-									"False",
-									"NoMatchingSnapshots",
-									"Snapshot list job returned no snapshots matching the configured filter",
 								)
 								.await?;
 						}
@@ -1111,18 +986,17 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 				.as_ref()
 				.and_then(|s| s.verified_snapshot_id.clone())
 		});
-	let canopy_desired_changed = is_canopy
-		&& match (
-			replica
-				.status
-				.as_ref()
-				.and_then(|s| s.canopy_desired_snapshot_id.as_ref()),
-			effective_current_snapshot.as_deref(),
-		) {
-			(Some(desired), Some(current)) => desired != current,
-			(Some(_), None) => true,
-			_ => false,
-		} && !replica.within_minimum_ttl(now);
+	let canopy_desired_changed = match (
+		replica
+			.status
+			.as_ref()
+			.and_then(|s| s.canopy_desired_snapshot_id.as_ref()),
+		effective_current_snapshot.as_deref(),
+	) {
+		(Some(desired), Some(current)) => desired != current,
+		(Some(_), None) => true,
+		_ => false,
+	} && !replica.within_minimum_ttl(now);
 
 	let should_restore = never_restored
 		|| active_restore_deleted
@@ -1175,18 +1049,14 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 		info!(replica = name, "creating snapshot list job");
 		let callback_url = ctx.snapshot_callback_url(&namespace, &name);
 		let stats_callback_url = ctx.canopy_stats_callback_url(&namespace, &snapshot_job_name);
-		let canopy_proxy = if is_canopy {
-			Some(crate::controllers::restore::builders::CanopyProxyArgs {
-				image: &ctx.canopy_proxy_image,
-				broker_base_url: &ctx.canopy_broker_base_url,
-				stats_callback_url: &stats_callback_url,
-				// Snapshot listing is discovery, not a restore run — no run_id,
-				// and nothing long enough to be worth sampling.
-				progress_callback_url: None,
-				run_id: None,
-			})
-		} else {
-			None
+		let canopy_proxy = crate::controllers::restore::builders::CanopyProxyArgs {
+			image: &ctx.canopy_proxy_image,
+			broker_base_url: &ctx.canopy_broker_base_url,
+			stats_callback_url: &stats_callback_url,
+			// Snapshot listing is discovery, not a restore run — no run_id,
+			// and nothing long enough to be worth sampling.
+			progress_callback_url: None,
+			run_id: None,
 		};
 		let job = build_snapshot_list_job(
 			&replica,
@@ -1194,7 +1064,7 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 			&namespace,
 			&ctx.kopia_image(),
 			&callback_url,
-			canopy_proxy.as_ref(),
+			&canopy_proxy,
 			&ctx.pod_placement(),
 		)?;
 		jobs.create(&PostParams::default(), &job).await?;

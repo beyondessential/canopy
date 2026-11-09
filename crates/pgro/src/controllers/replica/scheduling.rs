@@ -322,12 +322,10 @@ mod tests {
 				pre_migrate_sql: None,
 				migrate_to: None,
 				builder_image: None,
-				kopia_secret_ref: Some(SecretReference {
-					name: Some("test-secret".into()),
-					namespace: None,
-				}),
-				canopy_source: None,
-				snapshot_filter: None,
+				canopy_source: CanopySource {
+					group: "00000000-0000-0000-0000-000000000000".into(),
+					r#type: "tamanu-postgres".into(),
+				},
 				schedule: schedule.into(),
 				schedule_jitter: TimeSpan(Span::new().seconds(0)),
 				minimum_ttl,
@@ -348,7 +346,6 @@ mod tests {
 				read_only: true,
 				ephemeral: false,
 				postgres_extra_config: None,
-				notifications: Vec::new(),
 				storage_size_maximum: k8s_openapi::apimachinery::pkg::api::resource::Quantity(
 					"2Ti".to_string(),
 				),
@@ -604,24 +601,6 @@ mod tests {
 		// TTL configured but no last_completed timestamp (first restore)
 		let ttl = TimeSpan(Span::new().hours(2));
 		let replica = make_replica("0 */6 * * *", Some(past), None, Some(ttl));
-		assert_eq!(replica.check_schedule(), ScheduleDecision::Trigger);
-	}
-
-	#[test]
-	fn check_schedule_uses_tags_for_filtering() {
-		// Verify that check_schedule works with snapshot filter tags
-		// (tags are used elsewhere but shouldn't affect scheduling)
-		let past = Timestamp::now()
-			.to_zoned(jiff::tz::TimeZone::UTC)
-			.saturating_add(Span::new().hours(-1))
-			.timestamp();
-		let mut replica = make_replica("0 */6 * * *", Some(past), None, None);
-		replica.spec.snapshot_filter = Some(SnapshotFilter {
-			tags: Some(HashMap::from([("env".into(), "prod".into())])),
-			host_pattern: None,
-			description_pattern: None,
-			path_pattern: None,
-		});
 		assert_eq!(replica.check_schedule(), ScheduleDecision::Trigger);
 	}
 }

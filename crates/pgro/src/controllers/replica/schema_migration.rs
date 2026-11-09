@@ -293,9 +293,10 @@ mod tests {
 				pre_migrate_sql: None,
 				migrate_to: None,
 				builder_image: None,
-				kopia_secret_ref: Some(Default::default()),
-				canopy_source: None,
-				snapshot_filter: None,
+				canopy_source: crate::types::CanopySource {
+					group: "00000000-0000-0000-0000-000000000000".into(),
+					r#type: "tamanu-postgres".into(),
+				},
 				schedule: "0 * * * *".into(),
 				schedule_jitter: crate::util::TimeSpan(jiff::Span::new()),
 				minimum_ttl: None,
@@ -316,7 +317,6 @@ mod tests {
 				read_only: true,
 				ephemeral: false,
 				postgres_extra_config: None,
-				notifications: vec![],
 				storage_size_maximum: k8s_openapi::apimachinery::pkg::api::resource::Quantity(
 					"2Ti".to_string(),
 				),

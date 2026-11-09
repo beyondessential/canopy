@@ -31,14 +31,6 @@ async fn locale_rewrite_is_recorded_and_reindexed() {
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
 	println!("--- creating kopia secret pointing at the non-C-locale snapshot");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "locale-kopia-creds", "locale-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating replica");
 	let mut replica = build_replica(
 		replica_name,
@@ -48,11 +40,7 @@ async fn locale_rewrite_is_recorded_and_reindexed() {
 			..Default::default()
 		},
 	);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "locale-bucket").await;
 
 	println!("--- waiting for the restore to go Active");
 	let restore_name =

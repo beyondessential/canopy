@@ -153,12 +153,10 @@ fn make_replica(
 			pre_migrate_sql: None,
 			migrate_to: None,
 			builder_image: None,
-			kopia_secret_ref: Some(SecretReference {
-				name: Some("creds".into()),
-				namespace: None,
-			}),
-			canopy_source: None,
-			snapshot_filter: None,
+			canopy_source: CanopySource {
+				group: "00000000-0000-0000-0000-000000000000".into(),
+				r#type: "tamanu-postgres".into(),
+			},
 			schedule: "0 * * * *".into(),
 			schedule_jitter: TimeSpan(jiff::Span::new()),
 			minimum_ttl: None,
@@ -179,7 +177,6 @@ fn make_replica(
 			read_only: true,
 			ephemeral: false,
 			postgres_extra_config: None,
-			notifications: vec![],
 			persistent_schemas,
 			redaction: None,
 			storage_size_maximum: k8s_openapi::apimachinery::pkg::api::resource::Quantity(
@@ -433,12 +430,10 @@ fn snapshot_list_test_replica() -> PostgresPhysicalReplica {
 			pre_migrate_sql: None,
 			migrate_to: None,
 			builder_image: None,
-			kopia_secret_ref: Some(SecretReference {
-				name: Some("creds".into()),
-				namespace: None,
-			}),
-			canopy_source: None,
-			snapshot_filter: None,
+			canopy_source: CanopySource {
+				group: "00000000-0000-0000-0000-000000000000".into(),
+				r#type: "tamanu-postgres".into(),
+			},
 			schedule: "0 * * * *".into(),
 			schedule_jitter: TimeSpan(jiff::Span::new()),
 			minimum_ttl: None,
@@ -459,7 +454,6 @@ fn snapshot_list_test_replica() -> PostgresPhysicalReplica {
 			read_only: true,
 			ephemeral: false,
 			postgres_extra_config: None,
-			notifications: vec![],
 			persistent_schemas: None,
 			redaction: None,
 			storage_size_maximum: k8s_openapi::apimachinery::pkg::api::resource::Quantity(

@@ -32,26 +32,9 @@ async fn full_restore_lifecycle() {
 	let pvcs: Api<PersistentVolumeClaim> = Api::namespaced(client.clone(), ns);
 	let deployments: Api<Deployment> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "lifecycle-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating PostgresPhysicalReplica");
-	let mut replica = build_replica(
-		"lifecycle-replica",
-		"lifecycle-kopia-creds",
-		Default::default(),
-	);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let mut replica = build_replica("lifecycle-replica", Default::default());
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for replica Restoring phase");
 	wait_for_replica_phase(
@@ -192,157 +175,6 @@ async fn full_restore_lifecycle() {
 
 #[tokio::test]
 #[ignore = "requires a running Kubernetes cluster with MinIO and kopia"]
-async fn invalid_kopia_secret_structure() {
-	let client = make_client().await;
-	let ns = "test-invalid-secret";
-
-	setup_namespace(&client, ns).await;
-	cleanup_namespace(&client, ns, &["invalid-secret-replica"]).await;
-
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
-	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
-
-	println!("--- creating kopia secret with missing required keys");
-	let invalid_secret = Secret {
-		metadata: ObjectMeta {
-			name: Some("invalid-kopia-creds".into()),
-			namespace: Some(ns.into()),
-			..Default::default()
-		},
-		data: Some(BTreeMap::from([
-			("bucket".into(), ByteString("test-bucket".into())),
-			// Missing: region, accessKeyId, secretAccessKey, repositoryPassword
-		])),
-		..Default::default()
-	};
-	secrets
-		.create(&PostParams::default(), &invalid_secret)
-		.await
-		.expect("failed to create invalid secret");
-
-	println!("--- creating PostgresPhysicalReplica");
-	let mut replica = build_replica(
-		"invalid-secret-replica",
-		"invalid-kopia-creds",
-		Default::default(),
-	);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
-
-	println!("--- waiting for KopiaSecretValid=False condition");
-	wait_for_replica_condition(
-		&client,
-		ns,
-		"invalid-secret-replica",
-		"KopiaSecretValid",
-		"False",
-		Duration::from_secs(60),
-	)
-	.await;
-
-	// Verify the condition has the right reason
-	let replica = replicas
-		.get("invalid-secret-replica")
-		.await
-		.expect("failed to get replica");
-	let status = replica.status.expect("replica has no status");
-	let cond = status
-		.conditions
-		.iter()
-		.find(|c| c.type_ == "KopiaSecretValid")
-		.expect("KopiaSecretValid condition not found");
-	assert_eq!(cond.status, "False");
-	assert_eq!(cond.reason, "SecretInvalid");
-	assert!(
-		cond.message.contains("missing key"),
-		"condition message should mention missing key, got: {}",
-		cond.message
-	);
-
-	// No restores should be created
-	let restore_count = count_restores_for_replica(&client, ns, "invalid-secret-replica").await;
-	assert_eq!(
-		restore_count, 0,
-		"no restores should be created with invalid secret"
-	);
-
-	// No snapshot-list jobs should be created
-	let jobs: Api<Job> = Api::namespaced(client.clone(), ns);
-	let job_list = jobs
-		.list(&ListParams::default().labels("pgro.bes.au/replica=invalid-secret-replica"))
-		.await
-		.expect("failed to list jobs");
-	assert!(
-		job_list.items.is_empty(),
-		"no jobs should be created with invalid secret"
-	);
-
-	println!("--- invalid secret correctly detected");
-	cleanup_namespace(&client, ns, &["invalid-secret-replica"]).await;
-}
-
-#[tokio::test]
-#[ignore = "requires a running Kubernetes cluster with MinIO and kopia"]
-async fn missing_kopia_secret_handled() {
-	let client = make_client().await;
-	let ns = "test-missing-secret";
-
-	setup_namespace(&client, ns).await;
-	cleanup_namespace(&client, ns, &["missing-secret-replica"]).await;
-
-	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
-
-	println!("--- creating PostgresPhysicalReplica referencing non-existent secret");
-	let mut replica = build_replica(
-		"missing-secret-replica",
-		"this-secret-does-not-exist",
-		Default::default(),
-	);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
-
-	println!("--- waiting for KopiaSecretValid=False condition");
-	wait_for_replica_condition(
-		&client,
-		ns,
-		"missing-secret-replica",
-		"KopiaSecretValid",
-		"False",
-		Duration::from_secs(60),
-	)
-	.await;
-
-	let replica = replicas
-		.get("missing-secret-replica")
-		.await
-		.expect("failed to get replica");
-	let status = replica.status.expect("replica has no status");
-	let cond = status
-		.conditions
-		.iter()
-		.find(|c| c.type_ == "KopiaSecretValid")
-		.expect("KopiaSecretValid condition not found");
-	assert_eq!(cond.status, "False");
-	assert_eq!(cond.reason, "SecretNotFound");
-
-	let restore_count = count_restores_for_replica(&client, ns, "missing-secret-replica").await;
-	assert_eq!(
-		restore_count, 0,
-		"no restores should be created when secret is missing"
-	);
-
-	println!("--- missing secret correctly detected");
-	cleanup_namespace(&client, ns, &["missing-secret-replica"]).await;
-}
-
-#[tokio::test]
-#[ignore = "requires a running Kubernetes cluster with MinIO and kopia"]
 async fn analytics_create_schema_read_write() {
 	let client = make_client().await;
 	let ns = "test-rw-schema";
@@ -354,29 +186,15 @@ async fn analytics_create_schema_read_write() {
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "rw-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating PostgresPhysicalReplica with readOnly: false");
 	let mut replica = build_replica(
 		"rw-replica",
-		"rw-kopia-creds",
 		ReplicaOpts {
 			read_only: false,
 			..Default::default()
 		},
 	);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for restore Active phase");
 	let restore_name =
@@ -466,29 +284,15 @@ async fn analytics_read_only_cannot_create_schema() {
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "ro-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating PostgresPhysicalReplica with readOnly: true");
 	let mut replica = build_replica(
 		"ro-replica",
-		"ro-kopia-creds",
 		ReplicaOpts {
 			read_only: true,
 			..Default::default()
 		},
 	);
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for restore Active phase");
 	let restore_name =

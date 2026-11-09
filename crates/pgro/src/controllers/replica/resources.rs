@@ -6,9 +6,9 @@ use k8s_openapi::{
 	api::{
 		batch::v1::{Job, JobSpec},
 		core::v1::{
-			Container, EmptyDirVolumeSource, EnvVar, LocalObjectReference, Pod, PodSpec,
-			PodTemplateSpec, ResourceRequirements, Secret, SecretReference, Service, ServicePort,
-			ServiceSpec, Volume, VolumeMount,
+			Container, EnvVar, LocalObjectReference, Pod, PodSpec, PodTemplateSpec,
+			ResourceRequirements, Secret, SecretReference, Service, ServicePort, ServiceSpec,
+			VolumeMount,
 		},
 	},
 	apimachinery::pkg::{api::resource::Quantity, util::intstr::IntOrString},
@@ -24,11 +24,12 @@ use tracing::{info, warn};
 use super::generate_password;
 use crate::{
 	controllers::{
-		READY_FOR_TRAFFIC_LABEL, env_from_secret, env_from_secret_optional,
-		restore::builders::{CanopyProxyArgs, PROXY_SIDECAR_POD_LABEL},
+		READY_FOR_TRAFFIC_LABEL, env_from_secret,
+		restore::builders::{
+			CanopyProxyArgs, PROXY_SIDECAR_POD_LABEL, canopy_proxy_sidecar, proxy_shared_volume,
+		},
 	},
 	error::Result,
-	kopia::KopiaSource,
 	placement::PodPlacement,
 	types::*,
 };
@@ -121,43 +122,32 @@ pub fn build_snapshot_list_job(
 	namespace: &str,
 	kopia_image: &str,
 	callback_url: &str,
-	canopy_proxy: Option<&CanopyProxyArgs<'_>>,
+	canopy_proxy: &CanopyProxyArgs<'_>,
 	placement: &PodPlacement,
 ) -> Result<Job> {
 	let source = replica.kopia_source();
 	let kopia_secret = SecretReference {
-		name: Some(source.secret_name().to_string()),
+		name: Some(source.secret_name.clone()),
 		namespace: None,
 	};
 	let replica_name = replica.name_any();
 
-	let mut env_vars = vec![
+	let env_vars = vec![
 		env_from_secret("KOPIA_BUCKET", &kopia_secret, "bucket"),
 		env_from_secret("KOPIA_REGION", &kopia_secret, "region"),
 		env_from_secret("AWS_ACCESS_KEY_ID", &kopia_secret, "accessKeyId"),
 		env_from_secret("AWS_SECRET_ACCESS_KEY", &kopia_secret, "secretAccessKey"),
 		env_from_secret("KOPIA_PASSWORD", &kopia_secret, "repositoryPassword"),
+		EnvVar {
+			name: "SNAPSHOT_CALLBACK_URL".to_string(),
+			value: Some(callback_url.to_string()),
+			..Default::default()
+		},
 	];
-	if !source.is_canopy_proxy() {
-		env_vars.push(env_from_secret_optional(
-			"KOPIA_ENDPOINT",
-			&kopia_secret,
-			"endpoint",
-		));
-		env_vars.push(env_from_secret_optional(
-			"KOPIA_DISABLE_TLS",
-			&kopia_secret,
-			"disableTls",
-		));
-	}
-	env_vars.push(EnvVar {
-		name: "SNAPSHOT_CALLBACK_URL".to_string(),
-		value: Some(callback_url.to_string()),
-		..Default::default()
-	});
 
-	let canopy_prelude = if source.is_canopy_proxy() {
-		r#"PORT_FILE="/var/run/pgro/proxy-port"
+	// Wait for the sidecar to bind, then export the loopback endpoint the
+	// main script connects kopia to.
+	let canopy_prelude = r#"PORT_FILE="/var/run/pgro/proxy-port"
 for _ in $(seq 1 30); do
   [ -f "$PORT_FILE" ] && break
   sleep 1
@@ -167,23 +157,11 @@ if [ ! -f "$PORT_FILE" ]; then
   exit 1
 fi
 export KOPIA_ENDPOINT="[::1]:$(cat "$PORT_FILE")"
-export KOPIA_DISABLE_TLS=true
 echo "kopia snapshot-list via canopy proxy at ${KOPIA_ENDPOINT}" >&2
 
-"#
-	} else {
-		""
-	};
+"#;
 
 	let script_body = r#"set -e
-
-ENDPOINT_ARGS=""
-if [ -n "$KOPIA_ENDPOINT" ]; then
-  ENDPOINT_ARGS="--endpoint=$KOPIA_ENDPOINT"
-fi
-if [ "$KOPIA_DISABLE_TLS" = "true" ]; then
-  ENDPOINT_ARGS="$ENDPOINT_ARGS --disable-tls --disable-tls-verification"
-fi
 
 # Global kopia flags: rotate CLI logs so they don't accumulate over
 # many snapshot-list invocations.
@@ -195,7 +173,9 @@ kopia $KOPIA_GLOBAL_FLAGS repository connect s3 \
   --access-key="$AWS_ACCESS_KEY_ID" \
   --secret-access-key="$AWS_SECRET_ACCESS_KEY" \
   --password="$KOPIA_PASSWORD" \
-  $ENDPOINT_ARGS \
+  --endpoint="$KOPIA_ENDPOINT" \
+  --disable-tls \
+  --disable-tls-verification \
   >&2
 
 SNAP_FILE=$(mktemp)
@@ -214,22 +194,28 @@ fi
 "#;
 	let script = format!("{canopy_prelude}{script_body}");
 
-	let mut kopia_volume_mounts: Vec<VolumeMount> = Vec::new();
-	let mut volumes: Vec<Volume> = Vec::new();
-	let mut pod_labels = BTreeMap::from([
+	let pod_labels = BTreeMap::from([
 		("pgro.bes.au/replica".to_string(), replica_name.clone()),
 		(
 			"pgro.bes.au/job-type".to_string(),
 			"snapshot-list".to_string(),
 		),
+		(
+			PROXY_SIDECAR_POD_LABEL.0.to_string(),
+			PROXY_SIDECAR_POD_LABEL.1.to_string(),
+		),
 	]);
-	let mut containers = vec![Container {
+	let containers = vec![Container {
 		name: "snapshot-list".to_string(),
 		image: Some(kopia_image.to_string()),
 		command: Some(vec!["/bin/sh".to_string(), "-c".to_string()]),
 		args: Some(vec![script]),
 		env: Some(env_vars),
-		volume_mounts: Some(kopia_volume_mounts.clone()),
+		volume_mounts: Some(vec![VolumeMount {
+			name: "proxy-shared".to_string(),
+			mount_path: "/var/run/pgro".to_string(),
+			..Default::default()
+		}]),
 		resources: Some(ResourceRequirements {
 			requests: Some(BTreeMap::from([
 				("cpu".to_string(), Quantity("50m".to_string())),
@@ -243,92 +229,8 @@ fi
 	// restartPolicy: Always) so the Pod completes once the main
 	// snapshot-list container exits; a plain sidecar container would keep
 	// the Pod Running and the Job would never succeed.
-	let mut init_containers: Vec<Container> = Vec::new();
-
-	if let KopiaSource::CanopyProxy {
-		group, backup_type, ..
-	} = &source
-	{
-		let proxy = canopy_proxy.expect(
-			"build_snapshot_list_job called with canopy_source but no CanopyProxyArgs; caller \
-			 must thread proxy config from Context when replica.spec.canopy_source is set",
-		);
-
-		kopia_volume_mounts.push(VolumeMount {
-			name: "proxy-shared".to_string(),
-			mount_path: "/var/run/pgro".to_string(),
-			..Default::default()
-		});
-		containers[0].volume_mounts = Some(kopia_volume_mounts);
-
-		init_containers.push(Container {
-			name: "canopy-proxy".to_string(),
-			image: Some(proxy.image.to_string()),
-			restart_policy: Some("Always".to_string()),
-			command: Some(vec!["canopy-proxy".to_string()]),
-			env: Some(vec![
-				EnvVar {
-					name: "PGRO_BROKER_URL".to_string(),
-					value: Some(proxy.broker_base_url.to_string()),
-					..Default::default()
-				},
-				EnvVar {
-					name: "PGRO_GROUP".to_string(),
-					value: Some(group.clone()),
-					..Default::default()
-				},
-				EnvVar {
-					name: "PGRO_TYPE".to_string(),
-					value: Some(backup_type.clone()),
-					..Default::default()
-				},
-				// Region comes from the canopy-creds Secret the syncer
-				// materialises alongside this Job; the sidecar signs S3
-				// requests for it before forwarding upstream.
-				crate::controllers::jobs::env_from_secret_name(
-					"PGRO_REGION",
-					source.secret_name(),
-					"region",
-				),
-				EnvVar {
-					name: "PGRO_STATS_CALLBACK_URL".to_string(),
-					value: Some(proxy.stats_callback_url.to_string()),
-					..Default::default()
-				},
-			]),
-			volume_mounts: Some(vec![VolumeMount {
-				name: "proxy-shared".to_string(),
-				mount_path: "/var/run/pgro".to_string(),
-				..Default::default()
-			}]),
-			resources: Some(ResourceRequirements {
-				requests: Some(BTreeMap::from([
-					("cpu".to_string(), Quantity("50m".to_string())),
-					("memory".to_string(), Quantity("64Mi".to_string())),
-				])),
-				limits: Some(BTreeMap::from([
-					("cpu".to_string(), Quantity("500m".to_string())),
-					("memory".to_string(), Quantity("256Mi".to_string())),
-				])),
-				..Default::default()
-			}),
-			..Default::default()
-		});
-
-		volumes.push(Volume {
-			name: "proxy-shared".to_string(),
-			empty_dir: Some(EmptyDirVolumeSource {
-				medium: Some("Memory".to_string()),
-				..Default::default()
-			}),
-			..Default::default()
-		});
-
-		pod_labels.insert(
-			PROXY_SIDECAR_POD_LABEL.0.to_string(),
-			PROXY_SIDECAR_POD_LABEL.1.to_string(),
-		);
-	}
+	let init_containers = vec![canopy_proxy_sidecar(&source, canopy_proxy)];
+	let volumes = vec![proxy_shared_volume()];
 
 	let mut job = Job {
 		metadata: ObjectMeta {
@@ -349,18 +251,10 @@ fi
 				}),
 				spec: Some(PodSpec {
 					restart_policy: Some("Never".to_string()),
-					init_containers: if init_containers.is_empty() {
-						None
-					} else {
-						Some(init_containers)
-					},
+					init_containers: Some(init_containers),
 					termination_grace_period_seconds: Some(30),
 					containers,
-					volumes: if volumes.is_empty() {
-						None
-					} else {
-						Some(volumes)
-					},
+					volumes: Some(volumes),
 					..Default::default()
 				}),
 			},

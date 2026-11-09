@@ -32,15 +32,6 @@ async fn a_builder_image_drives_a_schema_build_job() {
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 	let jobs: Api<Job> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret");
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "build-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	println!("--- creating PostgresPhysicalReplica with a builder image");
 	let mut replica = build_replica(replica_name, "build-kopia-creds", ReplicaOpts::default());
 	// A build needs a version to build for, which is the one the restore
@@ -50,11 +41,7 @@ async fn a_builder_image_drives_a_schema_build_job() {
 		version_id: TARGET_VERSION_ID.to_string(),
 	});
 	replica.spec.builder_image = Some(BUILDER_IMAGE.to_string());
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for a restore to reach Migrating");
 	let restore_name = wait_for_restore_phase(
@@ -131,20 +118,8 @@ async fn a_replica_without_a_builder_image_builds_nothing() {
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 	let jobs: Api<Job> = Api::namespaced(client.clone(), ns);
 
-	secrets
-		.create(
-			&PostParams::default(),
-			&build_kopia_secret(ns, "no-build-kopia-creds", "test-bucket"),
-		)
-		.await
-		.expect("failed to create kopia secret");
-
 	let mut replica = build_replica(replica_name, "no-build-kopia-creds", ReplicaOpts::default());
-	replica.metadata.namespace = Some(ns.into());
-	replicas
-		.create(&PostParams::default(), &replica)
-		.await
-		.expect("failed to create replica");
+	let replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for the restore to go active without a build");
 	let restore_name = wait_for_restore_phase(

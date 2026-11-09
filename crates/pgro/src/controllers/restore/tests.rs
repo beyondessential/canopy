@@ -14,6 +14,16 @@ use super::builders::{
 };
 use crate::{placement::PodPlacement, types::*, util::TimeSpan};
 
+fn proxy_args() -> super::builders::CanopyProxyArgs<'static> {
+	super::builders::CanopyProxyArgs {
+		image: "ghcr.io/beyondessential/canopy:latest",
+		broker_base_url: "http://operator.pgro-system.svc:9091",
+		stats_callback_url: "http://operator.pgro-system.svc:8080/api/v1/canopy-stats/ns/job",
+		progress_callback_url: None,
+		run_id: None,
+	}
+}
+
 #[test]
 fn deployment_uses_affinity_not_node_selector() {
 	let mut replica = PostgresPhysicalReplica::new(
@@ -23,12 +33,10 @@ fn deployment_uses_affinity_not_node_selector() {
 			pre_migrate_sql: None,
 			migrate_to: None,
 			builder_image: None,
-			kopia_secret_ref: Some(SecretReference {
-				name: Some("kopia-secret".to_string()),
-				namespace: None,
-			}),
-			canopy_source: None,
-			snapshot_filter: None,
+			canopy_source: CanopySource {
+				group: "11111111-1111-1111-1111-111111111111".to_string(),
+				r#type: "tamanu-postgres".to_string(),
+			},
 			schedule: "0 */6 * * *".into(),
 			schedule_jitter: TimeSpan(Span::new().minutes(10)),
 			minimum_ttl: None,
@@ -49,7 +57,6 @@ fn deployment_uses_affinity_not_node_selector() {
 			read_only: true,
 			ephemeral: false,
 			postgres_extra_config: None,
-			notifications: vec![],
 
 			persistent_schemas: None,
 			redaction: None,
@@ -128,12 +135,10 @@ fn test_restore_and_replica() -> (PostgresPhysicalRestore, PostgresPhysicalRepli
 			pre_migrate_sql: None,
 			migrate_to: None,
 			builder_image: None,
-			kopia_secret_ref: Some(SecretReference {
-				name: Some("kopia-secret".to_string()),
-				namespace: None,
-			}),
-			canopy_source: None,
-			snapshot_filter: None,
+			canopy_source: CanopySource {
+				group: "11111111-1111-1111-1111-111111111111".to_string(),
+				r#type: "tamanu-postgres".to_string(),
+			},
 			schedule: "0 */6 * * *".into(),
 			schedule_jitter: TimeSpan(Span::new().minutes(10)),
 			minimum_ttl: None,
@@ -154,7 +159,6 @@ fn test_restore_and_replica() -> (PostgresPhysicalRestore, PostgresPhysicalRepli
 			read_only: true,
 			ephemeral: false,
 			postgres_extra_config: None,
-			notifications: vec![],
 
 			persistent_schemas: None,
 			redaction: None,
@@ -398,11 +402,6 @@ fn canopy_restore_job_proxy_is_native_sidecar() {
 	// container exits, so the Job never succeeds and eventually hits
 	// activeDeadlineSeconds → DeadlineExceeded.
 	let (restore, mut replica) = test_restore_and_replica();
-	replica.spec.kopia_secret_ref = None;
-	replica.spec.canopy_source = Some(CanopySource {
-		group: "11111111-1111-1111-1111-111111111111".to_string(),
-		r#type: "tamanu-postgres".to_string(),
-	});
 	let proxy = super::builders::CanopyProxyArgs {
 		image: "ghcr.io/beyondessential/postgres-restore-operator:latest",
 		broker_base_url: "http://operator.pgro-system.svc:9091",
@@ -417,7 +416,7 @@ fn canopy_restore_job_proxy_is_native_sidecar() {
 		&replica,
 		"kopia:latest",
 		"http://operator/api/v1/cache-pressure/default/test-restore",
-		Some(&proxy),
+		&proxy,
 		&PodPlacement::default(),
 	)
 	.unwrap();
@@ -454,11 +453,6 @@ fn canopy_restore_job_sidecar_carries_run_id() {
 	// PGRO_RUN_ID so its credential requests are attributed to the run; when
 	// no run_id is given (non-run credential consumers) the env is absent.
 	let (restore, mut replica) = test_restore_and_replica();
-	replica.spec.kopia_secret_ref = None;
-	replica.spec.canopy_source = Some(CanopySource {
-		group: "11111111-1111-1111-1111-111111111111".to_string(),
-		r#type: "tamanu-postgres".to_string(),
-	});
 
 	let run_id_env = |run_id: Option<&str>| {
 		let proxy = super::builders::CanopyProxyArgs {
@@ -475,7 +469,7 @@ fn canopy_restore_job_sidecar_carries_run_id() {
 			&replica,
 			"kopia:latest",
 			"http://operator/api/v1/cache-pressure/default/test-restore",
-			Some(&proxy),
+			&proxy,
 			&PodPlacement::default(),
 		)
 		.unwrap();
@@ -519,7 +513,7 @@ fn restore_job_has_ttl_seconds_after_finished() {
 		&replica,
 		"kopia:latest",
 		"http://operator/api/v1/cache-pressure/default/test-restore",
-		None,
+		&proxy_args(),
 		&PodPlacement::default(),
 	)
 	.unwrap();
@@ -547,7 +541,7 @@ fn restore_job_mounts_persistent_kopia_cache() {
 		&replica,
 		"kopia:latest",
 		"http://operator/api/v1/cache-pressure/default/test-restore",
-		None,
+		&proxy_args(),
 		&PodPlacement::default(),
 	)
 	.unwrap();
@@ -684,10 +678,6 @@ fn parsed_bytes(q: &Quantity) -> u64 {
 #[test]
 fn canopy_restore_job_sidecar_carries_progress_callback_url() {
 	let (restore, mut replica) = test_restore_and_replica();
-	replica.spec.canopy_source = Some(CanopySource {
-		group: "11111111-1111-1111-1111-111111111111".to_string(),
-		r#type: "tamanu-postgres".to_string(),
-	});
 	let url = "http://operator.pgro-system.svc:8080/api/v1/canopy-progress/ns/job";
 	let proxy = super::builders::CanopyProxyArgs {
 		image: "ghcr.io/beyondessential/postgres-restore-operator:latest",
@@ -703,7 +693,7 @@ fn canopy_restore_job_sidecar_carries_progress_callback_url() {
 		&replica,
 		"kopia:latest",
 		"http://operator/api/v1/cache-pressure/default/test-restore",
-		Some(&proxy),
+		&proxy,
 		&PodPlacement::default(),
 	)
 	.unwrap();
@@ -738,7 +728,7 @@ fn restore_job_for(snapshot_size: &str) -> k8s_openapi::api::batch::v1::Job {
 		&replica,
 		"kopia:latest",
 		"http://operator/api/v1/cache-pressure/default/test-restore",
-		None,
+		&proxy_args(),
 		&PodPlacement::default(),
 	)
 	.unwrap()
@@ -824,7 +814,7 @@ fn restore_job_passes_cache_caps_and_log_rotation() {
 		&replica,
 		"kopia:latest",
 		"http://operator/api/v1/cache-pressure/default/test-restore",
-		None,
+		&proxy_args(),
 		&PodPlacement::default(),
 	)
 	.unwrap();
@@ -2423,7 +2413,7 @@ fn every_builder_stamps_the_placement_defaults() {
 				&replica,
 				"kopia:latest",
 				"http://operator/cache-pressure",
-				None,
+				&proxy_args(),
 				&placement,
 			)
 			.unwrap()
