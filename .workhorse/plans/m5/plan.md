@@ -15,8 +15,6 @@ The evaluation came out in favour of moving it, on the terms below.
 - **Transport:** tailnet only.
   The mTLS fallback, the device-key secret and the `canopyBaseUrl` setting are dropped.
   An operator whose Tailscale sidecar is down loses its link to Canopy until the sidecar returns; that has happened once in two years of running these clusters, which is acceptable.
-- **Not part of this move:** relocating `bestool-canopy` into Canopy, and Canopy verifying Kubernetes service-account tokens.
-  Both are independent follow-ups, and neither is blocked by this move: pgro's transport is one file behind `CanopyTransport`, so either can replace it later.
 
 ## Build plan
 
@@ -113,7 +111,7 @@ Against:
 - Losing the mTLS fallback (accepted above), the tailnet probe, and the hardcoded-address fallback; the proxy resolves names, so the last should not matter, but it is untested.
 - A second implementation of a transport bestool already has.
 
-### Alternatives considered
+### Alternatives considered and not pursued
 
 The Tailscale sidecar stays whichever is chosen: pgro reads the tailnet's MagicDNS suffix from it to build the URL of a replica exposed on the tailnet.
 
