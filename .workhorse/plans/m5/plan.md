@@ -61,13 +61,20 @@ Ordered so the history import is a pure move, and each later step is its own com
 
 ### Remove standalone mode
 
-Blocked on a finding from the import: every cluster integration test (about 4,000 lines, thirteen modules) builds its replicas through the Secret-based path, because the one Canopy-path test, `canopy_integration`, is an ignored scaffold waiting on a stub Canopy that was never built.
-Removing the path without that stub leaves pgro with unit tests and no cluster coverage of restores, switchovers, redaction, users or migrations.
-Canopy's configuration cannot become required either while those tests start pgro without Canopy.
+Every cluster integration test (about 4,000 lines, thirteen modules) built its replicas through the Secret-based path, and the one Canopy-path test was an ignored scaffold waiting on a stub Canopy that was never built, so removing the path meant giving the tests a Canopy first.
+The Canopy path also could not restore from the tests' S3-compatible store: the sidecar's upstream was hard-coded to AWS.
 
-- [ ] Make Canopy configuration required at operator startup, and a failure to build the client a startup error rather than a legacy-only mode.
-- [ ] Remove the Secret-based Kopia path from the replica controller and CRD types (`kopiaSecretRef`, `snapshotFilter` and what only they use), regenerate `crds.yaml`, and update the README's CRD tables.
-- [ ] Drop the README quick start and standalone install steps, and the integration cases that exist only for that path (invalid and missing Secret, Secret-backed lifecycle); keep the Canopy-driven integration tests.
+- [x] Make Canopy configuration required at startup: pgro exits with an error if `CANOPY_TAILNET_URL` is missing or invalid, or if it has no broker address, and `Context.canopy` is no longer optional.
+- [x] Remove the Secret-based Kopia path from the replica controller and CRD types (`kopiaSecretRef`, `snapshotFilter`, notifications and what only they used), make `canopySource` a required field, regenerate `crds.yaml`, and rewrite the README as the Canopy-driven operator's.
+  The scheduling machinery stays, because the Canopy path uses the schedule as a fallback trigger and for failure backoff.
+- [x] Let the proxy sidecar use a custom S3 endpoint (`PGRO_S3_ENDPOINT`, set from pgro's `CANOPY_S3_ENDPOINT`), and send no token header for an empty session token.
+- [x] Give the cluster tests a Canopy: a stub in the test process (`tests/it/stub_canopy.rs`) that hands out the fixtures' store credentials, serves a worklist the tests set, can refuse credentials for a group, and records what pgro reports.
+  The existing modules keep creating replicas directly, as the worklist syncer would (the credentials Secret, `canopySource`, the fixture's snapshot id patched into status), so every scenario is kept, including the ones no intent parameter reaches.
+  `canopy_integration` has two real tests of the worklist-driven flow in place of the scaffold.
+- [x] Remove the integration cases that exist only for the Secret path (invalid and missing Secret).
+- [ ] Run the `pgro integration` workflow in CI and fix what it finds.
+  None of the cluster tests, the proxy image build, the broker Service port or the stub could be run where this was written (no kind or docker), so the whole workflow is unverified.
+  Likeliest to need attention: the store accepting the proxy's signed requests, the sidecar reaching the broker through the Service, and the field names the stub's report assertions read.
 
 ### Specs and conventions
 
