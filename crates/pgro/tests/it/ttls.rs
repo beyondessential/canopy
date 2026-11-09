@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use jiff::Span;
 use k8s_openapi::api::core::v1::Secret;
-use kube::{Api, api::PostParams};
+use kube::Api;
 use pgro::{
 	types::{PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase},
 	util::TimeSpan,
@@ -20,12 +20,12 @@ async fn minimum_ttl_prevents_premature_restore() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &["ttl-replica"]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
 	println!("--- creating PostgresPhysicalReplica with schedule and long minimum_ttl");
-	let mut replica = build_replica(
+	let replica = build_replica(
 		"ttl-replica",
 		ReplicaOpts {
 			schedule: "* * * * *".into(),                       // every minute
@@ -34,7 +34,7 @@ async fn minimum_ttl_prevents_premature_restore() {
 			..Default::default()
 		},
 	);
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for first restore to complete");
 	wait_for_replica_phase(

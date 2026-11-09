@@ -1,5 +1,5 @@
 use k8s_openapi::api::core::v1::Secret;
-use kube::{Api, api::PostParams};
+use kube::Api;
 use pgro::types::{
 	ExtraUserSpec, PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase,
 };
@@ -24,7 +24,7 @@ async fn extra_user_provisioned_without_privileges() {
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
 	println!("--- creating replica with extra users (readOnly: true)");
-	let mut replica = build_replica(
+	let replica = build_replica(
 		"extra-users-replica",
 		ReplicaOpts {
 			read_only: true,
@@ -41,7 +41,7 @@ async fn extra_user_provisioned_without_privileges() {
 			..Default::default()
 		},
 	);
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for restore Active and replica Ready");
 	let restore_name = wait_for_restore_phase(

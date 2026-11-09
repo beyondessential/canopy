@@ -45,7 +45,6 @@ const MINIO_SECRET_KEY: &str = "minioadmin";
 /// JSON where the request carried JSON, the text otherwise.
 #[derive(Clone, Debug)]
 pub struct Recorded {
-	pub method: Method,
 	pub path: String,
 	pub body: Value,
 }
@@ -176,7 +175,6 @@ async fn handle(State(stub): State<StubCanopy>, request: Request) -> Response {
 		.and_then(Value::as_str)
 		.is_some_and(|group| stub.inner.lock().unwrap().denied_groups.contains(group));
 	stub.inner.lock().unwrap().requests.push(Recorded {
-		method: parts.method.clone(),
 		path: path.clone(),
 		body,
 	});

@@ -1,5 +1,4 @@
 use kube::Api;
-use kube::api::PostParams;
 use pgro::types::{PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase};
 
 use crate::helpers::*;
@@ -26,21 +25,20 @@ async fn locale_rewrite_is_recorded_and_reindexed() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &[replica_name]).await;
 
-	let secrets: Api<k8s_openapi::api::core::v1::Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<k8s_openapi::api::core::v1::Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret pointing at the non-C-locale snapshot");
+	println!("--- creating PostgresPhysicalReplica for the non-C-locale snapshot");
 	println!("--- creating replica");
-	let mut replica = build_replica(
+	let replica = build_replica(
 		replica_name,
-		"locale-kopia-creds",
 		ReplicaOpts {
 			schedule: "0 0 1 1 *".into(), // once a year: only the initial restore
 			..Default::default()
 		},
 	);
-	let replica = start_replica(&client, ns, replica, "locale-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "locale-bucket").await;
 
 	println!("--- waiting for the restore to go Active");
 	let restore_name =

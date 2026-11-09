@@ -21,7 +21,7 @@ async fn second_restore_and_switchover() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &["switchover-replica"]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 	let services: Api<Service> = Api::namespaced(client.clone(), ns);
@@ -30,14 +30,14 @@ async fn second_restore_and_switchover() {
 	// A long grace period keeps the outgoing restore alive after the
 	// switchover, so its post-switchover state can be inspected before the
 	// sweep removes it. Nothing here waits on the sweep, so this costs no time.
-	let mut replica = build_replica(
+	let replica = build_replica(
 		"switchover-replica",
 		ReplicaOpts {
 			switchover_grace_period: Some(TimeSpan(Span::new().seconds(120))),
 			..Default::default()
 		},
 	);
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for first restore to complete");
 	wait_for_replica_phase(

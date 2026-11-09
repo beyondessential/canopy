@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use kube::Api;
-use kube::api::PostParams;
 use pgro::types::PostgresPhysicalReplica;
 
 use crate::helpers::*;
@@ -18,13 +17,13 @@ async fn ephemeral_replica_tears_down_after_verify() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &["ephemeral-replica"]).await;
 
-	let secrets: Api<k8s_openapi::api::core::v1::Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<k8s_openapi::api::core::v1::Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 
 	println!("--- creating ephemeral PostgresPhysicalReplica");
 	// Long schedule so the only restore we observe is the initial one; after
 	// teardown it must NOT restore again within the test window.
-	let mut replica = build_replica(
+	let replica = build_replica(
 		"ephemeral-replica",
 		ReplicaOpts {
 			schedule: "0 0 1 1 *".into(), // once a year
@@ -32,7 +31,7 @@ async fn ephemeral_replica_tears_down_after_verify() {
 			..Default::default()
 		},
 	);
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	// Don't wait for the `Ready` phase: on an ephemeral replica it's
 	// transient — the switchover sets Ready and the very next reconcile

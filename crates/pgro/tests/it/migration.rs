@@ -1,5 +1,5 @@
 use k8s_openapi::api::{batch::v1::Job, core::v1::Secret};
-use kube::{Api, api::PostParams};
+use kube::Api;
 use pgro::{
 	controllers::canopy::intent::DEFAULT_PRE_MIGRATE_SQL,
 	types::{MigrationTarget, PostgresPhysicalReplica, PostgresPhysicalRestore, RestorePhase},
@@ -24,15 +24,15 @@ async fn migration_target_drives_a_migration_job() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &[replica_name]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
-	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 	let jobs: Api<Job> = Api::namespaced(client.clone(), ns);
 
 	// read_only stays true: lifting it for the migration is the operator's job,
 	// and asserting the DDL below is what proves it did.
 	println!("--- creating PostgresPhysicalReplica with a migration target");
-	let mut replica = build_replica(replica_name, "mig-kopia-creds", ReplicaOpts::default());
+	let mut replica = build_replica(replica_name, ReplicaOpts::default());
 	replica.spec.migrate_to = Some(MigrationTarget {
 		version: TARGET_VERSION.to_string(),
 		version_id: TARGET_VERSION_ID.to_string(),
@@ -42,7 +42,7 @@ async fn migration_target_drives_a_migration_job() {
 	replica.spec.pre_migrate_drop_schemas =
 		Some(vec!["reporting".to_string(), "public".to_string()]);
 	replica.spec.pre_migrate_sql = Some(DEFAULT_PRE_MIGRATE_SQL.to_string());
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for a restore to reach Migrating");
 	let restore_name = wait_for_restore_phase(

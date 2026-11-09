@@ -18,21 +18,20 @@ async fn persistent_schemas_migration() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &[replica_name]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
 	println!("--- creating PostgresPhysicalReplica with persistent_schemas and readOnly: false");
 	let mut replica = build_replica(
 		replica_name,
-		"ps-kopia-creds",
 		ReplicaOpts {
 			read_only: false,
 			..Default::default()
 		},
 	);
 	replica.spec.persistent_schemas = Some(vec!["persistent_data".to_string()]);
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for first restore to become Active");
 	let first_restore_name =
@@ -257,7 +256,7 @@ async fn persistent_schemas_drops_and_replaces_target_copy() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &[replica_name]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
@@ -268,14 +267,13 @@ async fn persistent_schemas_drops_and_replaces_target_copy() {
 	println!("--- creating replica with persistent_schemas: [\"public\"]");
 	let mut replica = build_replica(
 		replica_name,
-		"ps-conflict-kopia-creds",
 		ReplicaOpts {
 			read_only: false,
 			..Default::default()
 		},
 	);
 	replica.spec.persistent_schemas = Some(vec!["public".to_string()]);
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for first restore to become Active");
 	let first_restore_name =
@@ -394,7 +392,7 @@ async fn persistent_schemas_skip_missing_on_source() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &[replica_name]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
@@ -405,7 +403,6 @@ async fn persistent_schemas_skip_missing_on_source() {
 	);
 	let mut replica = build_replica(
 		replica_name,
-		"ps-skip-kopia-creds",
 		ReplicaOpts {
 			read_only: false,
 			..Default::default()
@@ -415,7 +412,7 @@ async fn persistent_schemas_skip_missing_on_source() {
 		"real_schema".to_string(),
 		"nonexistent_schema".to_string(),
 	]);
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for first restore to become Active");
 	let first_restore_name =
@@ -652,7 +649,7 @@ async fn persistent_schemas_all_missing_prunes_previous_restore() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &[replica_name]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
@@ -662,14 +659,13 @@ async fn persistent_schemas_all_missing_prunes_previous_restore() {
 	println!("--- creating replica with persistent_schemas: [\"never_created\"]");
 	let mut replica = build_replica(
 		replica_name,
-		"ps-all-missing-creds",
 		ReplicaOpts {
 			read_only: false,
 			..Default::default()
 		},
 	);
 	replica.spec.persistent_schemas = Some(vec!["never_created".to_string()]);
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for first restore to become Active");
 	let first_restore_name =

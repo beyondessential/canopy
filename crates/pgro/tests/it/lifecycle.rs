@@ -1,16 +1,12 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
-use k8s_openapi::{
-	ByteString,
-	api::{
-		apps::v1::Deployment,
-		batch::v1::Job,
-		core::v1::{PersistentVolumeClaim, Secret, Service},
-	},
+use k8s_openapi::api::{
+	apps::v1::Deployment,
+	core::v1::{PersistentVolumeClaim, Secret, Service},
 };
 use kube::{
 	Api,
-	api::{ListParams, ObjectMeta, Patch, PatchParams, PostParams},
+	api::{Patch, PatchParams},
 };
 use pgro::types::{PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase};
 
@@ -33,8 +29,8 @@ async fn full_restore_lifecycle() {
 	let deployments: Api<Deployment> = Api::namespaced(client.clone(), ns);
 
 	println!("--- creating PostgresPhysicalReplica");
-	let mut replica = build_replica("lifecycle-replica", Default::default());
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let replica = build_replica("lifecycle-replica", Default::default());
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for replica Restoring phase");
 	wait_for_replica_phase(
@@ -182,19 +178,19 @@ async fn analytics_create_schema_read_write() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &["rw-replica"]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
 	println!("--- creating PostgresPhysicalReplica with readOnly: false");
-	let mut replica = build_replica(
+	let replica = build_replica(
 		"rw-replica",
 		ReplicaOpts {
 			read_only: false,
 			..Default::default()
 		},
 	);
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for restore Active phase");
 	let restore_name =
@@ -280,19 +276,19 @@ async fn analytics_read_only_cannot_create_schema() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &["ro-replica"]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
 	println!("--- creating PostgresPhysicalReplica with readOnly: true");
-	let mut replica = build_replica(
+	let replica = build_replica(
 		"ro-replica",
 		ReplicaOpts {
 			read_only: true,
 			..Default::default()
 		},
 	);
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for restore Active phase");
 	let restore_name =

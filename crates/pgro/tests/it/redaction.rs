@@ -8,13 +8,8 @@
 //! operator is what fetches the manifest, and the integration harness runs
 //! it out-of-cluster — a `.svc` name would not resolve for it.
 
-use std::collections::BTreeMap;
-
-use k8s_openapi::{ByteString, api::core::v1::Secret};
-use kube::{
-	Api,
-	api::{ObjectMeta, PostParams},
-};
+use k8s_openapi::api::core::v1::Secret;
+use kube::Api;
 use pgro::types::{
 	PostgresPhysicalReplica, PostgresPhysicalRestore, RedactionPhase, RedactionSpec, ReplicaPhase,
 	RestorePhase,
@@ -38,7 +33,7 @@ async fn redaction_applies_masks_to_restored_data() {
 	setup_namespace(&client, NS).await;
 	cleanup_namespace(&client, NS, &[REPLICA_NAME]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), NS);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), NS);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), NS);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), NS);
 

@@ -1,5 +1,5 @@
 use k8s_openapi::api::{batch::v1::Job, core::v1::Secret};
-use kube::{Api, api::PostParams};
+use kube::Api;
 use pgro::types::{
 	MigrationTarget, PostgresPhysicalReplica, PostgresPhysicalRestore, RestorePhase,
 };
@@ -27,13 +27,13 @@ async fn a_builder_image_drives_a_schema_build_job() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &[replica_name]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
-	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 	let jobs: Api<Job> = Api::namespaced(client.clone(), ns);
 
 	println!("--- creating PostgresPhysicalReplica with a builder image");
-	let mut replica = build_replica(replica_name, "build-kopia-creds", ReplicaOpts::default());
+	let mut replica = build_replica(replica_name, ReplicaOpts::default());
 	// A build needs a version to build for, which is the one the restore
 	// migrated to, so a builder image without a target builds nothing.
 	replica.spec.migrate_to = Some(MigrationTarget {
@@ -41,7 +41,7 @@ async fn a_builder_image_drives_a_schema_build_job() {
 		version_id: TARGET_VERSION_ID.to_string(),
 	});
 	replica.spec.builder_image = Some(BUILDER_IMAGE.to_string());
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for a restore to reach Migrating");
 	let restore_name = wait_for_restore_phase(
@@ -113,13 +113,13 @@ async fn a_replica_without_a_builder_image_builds_nothing() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &[replica_name]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
-	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 	let jobs: Api<Job> = Api::namespaced(client.clone(), ns);
 
-	let mut replica = build_replica(replica_name, "no-build-kopia-creds", ReplicaOpts::default());
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let replica = build_replica(replica_name, ReplicaOpts::default());
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for the restore to go active without a build");
 	let restore_name = wait_for_restore_phase(

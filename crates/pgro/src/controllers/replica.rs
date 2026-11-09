@@ -147,19 +147,6 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 
 	let client = &ctx.client;
 
-	// Nothing to pre-validate: the proxy sidecar fetches short-lived creds
-	// at Job time via the operator's broker, and any auth failure surfaces
-	// there.
-	replica
-		.update_condition(
-			client,
-			"KopiaSecretValid",
-			"True",
-			"CanopySourced",
-			"canopy-managed replica; credentials issued by canopy at Job time",
-		)
-		.await?;
-
 	replica.ensure_credentials_secret(client).await?;
 
 	replica.ensure_extra_user_secrets(client).await?;

@@ -22,14 +22,13 @@ async fn extra_user_keeps_schema_grants_across_a_persistent_schema_migration() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &[replica_name]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
 	println!("--- creating replica with a persistent schema and a user scoped to it");
 	let mut replica = build_replica(
 		replica_name,
-		"eug-kopia-creds",
 		ReplicaOpts {
 			read_only: false,
 			extra_users: vec![ExtraUserSpec {
@@ -40,7 +39,7 @@ async fn extra_user_keeps_schema_grants_across_a_persistent_schema_migration() {
 		},
 	);
 	replica.spec.persistent_schemas = Some(vec!["persistent_data".to_string()]);
-	let replica = start_replica(&client, ns, replica, "test-bucket").await;
+	let _replica = start_replica(&client, ns, replica, "test-bucket").await;
 
 	println!("--- waiting for the first restore to become Active");
 	let first_restore_name =

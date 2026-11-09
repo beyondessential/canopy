@@ -1,10 +1,7 @@
 use std::time::Duration;
 
 use k8s_openapi::api::{batch::v1::Job, core::v1::Secret};
-use kube::{
-	Api,
-	api::{ListParams, PostParams},
-};
+use kube::{Api, api::ListParams};
 use pgro::types::{PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase};
 use tokio::time::{sleep, timeout};
 
@@ -19,14 +16,14 @@ async fn restore_fails_for_non_postgres_data() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &["non-pg-replica"]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 	let restores: Api<PostgresPhysicalRestore> = Api::namespaced(client.clone(), ns);
 
-	println!("--- creating kopia secret pointing to non-postgres bucket");
+	println!("--- creating PostgresPhysicalReplica for a repository holding no postgres data");
 	println!("--- creating PostgresPhysicalReplica");
-	let mut replica = build_replica("non-pg-replica", Default::default());
-	let replica = start_replica(&client, ns, replica, "non-postgres-bucket").await;
+	let replica = build_replica("non-pg-replica", Default::default());
+	let _replica = start_replica(&client, ns, replica, "non-postgres-bucket").await;
 
 	println!("--- waiting for replica to start restoring");
 	wait_for_replica_phase(
@@ -88,30 +85,18 @@ async fn snapshot_job_fails_for_wrong_bucket() {
 	setup_namespace(&client, ns).await;
 	cleanup_namespace(&client, ns, &["wrong-bucket-replica"]).await;
 
-	let secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
+	let _secrets: Api<Secret> = Api::namespaced(client.clone(), ns);
 	let replicas: Api<PostgresPhysicalReplica> = Api::namespaced(client.clone(), ns);
 
 	println!("--- creating PostgresPhysicalReplica whose repository bucket does not exist");
 	let replica = build_replica("wrong-bucket-replica", Default::default());
 	let snapshot = snapshot_id_for("test-bucket").await;
-	let replica = start_replica_at(
+	let _replica = start_replica_at(
 		&client,
 		ns,
 		replica,
 		"bucket-that-does-not-exist",
 		&snapshot,
-	)
-	.await;
-
-	// The credentials Secret is structurally valid, so the condition should be True
-	println!("--- waiting for KopiaSecretValid=True condition");
-	wait_for_replica_condition(
-		&client,
-		ns,
-		"wrong-bucket-replica",
-		"KopiaSecretValid",
-		"True",
-		Duration::from_secs(60),
 	)
 	.await;
 
