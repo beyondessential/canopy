@@ -555,21 +555,18 @@ spec:
                 type: string
               canopySource:
                 description: |-
-                  Route kopia through the canopy-mediated proxy sidecar instead of
-                  a static credentials Secret. Mutually exclusive with
-                  `kopiaSecretRef`.
+                  The Canopy group and backup type whose backups this replica restores.
 
-                  When set:
-                  - the restore + snapshot-list Jobs get the pgro-canopy-proxy
-                    sidecar and dummy AWS keys (kopia talks to `[::1]:<port>`);
-                  - the reconciler skips the snapshot-list step and instead reads
-                    the snapshot to restore from `status.canopyDesiredSnapshotId`
-                    (populated by the canopy worklist syncer);
-                  - the replica is treated as pgro-internal state — the canopy
-                    syncer materialises + tears down these CRs based on canopy's
-                    worklist. Manual edits to a canopy-managed CR are re-asserted
-                    on the next tick.
-                nullable: true
+                  Kopia reaches the repository through the pgro-canopy-proxy sidecar
+                  on the restore and snapshot-list Jobs, with dummy AWS keys; the
+                  sidecar holds the credentials Canopy issues for the run. The
+                  snapshot to restore is the one named by
+                  `status.canopyDesiredSnapshotId` (set by the Canopy worklist syncer),
+                  matched against the snapshot-list Job's output.
+
+                  The replica is pgro-internal state: the Canopy syncer creates and
+                  tears down these CRs from Canopy's worklist, and re-asserts any
+                  manual edit on its next tick.
                 properties:
                   group:
                     description: Canopy server-group id (UUID) whose backups this replica restores.
@@ -600,10 +597,9 @@ spec:
                 default: false
                 description: |-
                   Ephemeral replica: once a restore reaches `Active` (postgres came up
-                  healthy and, for canopy replicas, the verification was reported),
-                  tear the restore down instead of keeping it running. The replica CR
-                  stays; it only restores again when a new snapshot is offered (canopy
-                  path) or the schedule next fires (legacy path). Used by the `verify`
+                  healthy and the verification was reported), tear the restore down
+                  instead of keeping it running. The replica CR stays; it only
+                  restores again when Canopy offers a new snapshot. Used by the `verify`
                   intent, whose whole job is "prove the snapshot restores" — keeping
                   the database idling afterward just wastes cluster resources.
                 type: boolean
@@ -645,22 +641,6 @@ spec:
                   - name
                   type: object
                 type: array
-              kopiaSecretRef:
-                description: |-
-                  Reference to a Secret containing kopia repository credentials.
-                  Mutually exclusive with `canopySource`. Exactly one of the two
-                  must be set; the reconciler surfaces `KopiaSecretValid=False`
-                  with reason `SecretRefAndCanopySource` if both (or neither) are
-                  present.
-                nullable: true
-                properties:
-                  name:
-                    description: name is unique within a namespace to reference a secret resource.
-                    type: string
-                  namespace:
-                    description: namespace defines the space within which the secret name must be unique.
-                    type: string
-                type: object
               migrateTo:
                 description: |-
                   Tamanu version whose schema migrations each restore should apply once
@@ -686,49 +666,6 @@ spec:
                 format: duration
                 nullable: true
                 type: string
-              notifications:
-                items:
-                  properties:
-                    headers:
-                      additionalProperties:
-                        anyOf:
-                        - {}
-                        - required:
-                          - secretKeyRef
-                        properties:
-                          secretKeyRef:
-                            properties:
-                              key:
-                                type: string
-                              name:
-                                type: string
-                            required:
-                            - key
-                            - name
-                            type: object
-                        x-kubernetes-preserve-unknown-fields: true
-                      nullable: true
-                      type: object
-                    includePassword:
-                      type: boolean
-                    method:
-                      type: string
-                    mutation:
-                      type: string
-                    target:
-                      enum:
-                      - webhook
-                      - graphQL
-                      type: string
-                    url:
-                      type: string
-                    variablesTemplate:
-                      type: string
-                  required:
-                  - target
-                  - url
-                  type: object
-                type: array
               persistentSchemas:
                 description: List of schema names to migrate from the previous restore to the new restore on each switchover.
                 items:
@@ -913,29 +850,6 @@ spec:
                   upward just to raise shm.
                 nullable: true
                 x-kubernetes-int-or-string: true
-              snapshotFilter:
-                nullable: true
-                properties:
-                  descriptionPattern:
-                    description: Glob pattern for filtering snapshot descriptions
-                    nullable: true
-                    type: string
-                  hostPattern:
-                    description: Glob pattern for filtering snapshot hosts
-                    nullable: true
-                    type: string
-                  pathPattern:
-                    description: |-
-                      Glob pattern for filtering snapshot source paths.
-                      Windows paths are normalised to Unix style (e.g. `D:\Full` → `/D/Full`).
-                    nullable: true
-                    type: string
-                  tags:
-                    additionalProperties:
-                      type: string
-                    nullable: true
-                    type: object
-                type: object
               storageClass:
                 nullable: true
                 type: string
@@ -978,6 +892,7 @@ spec:
                   type: object
                 type: array
             required:
+            - canopySource
             - schedule
             type: object
           status:
@@ -986,9 +901,8 @@ spec:
               canopyDesiredSnapshotId:
                 description: |-
                   Snapshot id the canopy worklist syncer wants restored. Populated
-                  each syncer tick for canopy-sourced replicas (`spec.canopySource`
-                  is set); unused otherwise. The reconciler triggers a new restore
-                  when this differs from the current one.
+                  each syncer tick. The reconciler triggers a new restore when this
+                  differs from the current one.
                 nullable: true
                 type: string
               conditions:
@@ -1072,26 +986,6 @@ spec:
                 format: date-time
                 nullable: true
                 type: string
-              notifications:
-                items:
-                  properties:
-                    lastError:
-                      nullable: true
-                      type: string
-                    lastSentAt:
-                      description: Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.
-                      format: date-time
-                      nullable: true
-                      type: string
-                    name:
-                      type: string
-                    success:
-                      default: false
-                      type: boolean
-                  required:
-                  - name
-                  type: object
-                type: array
               persistentSchemaDataSize:
                 description: |-
                   Measured size of persistent schema data from the last successful migration (bytes).

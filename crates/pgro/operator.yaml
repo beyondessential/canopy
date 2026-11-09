@@ -1,4 +1,6 @@
-# postgres-restore-operator install manifest
+# pgro, the restore operator, install manifest.
+# pgro is driven only by Canopy: it needs the Tailscale sidecar below and
+# CANOPY_TAILNET_URL, and does not start without them.
 # CRDs are installed by the operator at startup. Generate them
 # manually with `cargo run --bin gen-crds` if you want to apply them
 # out-of-band (e.g. install-time gating on schema changes).
@@ -31,7 +33,7 @@ rules:
           - postgresphysicalrestores
           - postgresphysicalrestores/status
       verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-    # Secrets (kopia credentials, analytics credentials)
+    # Secrets (per-replica Canopy credentials, analytics credentials)
     - apiGroups: [""]
       resources: ["secrets"]
       verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -55,7 +57,7 @@ rules:
     - apiGroups: [""]
       resources: ["pods"]
       verbs: ["get", "list", "patch", "delete"]
-    # Namespaces (canopy-path replica namespaces are labelled + annotated
+    # Namespaces (Canopy replica namespaces are labelled + annotated
     # by the worklist syncer, and torn down when a declaration goes away)
     - apiGroups: [""]
       resources: ["namespaces"]
@@ -198,7 +200,7 @@ spec:
         - name: http
           port: 8080
           targetPort: http
-        # Credential-broker port. Reached from canopy-backed Job pods'
+        # Credential-broker port. Reached from kopia Job pods'
         # proxy sidecars in-cluster only; NetworkPolicy below gates
         # ingress to Pods carrying pgro.bes.au/proxy-sidecar=true.
         - name: broker
@@ -241,7 +243,8 @@ spec:
                 fsGroup: 65534
             containers:
                 - name: controller
-                  image: ghcr.io/beyondessential/postgres-restore-operator:latest
+                  image: ghcr.io/beyondessential/canopy:latest
+                  command: ["pgro"]
                   env:
                       # - name: RUST_LOG
                       #   value: "info,tower_http=debug"
@@ -253,29 +256,27 @@ spec:
                                 fieldPath: metadata.namespace
                       - name: OPERATOR_SERVICE_NAME
                         value: postgres-restore-operator
-                      # ------------------------------------------------
-                      # Canopy integration — see docs/canopy-backup-integration.md
-                      # ------------------------------------------------
-                      # Uncomment CANOPY_BASE_URL to opt into the canopy path.
-                      # Leaving it unset keeps the operator in legacy-only mode
-                      # (existing PostgresPhysicalReplica CRDs continue to work).
-                      # - name: CANOPY_BASE_URL
-                      #   value: https://canopy.example.com
-                      # SOCKS5 proxy the operator's Tailscale sidecar exposes.
-                      # Default [::1]:1055 matches the sidecar's TS_SOCKS5_SERVER.
+                      # Canopy's tailnet URL. Required: pgro reaches Canopy only
+                      # through the Tailscale sidecar below.
+                      - name: CANOPY_TAILNET_URL
+                        value: https://canopy.example.ts.net
+                      # SOCKS5 proxy the Tailscale sidecar exposes.
+                      # Default socks5://[::1]:1055 matches the sidecar's
+                      # TS_SOCKS5_SERVER.
                       # - name: CANOPY_SOCKS5_PROXY
                       #   value: socks5://[::1]:1055
-                      # Optional mTLS fallback if the tailnet probe fails.
-                      # - name: CANOPY_DEVICE_CERT_SECRET
-                      #   value: pgro-canopy-device-cert
-                      # Worklist tick cadence (jittered ±20%). Default 30.
+                      # A tailnet address to connect to in place of resolving
+                      # the URL's host, where the proxy cannot resolve it.
+                      # - name: CANOPY_TAILNET_ADDR
+                      #   value: 100.64.0.1
+                      # Worklist tick cadence (jittered +-20%). Default 30.
                       # - name: CANOPY_RECONCILE_INTERVAL_SECS
                       #   value: "30"
-                      # Sidecar image spawned into each canopy-backed
-                      # restore Job. Overrides the built-in default so
-                      # operators can pin to a specific tag.
+                      # Image of the sidecar spawned into each restore Job.
+                      # Set it to the tag of the image pgro runs from, so
+                      # the sidecar and pgro are never different builds.
                       # - name: CANOPY_PROXY_IMAGE
-                      #   value: ghcr.io/beyondessential/pgro-canopy-proxy:latest
+                      #   value: ghcr.io/beyondessential/canopy:latest
                       # Name of a kubernetes.io/dockerconfigjson Secret in the
                       # operator's namespace that the schema build pulls its
                       # builder image with, where that image is private. The
@@ -328,10 +329,9 @@ spec:
                       - name: tailscale-socket
                         mountPath: /var/run/tailscale
                         readOnly: true
-                # Tailscale sidecar — the primary production network path
-                # to canopy. bestool-canopy's CanopyClient auto-probes
-                # canopy.tail53aef.ts.net; the SOCKS5 proxy on [::1]:1055
-                # is what makes that probe succeed from in-cluster.
+                # Tailscale sidecar — pgro's only path to Canopy. Calls go
+                # through its SOCKS5 proxy on [::1]:1055, and the tailnet
+                # node it runs as is pgro's identity to Canopy.
                 #
                 # Ops (one-time per cluster) provisions:
                 # - the Tailscale k8s operator;
@@ -381,9 +381,8 @@ spec:
                   emptyDir: {}
 ---
 # NetworkPolicy restricting the credential-broker port (9091) to Pods
-# labelled `pgro.bes.au/proxy-sidecar=true` — the label the canopy Job
-# builder puts on kopia-restore Pods so their sidecars can reach the
-# broker. Metrics port (8080) is left open per the existing Service +
+# labelled `pgro.bes.au/proxy-sidecar=true` — the label pgro puts on
+# kopia Job Pods so their sidecars can reach the broker. Metrics port (8080) is left open per the existing Service +
 # Prometheus scrape convention.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -402,7 +401,7 @@ spec:
         - ports:
               - port: 8080
                 protocol: TCP
-        # Allow the broker port only from canopy Job proxy sidecars.
+        # Allow the broker port only from Job proxy sidecars.
         - from:
               - namespaceSelector: {}
                 podSelector:

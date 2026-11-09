@@ -1,6 +1,8 @@
-# pgro — PostgreSQL Restore Operator
+# pgro — restore operator
 
-Monitors a Kopia backup repository for "physical" backups of PostgreSQL databases and restores them regularly within a Kubernetes cluster.
+A Kubernetes operator that Canopy drives to restore Kopia-backed PostgreSQL backups into working replicas within a cluster.
+Canopy decides which replicas exist, which snapshot each is restored from and how each is configured; pgro restores them, reports each outcome back, and tears a replica down when Canopy stops asking for it.
+Its specs are in [`.workhorse/specs/restore-operator/`](../../.workhorse/specs/restore-operator/overview.md).
 
 > [!WARNING]
 > This is an internal project of BES International, used in our data and analytics infrastructure, as well as for backup operations and testing purposes, and not supported outside that.
@@ -13,6 +15,18 @@ Apply the operator manifest:
 kubectl apply -f operator.yaml
 ```
 
+The manifest runs pgro with a Tailscale sidecar, which is pgro's only path to Canopy and whose tailnet node is its identity there.
+That node has to be attached to a Canopy device holding the restore role.
+pgro does not start without a connection configured to Canopy:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `CANOPY_TAILNET_URL` | Yes | Canopy's tailnet URL. |
+| `CANOPY_SOCKS5_PROXY` | No | The sidecar's SOCKS5 proxy. Defaults to `socks5://[::1]:1055`; empty disables the proxy. |
+| `CANOPY_TAILNET_ADDR` | No | A tailnet IP address to connect to in place of resolving the URL's host, for where the proxy cannot resolve it. |
+| `CANOPY_RECONCILE_INTERVAL_SECS` | No | How often the worklist is reconciled. Defaults to 30. |
+| `CANOPY_PROXY_IMAGE` | No | Image of the sidecar added to every kopia Job, which ships in the same image as pgro. Set it to the tag pgro runs from. |
+
 The operator applies its own CRDs on startup, so no separate `crds.yaml`
 step is needed. If you'd rather manage CRD lifecycle out-of-band (e.g.
 gating schema changes at install time), generate + apply them manually:
@@ -22,52 +36,15 @@ cargo run --bin gen-crds > crds.yaml
 kubectl apply -f crds.yaml
 ```
 
-## Quick start
+## How replicas come about
 
-Make a new namespace:
-
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: pgro-example
-```
-
-Create a Secret containing the Kopia repository credentials:
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  namespace: pgro-example
-  name: kopia-credentials
-type: Opaque
-stringData:
-  bucket: example-bucket
-  region: ap-southeast-2
-  repositoryPassword: super-secret-repo-password-123
-  accessKeyId: AKIAIOSFODNN7EXAMPLE
-  secretAccessKey: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-```
-
-Create a PostgreSQL Physical Replica instance:
-
-```yaml
-apiVersion: pgro.bes.au/v1alpha1
-kind: PostgresPhysicalReplica
-metadata:
-  namespace: pgro-example
-  name: test
-spec:
-  kopiaSecretRef:
-    name: kopia-credentials
-  schedule: '* */6 * * *'
-  snapshotFilter:
-    tags:
-      area: postgres
-```
-
-This will restore the latest snapshot matching the filter, create a new PostgreSQL instance with the restored data, and then do that again every 6 hours.
+Every replica is Canopy's.
+Each tick, pgro fetches Canopy's worklist and, for each entry, makes a namespace holding a Secret and a `PostgresPhysicalReplica` whose `canopySource` names the entry's group and backup type.
+The Secret carries the entry's bucket, region, prefix and repository password, with dummy AWS keys.
+Kopia Jobs run beside a `canopy-proxy` sidecar that holds the credentials Canopy issues for the run, re-signs each S3 request with them, and refreshes them, so a long restore is not bound by one credential's lifetime.
+When Canopy offers a newer snapshot, pgro records it in `status.canopyDesiredSnapshotId`, restores it, switches the replica over and reports the outcome.
+When a namespace is no longer on the worklist, pgro tears it down.
+A hand edit to one of these replicas is put back on the next tick, so replicas are changed in Canopy rather than here.
 
 ## CRDs
 
@@ -78,17 +55,15 @@ There are two CRDs:
 
 ### PostgresPhysicalReplica
 
-The main user-facing resource.
-Defines a continuously-refreshed replica of a PostgreSQL database restored from Kopia snapshots.
+The main resource.
+Defines a continuously-refreshed replica of a PostgreSQL database restored from Kopia snapshots. Created and kept in step by pgro from Canopy's worklist.
 
 #### Spec
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `kopiaSecretRef` | `SecretReference` | One of | — | Reference to a Secret containing Kopia repository credentials (`bucket`, `region`, `repositoryPassword`, `accessKeyId`, `secretAccessKey`). Mutually exclusive with `canopySource`. |
-| `canopySource` | `CanopySource` | One of | — | Route kopia through the canopy-mediated proxy sidecar instead of a static Secret. `{ group, type }`. Managed by the canopy worklist syncer; humans usually don't hand-author these. Mutually exclusive with `kopiaSecretRef`. |
-| `snapshotFilter` | `SnapshotFilter` | No | — | Filter criteria to select which Kopia snapshot to restore. |
-| `schedule` | `string` | Yes | — | Cron expression controlling how often new restores are triggered. |
+| `canopySource` | `CanopySource` | Yes | — | The Canopy group and backup type whose backups this replica restores: `{ group, type }`. Written by the worklist syncer. |
+| `schedule` | `string` | Yes | — | Cron expression for a fallback restore trigger. The syncer sets an hourly one; what normally triggers a restore is a new `status.canopyDesiredSnapshotId`. Also sets the time budget of a [persistent schemas](#persistent-schemas) migration. |
 | `scheduleJitter` | `string` | No | `"10m"` | Random jitter added to scheduled restores (friendly duration, e.g. `"5m"`, `"1h"`). |
 | `minimumTtl` | `string` | No | — | Don't restore a new snapshot within this duration of the last restore completing. |
 | `switchoverGracePeriod` | `string` | No | `"5m"` | How long to wait before deleting the old restore after a switchover. |
@@ -107,9 +82,8 @@ Defines a continuously-refreshed replica of a PostgreSQL database restored from 
 | `affinity` | `Affinity` | No | — | Pod scheduling affinity rules. |
 | `tolerations` | `[]Toleration` | No | `[]` | Pod tolerations. |
 | `readOnly` | `bool` | No | `true` | Set the restored database to read-only mode. |
-| `ephemeral` | `bool` | No | `false` | Tear the restore down once it reaches `Active` (postgres came up healthy) instead of keeping it running. The replica only restores again when a newer snapshot is offered (canopy path) or the schedule next fires (legacy path). Used by the `verify` intent, whose job is just to prove the snapshot restores, and by `upgrade`, which additionally migrates it. |
+| `ephemeral` | `bool` | No | `false` | Tear the restore down once it reaches `Active` (postgres came up healthy) instead of keeping it running. The replica only restores again when Canopy offers a newer snapshot. Used by the `verify` intent, whose job is just to prove the snapshot restores, and by `upgrade`, which additionally migrates it. |
 | `postgresExtraConfig` | `string` | No | — | Extra lines appended to `postgresql.conf` (e.g. `shared_preload_libraries`). |
-| `notifications` | `[]NotificationConfig` | No | `[]` | Notification targets called on restore events. |
 | `persistentSchemas` | `[]string` | No | — | List of schema names to migrate from the previous restore to the new restore on each switchover. See [Persistent schemas](#persistent-schemas) below for the migration time budget and what happens on timeout. |
 | `preMigrateDropSchemas` | `[]string` | No | — | Schemas dropped from the restore before its migration Job runs. Views over a table a migration alters block the DDL, so a deployment that drops and regenerates such schemas around a real upgrade names them here and the test starts from the same place. `public`, `information_schema` and `pg_*` are refused. Set from the intent's `pre_migrate_drop_schemas` param, which the `upgrade` and `reporting-schema` intents default to `reporting`. |
 | `preMigrateSql` | `string` | No | — | SQL run against the restore after the schema drops and before its migration Job, for starting-state changes a drop can't express. Set from the intent's `pre_migrate_sql` param, which the `upgrade` and `reporting-schema` intents default to calling Tamanu's `forget_server_identity()` where the snapshot has it and soft-deleting the `S1:` encrypted values in `local_system_secrets` and `local_system_facts`, so the copy forgets the source server and the upgrade's config key check passes without the source deployment's key. |
@@ -175,39 +149,6 @@ Notes:
 - During redaction the database is writable; once anonymisation completes, the operator sets `default_transaction_read_only = on` at the database level and demotes the analytics user back to non-superuser when `spec.readOnly` is true. Replicas that also set `persistentSchemas` stay writable, because the schema migration runs after redaction and writes to the same database — matching what those replicas do without redaction.
 - If a redaction run fails, the switchover is held: the replica keeps serving its previous restore, a `RedactionFailed` Warning event is recorded, and the next reconcile retries. An unredacted restore is never made live.
 
-#### SnapshotFilter
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `tags` | `map[string]string` | No | Key-value tags that the snapshot must match. |
-| `hostPattern` | `string` | No | Glob pattern for filtering snapshot hosts. |
-| `descriptionPattern` | `string` | No | Glob pattern for filtering snapshot descriptions. |
-| `pathPattern` | `string` | No | Glob pattern for filtering snapshot source paths. Windows paths are normalised to Unix style (e.g. `D:\Full` becomes `/D/Full`). |
-
-#### NotificationConfig
-
-A tagged union on the `target` field. Common fields:
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `target` | `"webhook"` \| `"graphQL"` | Yes | Notification target type. |
-| `url` | `string` | Yes | URL to send the notification to. |
-| `headers` | `map[string]HeaderValue` | No | HTTP headers. Values can be plain strings or `{ secretKeyRef: { name, key } }`. |
-| `includePassword` | `bool` | No | Include the database password in the notification payload. |
-
-Additional fields for `target: webhook`:
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `method` | `string` | `"POST"` | HTTP method. |
-
-Additional fields for `target: graphQL`:
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `mutation` | `string` | Yes | GraphQL mutation string. |
-| `variablesTemplate` | `string` | Yes | Template for the GraphQL variables payload. |
-
 #### ExtraUserSpec
 
 | Field | Type | Required | Description |
@@ -227,12 +168,11 @@ Each role is reset to a fixed state on every restore — attributes (`LOGIN`, no
 | `serviceName` | `string` | Name of the Kubernetes Service pointing to the active restore. |
 | `lastRestoreCompletedAt` | `Time` | When the last restore completed. |
 | `nextScheduledRestore` | `Time` | When the next scheduled restore will occur. |
-| `latestAvailableSnapshot` | `string` | Snapshot ID of the latest available snapshot matching the filter. |
-| `canopyDesiredSnapshotId` | `string` | For canopy-sourced replicas: the snapshot the canopy worklist syncer wants restored. The reconciler triggers a new restore when this differs from the current one. |
+| `latestAvailableSnapshot` | `string` | Snapshot ID of the snapshot Canopy named, as found in the repository. |
+| `canopyDesiredSnapshotId` | `string` | The snapshot the Canopy worklist syncer wants restored. The reconciler triggers a new restore when this differs from the current one. |
 | `verifiedSnapshotId` | `string` | For `ephemeral` replicas: the last snapshot that was verified and then torn down. Gates re-restore — the reconciler only restores again when the desired snapshot differs from this. |
 | `connectionInfo` | `ConnectionInfo` | Connection details (host, port, database, username, password secret). |
 | `queuePosition` | `uint32` | Position in the global restore queue. |
-| `notifications` | `[]NotificationStatus` | Status of each configured notification target. |
 | `conditions` | `[]Condition` | Standard Kubernetes conditions. |
 | `schemaMigrationJob` | `string` | Name of the active schema migration Job (set while migration is in progress). |
 | `schemaMigrationPhase` | `string` | Phase of the schema migration (`active`, `complete`, `partial`, `timeout-skipped`, or `failed: <reason>`). See [Persistent schemas](#persistent-schemas). |
@@ -248,7 +188,7 @@ Each role is reset to a fixed state on every restore — attributes (`LOGIN`, no
 
 Managed by the operator.
 Each resource represents a single restore operation from a Kopia snapshot.
-Users should not create these directly.
+Nothing should create these by hand.
 Deleting this resource will drop the restored database and prompt the Replica to create a new Restore immediately.
 
 #### Spec
@@ -267,7 +207,7 @@ Deleting this resource will drop the restored database and prompt the Replica to
 | Field | Type | Description |
 |-------|------|-------------|
 | `phase` | `Pending` \| `Restoring` \| `Migrating` \| `Ready` \| `Switching` \| `Active` \| `Failed` | Current phase of the restore. `Migrating` is only reached when `migrateTo` is set. |
-| `runId` | `string` | Canopy run-uuid minted when the restore Job is created, reused for the run's credential requests and verification report so canopy can correlate them. Canopy-backed restores only. |
+| `runId` | `string` | Canopy run-uuid minted when the restore Job is created, reused for the run's credential requests and verification report so canopy can correlate them. |
 | `postgresVersion` | `string` | Detected PostgreSQL major version from the restored data. |
 | `createdAt` | `Time` | When the restore resource was created. |
 | `restoredAt` | `Time` | When the restore job completed. |
