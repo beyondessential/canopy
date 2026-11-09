@@ -714,5 +714,46 @@ fn snapshot_list_proxy() -> CanopyProxyArgs<'static> {
 		stats_callback_url: "http://operator.pgro-system.svc:8080/api/v1/canopy-stats/ns/job",
 		progress_callback_url: None,
 		run_id: None,
+		s3_endpoint: None,
 	}
+}
+
+/// The snapshot-list Job reaches the repository through the same sidecar, so a
+/// custom S3 endpoint has to reach its sidecar too.
+#[test]
+fn snapshot_list_sidecar_carries_the_s3_endpoint() {
+	let replica = snapshot_list_test_replica();
+	let proxy = CanopyProxyArgs {
+		s3_endpoint: Some("http://minio.minio.svc:9000"),
+		..snapshot_list_proxy()
+	};
+	let job = build_snapshot_list_job(
+		&replica,
+		"test-snap",
+		"default",
+		"kopia:latest",
+		"http://x",
+		&proxy,
+		&PodPlacement::default(),
+	)
+	.expect("job builds");
+
+	let sidecar = job
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.init_containers
+		.unwrap()
+		.into_iter()
+		.find(|c| c.name == "canopy-proxy")
+		.expect("canopy-proxy sidecar");
+	let endpoint = sidecar
+		.env
+		.unwrap_or_default()
+		.into_iter()
+		.find(|e| e.name == "PGRO_S3_ENDPOINT")
+		.and_then(|e| e.value);
+	assert_eq!(endpoint.as_deref(), Some("http://minio.minio.svc:9000"));
 }

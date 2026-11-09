@@ -26,6 +26,7 @@ pgro does not start without a connection configured to Canopy:
 | `CANOPY_TAILNET_ADDR` | No | A tailnet IP address to connect to in place of resolving the URL's host, for where the proxy cannot resolve it. |
 | `CANOPY_RECONCILE_INTERVAL_SECS` | No | How often the worklist is reconciled. Defaults to 30. |
 | `CANOPY_PROXY_IMAGE` | No | Image of the sidecar added to every kopia Job, which ships in the same image as pgro. Set it to the tag pgro runs from. |
+| `CANOPY_S3_ENDPOINT` | No | An S3-compatible endpoint (e.g. `http://minio.minio.svc:9000`) the sidecars use in place of AWS S3, for clusters that test against their own object store. |
 
 The operator applies its own CRDs on startup, so no separate `crds.yaml`
 step is needed. If you'd rather manage CRD lifecycle out-of-band (e.g.

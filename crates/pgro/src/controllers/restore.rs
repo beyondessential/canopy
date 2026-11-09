@@ -541,6 +541,7 @@ async fn reconcile_restoring(
 				stats_callback_url: &stats_callback_url,
 				progress_callback_url: Some(&progress_callback_url),
 				run_id: Some(&run_id),
+				s3_endpoint: ctx.s3_endpoint.as_deref(),
 			};
 			let job = build_restore_job(
 				restore,

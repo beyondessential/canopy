@@ -1056,6 +1056,7 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 			// and nothing long enough to be worth sampling.
 			progress_callback_url: None,
 			run_id: None,
+			s3_endpoint: ctx.s3_endpoint.as_deref(),
 		};
 		let job = build_snapshot_list_job(
 			&replica,

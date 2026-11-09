@@ -277,6 +277,10 @@ spec:
                       # the sidecar and pgro are never different builds.
                       # - name: CANOPY_PROXY_IMAGE
                       #   value: ghcr.io/beyondessential/canopy:latest
+                      # S3-compatible endpoint the sidecars use in place of AWS S3,
+                      # for clusters that test against their own object store.
+                      # - name: CANOPY_S3_ENDPOINT
+                      #   value: http://minio.minio.svc:9000
                       # Name of a kubernetes.io/dockerconfigjson Secret in the
                       # operator's namespace that the schema build pulls its
                       # builder image with, where that image is private. The

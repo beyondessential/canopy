@@ -47,6 +47,9 @@ struct Config {
 	/// so a sidecar scheduled by an older operator (no env set) still works.
 	run_id: Option<String>,
 	region: String,
+	/// An S3-compatible endpoint to use in place of AWS S3
+	/// (`PGRO_S3_ENDPOINT`), e.g. `http://minio.minio.svc:9000`.
+	s3_endpoint: Option<String>,
 	port_file: PathBuf,
 	/// URL the operator serves the stats-callback on; the sidecar POSTs
 	/// its final TrafficStats there on shutdown so the reporter can
@@ -69,6 +72,9 @@ impl Config {
 			backup_type: env_required("PGRO_TYPE")?,
 			run_id: std::env::var("PGRO_RUN_ID").ok().filter(|s| !s.is_empty()),
 			region: env_required("PGRO_REGION")?,
+			s3_endpoint: std::env::var("PGRO_S3_ENDPOINT")
+				.ok()
+				.filter(|s| !s.trim().is_empty()),
 			port_file: env_or("PGRO_PROXY_PORT_FILE", "/var/run/pgro/proxy-port").into(),
 			stats_callback_url: env_required("PGRO_STATS_CALLBACK_URL")?,
 			progress_callback_url: std::env::var("PGRO_PROGRESS_CALLBACK_URL")
@@ -163,14 +169,56 @@ impl CredentialProvider for BrokerCredentialProvider {
 				let fresh = self.fetch().await?;
 				*cached = Some(fresh);
 			}
-			let creds = cached.as_ref().expect("cache populated above");
-			Ok(Credentials {
-				access_key: creds.access_key_id.clone(),
-				secret_key: creds.secret_access_key.0.clone(),
-				session_token: Some(creds.session_token.0.clone()),
-			})
+			Ok(credentials_from(
+				cached.as_ref().expect("cache populated above"),
+			))
 		})
 	}
+}
+
+/// What the proxy signs with. An empty session token is no token: a backend
+/// that issues long-lived keys sends none, and the proxy must not forward an
+/// empty `x-amz-security-token` for it to reject.
+fn credentials_from(creds: &BackupCredentials) -> Credentials {
+	Credentials {
+		access_key: creds.access_key_id.clone(),
+		secret_key: creds.secret_access_key.0.clone(),
+		session_token: Some(creds.session_token.0.clone()).filter(|token| !token.is_empty()),
+	}
+}
+
+/// Where the proxy sends requests: the endpoint when one is set, otherwise
+/// AWS S3 in `region`. The `Host` header and signature use the endpoint's
+/// authority, and the endpoint's path is dropped.
+fn s3_proxy_config(region: &str, endpoint: Option<&str>) -> Result<S3ProxyConfig, String> {
+	let (upstream, upstream_host) = match endpoint {
+		None => (
+			format!("https://s3.{region}.amazonaws.com"),
+			format!("s3.{region}.amazonaws.com"),
+		),
+		Some(endpoint) => {
+			let url = reqwest::Url::parse(endpoint)
+				.map_err(|err| format!("PGRO_S3_ENDPOINT {endpoint:?} is not a URL: {err}"))?;
+			if !matches!(url.scheme(), "http" | "https") {
+				return Err(format!(
+					"PGRO_S3_ENDPOINT {endpoint:?} must be an http or https URL"
+				));
+			}
+			let host = url
+				.host_str()
+				.ok_or_else(|| format!("PGRO_S3_ENDPOINT {endpoint:?} has no host"))?;
+			let authority = match url.port() {
+				Some(port) => format!("{host}:{port}"),
+				None => host.to_string(),
+			};
+			(format!("{}://{authority}", url.scheme()), authority)
+		}
+	};
+	Ok(S3ProxyConfig {
+		upstream,
+		upstream_host,
+		region: region.to_string(),
+	})
 }
 
 #[derive(Serialize)]
@@ -307,11 +355,7 @@ async fn run(cfg: Config) -> Result<(), String> {
 		&backup_type,
 		cfg.run_id.as_deref(),
 	));
-	let s3_cfg = S3ProxyConfig {
-		upstream: format!("https://s3.{}.amazonaws.com", cfg.region),
-		upstream_host: format!("s3.{}.amazonaws.com", cfg.region),
-		region: cfg.region.clone(),
-	};
+	let s3_cfg = s3_proxy_config(&cfg.region, cfg.s3_endpoint.as_deref())?;
 	let proxy = Arc::new(
 		proxy::spawn(s3_cfg, provider)
 			.await
@@ -402,6 +446,7 @@ mod tests {
 			backup_type: "tamanu-postgres".into(),
 			run_id: run_id.map(str::to_string),
 			region: "ap-southeast-2".into(),
+			s3_endpoint: None,
 			port_file: "/var/run/pgro/proxy-port".into(),
 			stats_callback_url: "http://operator:8080/api/v1/canopy-stats/ns/job".into(),
 			progress_callback_url: progress_callback_url.map(str::to_string),
@@ -448,6 +493,60 @@ mod tests {
 			"Expiration": expiration,
 		}))
 		.unwrap()
+	}
+
+	#[test]
+	fn aws_is_the_default_upstream() {
+		let cfg = s3_proxy_config("ap-southeast-2", None).unwrap();
+		assert_eq!(cfg.upstream, "https://s3.ap-southeast-2.amazonaws.com");
+		assert_eq!(cfg.upstream_host, "s3.ap-southeast-2.amazonaws.com");
+		assert_eq!(cfg.region, "ap-southeast-2");
+	}
+
+	#[test]
+	fn an_endpoint_replaces_the_upstream_and_its_authority_is_the_host() {
+		let cfg = s3_proxy_config("us-east-1", Some("http://minio.minio.svc:9000")).unwrap();
+		assert_eq!(cfg.upstream, "http://minio.minio.svc:9000");
+		assert_eq!(cfg.upstream_host, "minio.minio.svc:9000");
+		assert_eq!(cfg.region, "us-east-1");
+	}
+
+	#[test]
+	fn an_endpoint_without_a_port_has_a_bare_host_and_loses_its_path() {
+		let cfg = s3_proxy_config("us-east-1", Some("https://s3.example.com/")).unwrap();
+		assert_eq!(cfg.upstream, "https://s3.example.com");
+		assert_eq!(cfg.upstream_host, "s3.example.com");
+	}
+
+	#[test]
+	fn an_endpoint_that_is_not_an_http_url_is_refused() {
+		assert!(s3_proxy_config("us-east-1", Some("minio:9000")).is_err());
+		assert!(s3_proxy_config("us-east-1", Some("ftp://minio")).is_err());
+		assert!(s3_proxy_config("us-east-1", Some("not a url")).is_err());
+	}
+
+	fn creds_with_token(token: &str) -> BackupCredentials {
+		serde_json::from_value(serde_json::json!({
+			"Version": 1,
+			"AccessKeyId": "AKIA",
+			"SecretAccessKey": "secret",
+			"SessionToken": token,
+			"Expiration": "2026-07-01T01:00:00Z",
+		}))
+		.unwrap()
+	}
+
+	#[test]
+	fn an_empty_session_token_is_no_token() {
+		assert_eq!(credentials_from(&creds_with_token("")).session_token, None);
+	}
+
+	#[test]
+	fn a_session_token_is_forwarded() {
+		let creds = credentials_from(&creds_with_token("session"));
+		assert_eq!(creds.session_token.as_deref(), Some("session"));
+		assert_eq!(creds.access_key, "AKIA");
+		assert_eq!(creds.secret_key, "secret");
 	}
 
 	#[test]

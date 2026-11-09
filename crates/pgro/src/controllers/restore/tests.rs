@@ -21,6 +21,7 @@ fn proxy_args() -> super::builders::CanopyProxyArgs<'static> {
 		stats_callback_url: "http://operator.pgro-system.svc:8080/api/v1/canopy-stats/ns/job",
 		progress_callback_url: None,
 		run_id: None,
+		s3_endpoint: None,
 	}
 }
 
@@ -408,6 +409,7 @@ fn canopy_restore_job_proxy_is_native_sidecar() {
 		stats_callback_url: "http://operator.pgro-system.svc:8080/api/v1/canopy-stats/ns/job",
 		progress_callback_url: None,
 		run_id: Some("44444444-4444-4444-4444-444444444444"),
+		s3_endpoint: None,
 	};
 	let job = build_restore_job(
 		&restore,
@@ -461,6 +463,7 @@ fn canopy_restore_job_sidecar_carries_run_id() {
 			stats_callback_url: "http://operator.pgro-system.svc:8080/api/v1/canopy-stats/ns/job",
 			progress_callback_url: None,
 			run_id,
+			s3_endpoint: None,
 		};
 		let job = build_restore_job(
 			&restore,
@@ -691,6 +694,7 @@ fn canopy_restore_job_sidecar_carries_progress_callback_url() {
 		stats_callback_url: "http://operator.pgro-system.svc:8080/api/v1/canopy-stats/ns/job",
 		progress_callback_url: Some(url),
 		run_id: Some("22222222-2222-2222-2222-222222222222"),
+		s3_endpoint: None,
 	};
 	let job = build_restore_job(
 		&restore,
@@ -722,6 +726,52 @@ fn canopy_restore_job_sidecar_carries_progress_callback_url() {
 		.find(|e| e.name == "PGRO_PROGRESS_CALLBACK_URL")
 		.and_then(|e| e.value);
 	assert_eq!(got.as_deref(), Some(url));
+}
+
+/// A custom S3 endpoint (MinIO in the cluster tests) reaches the sidecar as
+/// `PGRO_S3_ENDPOINT`, and is absent when none is configured, which leaves the
+/// sidecar on AWS.
+#[test]
+fn canopy_restore_job_sidecar_carries_the_s3_endpoint() {
+	let (restore, replica) = test_restore_and_replica();
+	let endpoint_env = |s3_endpoint: Option<&str>| {
+		let proxy = super::builders::CanopyProxyArgs {
+			s3_endpoint,
+			..proxy_args()
+		};
+		let job = build_restore_job(
+			&restore,
+			"test-restore-restore",
+			"default",
+			&replica,
+			"kopia:latest",
+			"http://operator/api/v1/cache-pressure/default/test-restore",
+			&proxy,
+			&PodPlacement::default(),
+		)
+		.unwrap();
+		job.spec
+			.unwrap()
+			.template
+			.spec
+			.unwrap()
+			.init_containers
+			.unwrap()
+			.into_iter()
+			.find(|c| c.name == "canopy-proxy")
+			.expect("canopy-proxy sidecar")
+			.env
+			.unwrap_or_default()
+			.into_iter()
+			.find(|e| e.name == "PGRO_S3_ENDPOINT")
+			.and_then(|e| e.value)
+	};
+
+	assert_eq!(
+		endpoint_env(Some("http://minio.minio.svc:9000")).as_deref(),
+		Some("http://minio.minio.svc:9000"),
+	);
+	assert_eq!(endpoint_env(None), None);
 }
 
 fn restore_job_for(snapshot_size: &str) -> k8s_openapi::api::batch::v1::Job {

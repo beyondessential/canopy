@@ -59,6 +59,9 @@ pub struct CanopyProxyArgs<'a> {
 	/// `None` for non-run credential consumers (e.g. the snapshot-list job,
 	/// which is discovery rather than a restore run).
 	pub run_id: Option<&'a str>,
+	/// An S3-compatible endpoint the sidecar uses in place of AWS S3,
+	/// passed to it as `PGRO_S3_ENDPOINT`.
+	pub s3_endpoint: Option<&'a str>,
 }
 
 /// Name of the credential-reset Job for a given restore.
@@ -601,6 +604,13 @@ pub fn canopy_proxy_sidecar(source: &KopiaSource, proxy: &CanopyProxyArgs<'_>) -
 		env.push(EnvVar {
 			name: "PGRO_RUN_ID".to_string(),
 			value: Some(run_id.to_string()),
+			..Default::default()
+		});
+	}
+	if let Some(endpoint) = proxy.s3_endpoint {
+		env.push(EnvVar {
+			name: "PGRO_S3_ENDPOINT".to_string(),
+			value: Some(endpoint.to_string()),
 			..Default::default()
 		});
 	}

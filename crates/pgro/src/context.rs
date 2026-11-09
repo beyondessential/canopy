@@ -50,6 +50,10 @@ pub struct Context {
 	/// build namespace is made per worklist entry and torn down with it, so the
 	/// Secret is copied in at dispatch rather than placed there in advance.
 	pub builder_pull_secret: Option<String>,
+	/// An S3-compatible endpoint the proxy sidecars use in place of AWS S3,
+	/// from `CANOPY_S3_ENDPOINT` (a URL such as `http://minio.minio.svc:9000`).
+	/// Unset reaches the bucket's AWS S3 endpoint, as in production.
+	pub s3_endpoint: Option<String>,
 	/// Image reference for the pgro-canopy-proxy sidecar container. Set
 	/// by the operator startup from `CANOPY_PROXY_IMAGE`.
 	pub canopy_proxy_image: String,
@@ -118,6 +122,7 @@ impl Context {
 			canopy_broker_base_url: String::new(),
 			operator_namespace: "default".to_string(),
 			builder_pull_secret: None,
+			s3_endpoint: None,
 			canopy_proxy_image: DEFAULT_CANOPY_PROXY_IMAGE.to_string(),
 			snapshot_results: Arc::new(CallbackStore::default()),
 			schema_migration_results: Arc::new(CallbackStore::default()),

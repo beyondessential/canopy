@@ -367,6 +367,10 @@ async fn main() -> anyhow::Result<()> {
 	ctx.builder_pull_secret = std::env::var("BUILDER_PULL_SECRET")
 		.ok()
 		.filter(|name| !name.trim().is_empty());
+	ctx.s3_endpoint = std::env::var("CANOPY_S3_ENDPOINT")
+		.ok()
+		.map(|endpoint| endpoint.trim().to_string())
+		.filter(|endpoint| !endpoint.is_empty());
 	ctx.canopy_proxy_image = std::env::var("CANOPY_PROXY_IMAGE")
 		.unwrap_or_else(|_| DEFAULT_CANOPY_PROXY_IMAGE.to_string());
 	// Path to the tailscale sidecar's LocalAPI socket (shared via an emptyDir),
