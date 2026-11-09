@@ -27,11 +27,13 @@ use crate::{
 mod counted;
 mod decisions;
 mod items;
+mod sources;
 mod suggestions;
 
 pub use counted::*;
 pub use decisions::*;
 pub use items::*;
+pub use sources::*;
 pub use suggestions::*;
 
 /// A repository whose default branch Canopy reads dependencies from.

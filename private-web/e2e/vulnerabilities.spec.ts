@@ -159,6 +159,30 @@ test.describe("vulnerabilities", () => {
 		).toBeVisible();
 	});
 
+	test("the sources page shows each source, and a rescan marks one due", async ({ page, sql }) => {
+		await seedFleet(sql);
+		await seedItems(sql);
+		await page.goto("/vulnerabilities");
+		await page.getByRole("link", { name: "Sources" }).click();
+		await expect(page).toHaveURL(/\/vulnerabilities\/sources$/);
+
+		const tamanu = page.getByRole("row").filter({ hasText: "tamanu" });
+		await expect(tamanu).toContainText("beyondessential/tamanu");
+		await expect(tamanu).toContainText("2 packages");
+		const linux = page.getByRole("row").filter({ hasText: "linux" });
+		await expect(linux).toContainText("machine");
+		await expect(linux.getByRole("button", { name: "Rescan" })).toHaveCount(0);
+
+		// A repository nothing has read yet is listed, and already due.
+		const unread = page.getByRole("row").filter({ hasText: "bliti" });
+		await expect(unread).toContainText("0 packages");
+		await expect(unread).toContainText("Due");
+
+		await tamanu.getByRole("button", { name: "Rescan" }).click();
+		await expect(tamanu).toContainText("Due");
+		await expect(tamanu).toContainText("2 packages");
+	});
+
 	test("lists what needs triage by severity, with package, scope and suggestion", async ({
 		page,
 		sql,

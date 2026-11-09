@@ -87,6 +87,8 @@ pub enum RecordKind {
 	RelyingParty,
 	/// An OSV advisory, by its identifier.
 	Advisory,
+	/// A vulnerability source, by its name.
+	Source,
 }
 
 /// A record an action acted on: its identifier, and its name as it was when the
@@ -746,6 +748,15 @@ actions! {
 			reason: Option<String>, issue_url: Option<String>,
 			earlier_reason: Option<String>, earlier_issue_url: Option<String>, via: String,
 		}
+	}
+
+	/// A repository was asked to be read again, whatever its default branch is
+	/// at, by an operator who has reason to think what Canopy holds for it is
+	/// not what is there.
+	// spec: VUL#where-a-package-sits
+	VulnerabilitySourceRescanned = "vulnerability_source_rescanned", "Rescan vulnerability source" {
+		records { source: Record }
+		detail { }
 	}
 
 	/// A decision on a vulnerability stopped standing, because OSV revised the

@@ -10247,7 +10247,8 @@
           "name",
           "certificate",
           "relying_party",
-          "advisory"
+          "advisory",
+          "source"
         ],
         "type": "string"
       },
@@ -16232,6 +16233,19 @@
         ],
         "type": "object"
       },
+      "VulnerabilityRescanArgs": {
+        "description": "Which source to read again.",
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/VulnerabilitySource",
+            "description": "The source, which must be a repository."
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "type": "object"
+      },
       "VulnerabilityScope": {
         "description": "When a package is used, in the terms SPDX gives a dependency's lifecycle.",
         "enum": [
@@ -16293,6 +16307,69 @@
           "tamanu"
         ],
         "type": "string"
+      },
+      "VulnerabilitySourceState": {
+        "description": "One source, with what Canopy holds for it and how it came to hold it.",
+        "properties": {
+          "commit_sha": {
+            "description": "The commit it was last read at, absent before it has been read and once\na rescan has been asked for.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failure": {
+            "description": "Why the last attempt failed, absent when it did not.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_attempt_at": {
+            "description": "When reading it was last attempted.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "machines": {
+            "description": "How many live production machines have reported packages, for Linux.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "packages": {
+            "description": "How many package versions it carries.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "read_at": {
+            "description": "When it was last read, or its head last found unchanged.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "slug": {
+            "description": "The GitHub repository it is read from, absent for Linux.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/VulnerabilitySource"
+          }
+        },
+        "required": [
+          "source",
+          "packages"
+        ],
+        "type": "object"
       },
       "VulnerabilityStatus": {
         "description": "An item's triage status.",
@@ -29264,6 +29341,127 @@
           }
         ],
         "summary": "When a machine last reported its packages, and how many it reported.",
+        "tags": [
+          "vulnerabilities"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/vulnerabilities/rescan": {
+      "post": {
+        "description": "The next pass reads its default branch whether or not it has moved. What is\nheld for it stays until that read lands.",
+        "operationId": "vulnerabilities_rescan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VulnerabilityRescanArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Read a repository again.",
+        "tags": [
+          "vulnerabilities"
+        ],
+        "x-canopy-audit": [
+          "vulnerability_source_rescanned"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/vulnerabilities/sources": {
+      "post": {
+        "description": "Every tracked repository with the state of its last read and how much it\ncarries, and Linux with what the production fleet has reported.",
+        "operationId": "vulnerabilities_sources",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VulnerabilitySourceState"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "Where the items come from.",
         "tags": [
           "vulnerabilities"
         ],

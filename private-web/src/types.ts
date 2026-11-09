@@ -209,6 +209,7 @@ export type VulnerabilityFacetCount = Solidify<Schemas["VulnerabilityFacetCount"
 export type VulnerabilitySortColumn = Solidify<Schemas["VulnerabilitySortColumn"]>;
 export type VulnerabilitySeverity = Solidify<Schemas["VulnerabilitySeverity"]>;
 export type VulnerabilitySource = Solidify<Schemas["VulnerabilitySource"]>;
+export type VulnerabilitySourceState = Solidify<Schemas["VulnerabilitySourceState"]>;
 export type VulnerabilityStatus = Solidify<Schemas["VulnerabilityStatus"]>;
 export type VulnerabilityOutcome = Solidify<Schemas["VulnerabilityOutcome"]>;
 export type VulnerabilityScope = Solidify<Schemas["VulnerabilityScope"]>;

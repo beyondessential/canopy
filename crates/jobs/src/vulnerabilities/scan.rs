@@ -21,7 +21,7 @@ use commons_errors::{AppError, Result};
 use database::{
 	audit::{self, Actor},
 	osv::{self, Counted},
-	packages::{READER_VERSION, RepositoryRead},
+	packages::RepositoryRead,
 	self_alerts,
 	vulnerabilities::{
 		Advisory, Decision, Lapse, REPOSITORIES, Repository, Via, change_signal, counted_packages,
@@ -152,23 +152,14 @@ impl Scanner {
 					continue;
 				}
 			};
-			// Nothing to do only when the branch is where the read left it and
-			// the reader that made that read is this one: a reader that has
-			// learnt to read something new makes a different read of the very
-			// same commit.
-			let stands = held.as_ref().is_some_and(|held| {
-				held.commit_sha.as_deref() == Some(head.as_str())
-					&& held.read_by == Some(READER_VERSION)
-			});
-			if stands {
+			if held.as_ref().and_then(|held| held.commit_sha.as_deref()) == Some(head.as_str()) {
 				RepositoryRead::unchanged(conn, repository.name).await?;
 				report.unchanged += 1;
 				continue;
 			}
 			match self.github.read(&repository, &head).await {
 				Ok(packages) => {
-					RepositoryRead::store(conn, repository.name, &head, READER_VERSION, &packages)
-						.await?;
+					RepositoryRead::store(conn, repository.name, &head, &packages).await?;
 					report.read += 1;
 				}
 				Err(e) => {

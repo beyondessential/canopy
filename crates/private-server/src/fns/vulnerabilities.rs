@@ -12,11 +12,11 @@ use commons_servers::{
 	tailscale_auth::{TailscaleAdmin, TailscaleUser},
 };
 use database::{
-	audit::Actor,
+	audit::{Action, Actor, Record, RecordKind},
 	packages::MachinePackageReport,
 	vulnerabilities::{
 		Decision, Edit, Entry, Facets, ItemDetail, ItemSummary, ListQuery, NewDecision, Source,
-		Via, Withdrawal,
+		SourceState, Via, Withdrawal,
 	},
 };
 use serde::{Deserialize, Serialize};
@@ -31,9 +31,75 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only, silent: count))
 		.routes(routes!(read_only, silent: get))
 		.routes(routes!(read_only, silent: machine_packages))
+		.routes(routes!(read_only, silent: sources))
+		.routes(routes!(write, audit(VulnerabilitySourceRescanned): rescan))
 		.routes(routes!(write, audit(VulnerabilityDecided): decide))
 		.routes(routes!(write, audit(VulnerabilityDecisionWithdrawn): withdraw))
 		.routes(routes!(write, audit(VulnerabilityDecisionEdited): edit))
+}
+
+/// Where the items come from.
+///
+/// Every tracked repository with the state of its last read and how much it
+/// carries, and Linux with what the production fleet has reported.
+#[utoipa::path(
+	post,
+	path = "/sources",
+	operation_id = "vulnerabilities_sources",
+	tag = "vulnerabilities",
+	security(("tailscale-user" = [])),
+	request_body = serde_json::Value,
+	responses(
+		(status = 200, body = Vec<SourceState>),
+		(status = 401, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn sources(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+) -> Result<Json<Vec<SourceState>>> {
+	let mut conn = state.db.get().await?;
+	Ok(Json(database::vulnerabilities::list(&mut conn).await?))
+}
+
+/// Which source to read again.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct VulnerabilityRescanArgs {
+	/// The source, which must be a repository.
+	pub source: Source,
+}
+
+/// Read a repository again.
+///
+/// The next pass reads its default branch whether or not it has moved. What is
+/// held for it stays until that read lands.
+#[utoipa::path(
+	post,
+	path = "/rescan",
+	operation_id = "vulnerabilities_rescan",
+	tag = "vulnerabilities",
+	security(("tailscale-admin" = [])),
+	request_body = VulnerabilityRescanArgs,
+	responses(
+		(status = 200, body = ()),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn rescan(
+	audit: Audit,
+	TailscaleAdmin(_admin): TailscaleAdmin,
+	Json(args): Json<VulnerabilityRescanArgs>,
+) -> Result<Json<()>> {
+	let mut conn = audit.begin().await?;
+	database::vulnerabilities::rescan(&mut conn, &args.source).await?;
+	let name = args.source.as_str();
+	conn.record(Action::VulnerabilitySourceRescanned {
+		source: Record::new(RecordKind::Source, name, name),
+	})
+	.await?;
+	Ok(Json(()))
 }
 
 /// A page of items, with the choices of every filter and how many items each

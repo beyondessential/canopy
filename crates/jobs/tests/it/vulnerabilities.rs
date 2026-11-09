@@ -19,9 +19,7 @@ use commons_types::server::rank::ServerRank;
 use database::{
 	audit::{self, Actor, Filter},
 	machines::{Machine, NewMachine},
-	packages::{
-		MachinePackageReport, PackageReport, READER_VERSION, ReportedPackage, RepositoryRead,
-	},
+	packages::{MachinePackageReport, PackageReport, ReportedPackage, RepositoryRead},
 	self_alerts::{self, VULNERABILITY_REPOSITORIES_REF},
 	vulnerabilities::{
 		Basis, Decision, Entry, ItemDetail, ItemSummary, ListQuery, NewDecision, Outcome,
@@ -414,48 +412,6 @@ async fn a_repository_is_read_when_its_head_moves_and_not_otherwise() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_repository_read_by_an_earlier_reader_is_read_again_where_it_stands() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let fake: Shared = Arc::default();
-		publish(&fake, "aaaa", &[("package-lock.json", LOCKFILE)]);
-		let base = serve(fake.clone()).await;
-		let scanner = scanner(&base);
-
-		scanner.read_repositories(&mut conn).await.unwrap();
-		assert_eq!(held(&mut conn).await, 1);
-
-		// What the migration leaves on a read made before readers were told
-		// apart, and what a read by any earlier reader amounts to.
-		diesel::sql_query("UPDATE repository_reads SET read_by = NULL")
-			.execute(&mut conn)
-			.await
-			.unwrap();
-
-		let again = scanner.read_repositories(&mut conn).await.unwrap();
-		assert_eq!(
-			(again.read, again.unchanged),
-			(1, 0),
-			"the head has not moved, but what Canopy makes of it has"
-		);
-		assert_eq!(fake.lock().unwrap().tree_requests.len(), 2);
-		let read = RepositoryRead::get(&mut conn, "tamanu")
-			.await
-			.unwrap()
-			.unwrap();
-		assert_eq!(read.commit_sha.as_deref(), Some("aaaa"));
-		assert_eq!(read.read_by, Some(READER_VERSION));
-
-		let settled = scanner.read_repositories(&mut conn).await.unwrap();
-		assert_eq!(
-			(settled.read, settled.unchanged),
-			(0, 1),
-			"once read by this reader it is left alone again"
-		);
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_scan_asks_about_each_package_version_once_and_each_advisory_until_it_is_revised() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let fake: Shared = Arc::default();
@@ -700,6 +656,95 @@ async fn a_yarn_lockfile_that_cannot_be_read_is_a_failure_not_a_skip() {
 	);
 	let failure = github(&base).read(&TAMANU, "bbbb").await.unwrap_err();
 	assert!(failure.to_string().contains("classic"), "{failure}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repository_with_no_lockfile_canopy_can_read_is_a_failure_not_an_empty_read() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let (fake, base) = scanned(&mut conn).await;
+		let scanner = scanner(&base);
+		assert_eq!(held(&mut conn).await, 2);
+
+		// Nothing Canopy reads: as a repository in an ecosystem it does not
+		// read yet looks, and as Tupaia looked to a build that did not read
+		// Yarn lockfiles.
+		publish(&fake, "bbbb", &[("Gemfile.lock", "GEM\n  specs:\n")]);
+		let report = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!((report.read, report.failed), (0, 1));
+
+		let read = RepositoryRead::get(&mut conn, "tamanu")
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(
+			read.commit_sha.as_deref(),
+			Some("aaaa"),
+			"the commit that could not be read is not recorded as read"
+		);
+		assert!(
+			read.failure.as_deref().unwrap().contains("no lockfile"),
+			"{:?}",
+			read.failure
+		);
+		assert_eq!(
+			held(&mut conn).await,
+			2,
+			"what was held is kept, not emptied"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rescan_reads_the_repository_again_where_it_stands() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let (_fake, base) = scanned(&mut conn).await;
+		let scanner = scanner(&base);
+
+		let unmoved = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!((unmoved.read, unmoved.unchanged), (0, 1));
+
+		database::vulnerabilities::rescan(&mut conn, &tamanu())
+			.await
+			.unwrap();
+		let read = RepositoryRead::get(&mut conn, "tamanu")
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(read.commit_sha, None, "it reads as due");
+		assert!(read.read_at.is_some(), "without going stale meanwhile");
+
+		let asked = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!(
+			(asked.read, asked.unchanged),
+			(1, 0),
+			"the head has not moved, but the read was asked for"
+		);
+		let read = RepositoryRead::get(&mut conn, "tamanu")
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(read.commit_sha.as_deref(), Some("aaaa"));
+
+		let settled = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!(
+			(settled.read, settled.unchanged),
+			(0, 1),
+			"and once read it is left alone again"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn linux_cannot_be_rescanned_since_machines_report_it() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let refused = database::vulnerabilities::rescan(&mut conn, &Source::Linux)
+			.await
+			.unwrap_err();
+		assert!(refused.to_string().contains("machines"), "{refused}");
+	})
+	.await;
 }
 
 async fn held(conn: &mut AsyncPgConnection) -> usize {

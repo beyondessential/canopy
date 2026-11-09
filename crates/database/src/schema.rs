@@ -912,7 +912,6 @@ diesel::table! {
 		first_attempt_at -> Timestamptz,
 		last_attempt_at -> Timestamptz,
 		failure -> Nullable<Text>,
-		read_by -> Nullable<Int4>,
 	}
 }
 

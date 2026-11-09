@@ -101,23 +101,6 @@ pub struct RepositoryPackage {
 	pub paths: Vec<PackagePath>,
 }
 
-/// Which reader a stored read was made by. A repository read by an earlier one
-/// is read again whether or not its default branch has moved, since the head
-/// alone says nothing about what Canopy made of what was there.
-///
-/// **Raise this whenever a change alters what a read of the same commit
-/// yields**: a lockfile kind that now counts, a manifest that is now consulted,
-/// a parser that resolves a dependency differently. The reading itself is the
-/// `vulnerabilities::repository` and `vulnerabilities::lockfile` modules of the
-/// jobs crate. A repository whose default branch rarely moves is otherwise left
-/// at whatever an older reader understood, which is how Tupaia carried no
-/// packages at all for days after Yarn lockfiles came to count.
-///
-/// 1. Yarn lockfiles count, and a Yarn resolution is held to the package it
-///    names.
-// spec: VUL#where-a-package-sits
-pub const READER_VERSION: i32 = 1;
-
 /// The last read of a repository's default branch.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, QueryableByName)]
 pub struct RepositoryRead {
@@ -129,11 +112,6 @@ pub struct RepositoryRead {
 	/// When it was last read, or its head last found unchanged.
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Timestamptz>, deserialize_as = jiff_diesel::NullableTimestamp)]
 	pub read_at: Option<Timestamp>,
-	/// The reader that read it, `None` on a read made before readers were
-	/// told apart. What a reader of a given version makes of a lockfile does
-	/// not change, so a read by the current one need not be made again.
-	#[diesel(sql_type = sql_types::Nullable<sql_types::Integer>)]
-	pub read_by: Option<i32>,
 	#[diesel(sql_type = sql_types::Timestamptz, deserialize_as = jiff_diesel::Timestamp)]
 	pub last_attempt_at: Timestamp,
 	/// Why the last attempt failed, `None` when it did not.
@@ -144,7 +122,7 @@ pub struct RepositoryRead {
 impl RepositoryRead {
 	pub async fn get(conn: &mut AsyncPgConnection, repository: &str) -> Result<Option<Self>> {
 		diesel::sql_query(
-			"SELECT repository, commit_sha, read_at, read_by, last_attempt_at, failure \
+			"SELECT repository, commit_sha, read_at, last_attempt_at, failure \
 			 FROM repository_reads WHERE repository = $1",
 		)
 		.bind::<sql_types::Text, _>(repository)
@@ -162,7 +140,6 @@ impl RepositoryRead {
 		conn: &mut AsyncPgConnection,
 		repository: &str,
 		commit: &str,
-		read_by: i32,
 		packages: &[RepositoryPackage],
 	) -> Result<()> {
 		use crate::schema::{repository_package_paths as paths, repository_packages as held};
@@ -235,14 +212,13 @@ impl RepositoryRead {
 					.await?;
 			}
 			diesel::sql_query(
-				"INSERT INTO repository_reads (repository, commit_sha, read_at, read_by, last_attempt_at, failure) \
-				 VALUES ($1, $2, now(), $3, now(), NULL) \
+				"INSERT INTO repository_reads (repository, commit_sha, read_at, last_attempt_at, failure) \
+				 VALUES ($1, $2, now(), now(), NULL) \
 				 ON CONFLICT (repository) DO UPDATE SET commit_sha = EXCLUDED.commit_sha, \
-				 read_at = now(), read_by = EXCLUDED.read_by, last_attempt_at = now(), failure = NULL",
+				 read_at = now(), last_attempt_at = now(), failure = NULL",
 			)
 			.bind::<sql_types::Text, _>(repository)
 			.bind::<sql_types::Text, _>(commit)
-			.bind::<sql_types::Integer, _>(read_by)
 			.execute(conn)
 			.await?;
 			Ok(())
@@ -293,6 +269,17 @@ impl RepositoryRead {
 		Ok(())
 	}
 
+	/// Every repository read Canopy holds, by repository.
+	pub async fn all(conn: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		diesel::sql_query(
+			"SELECT repository, commit_sha, read_at, last_attempt_at, failure \
+			 FROM repository_reads ORDER BY repository",
+		)
+		.load(conn)
+		.await
+		.map_err(AppError::from)
+	}
+
 	/// The tracked repositories not read for `after`, with why the last attempt
 	/// failed, where it did. One never read is measured from when it was first
 	/// tried, so a first attempt that fails is given the same time. A repository
@@ -302,7 +289,7 @@ impl RepositoryRead {
 		after: jiff::SignedDuration,
 	) -> Result<Vec<Self>> {
 		diesel::sql_query(
-			"SELECT repository, commit_sha, read_at, read_by, last_attempt_at, failure \
+			"SELECT repository, commit_sha, read_at, last_attempt_at, failure \
 			 FROM repository_reads \
 			 WHERE coalesce(read_at, first_attempt_at) < now() - make_interval(secs => $1) \
 			 ORDER BY repository",
