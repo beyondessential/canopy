@@ -21,6 +21,7 @@ Avoid writing large summaries of actions taken when done.
 - **Public server**: Internet-exposed API endpoints for device registration and updates
 - **Private server**: Admin HTTP/JSON API in axum, plus an embedded React SPA (in `private-web/`) served at the root in production
 - **Commons**: Shared utilities, authentication, error handling
+- **Restore operator** (`crates/pgro`): the Kubernetes operator Canopy drives to restore backups into replicas. It has its own guidance in `crates/pgro/AGENTS.md`
 
 ## Database Connection
 - Database models are in `crates/database/src/` with re-exports in `lib.rs`

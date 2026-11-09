@@ -1,11 +1,12 @@
 ---
 name: pgro-status
-description: Check the operational health of a postgres-restore-operator deployment and the replicas/restores it manages. Use when the user asks to "check the replicas", "status check", "is pgro healthy", or similar — anything about pgro operational state in a live cluster.
+description: Check the operational health of pgro, the restore operator, and the replicas and restores it manages in a live cluster. Use when the user asks to "check the replicas", "status check", "is pgro healthy", or similar, and for anything about pgro operational state in a cluster.
 ---
 
 # pgro-status
 
-A standard workflow for inspecting a running postgres-restore-operator and its `PostgresPhysicalReplica` / `PostgresPhysicalRestore` resources via `kubectl`.
+A standard workflow for inspecting a running pgro and its `PostgresPhysicalReplica` / `PostgresPhysicalRestore` resources via `kubectl`.
+Canopy declares every replica pgro runs, so a replica that looks wrong is also worth reading in Canopy (see `.workhorse/specs/restore-operator/`).
 
 ## Preconditions
 
@@ -31,7 +32,8 @@ kubectl get pods -A --field-selector=status.phase=Pending --no-headers | wc -l
 
 Look for:
 
-- Operator image version and pod age. A recent restart means operator logs only cover the post-restart window, which limits debugging.
+- The operator image tag (it is Canopy's image, tagged by commit) and pod age. A recent restart means operator logs only cover the post-restart window, which limits debugging.
+- Both of the pod's containers ready: the operator and the Tailscale sidecar. The sidecar is pgro's only path to Canopy, so without it pgro gets no worklist, credentials or way to report, and no new work starts.
 - Any replica not in `Ready` phase.
 - Restore objects: each replica should have **exactly one** `Active` restore in steady state. A transient `Pending` / `Restoring` / `Ready` / `Switching` restore is normal during a cycle. More than one `Active` indicates the sweep isn't pruning.
 - Pending pod count > 0 is worth digging into before reporting healthy — could be a scheduling problem (Karpenter, taints, resource pressure).
@@ -65,11 +67,10 @@ then iterate.
 |---|---|
 | `consecutiveRestoreFailures > 0` | One or more recent failures; check operator logs for failure mode |
 | `consecutiveRestoreFailures` growing across checks | Persistent failure mode — investigate root cause |
-| `lastRestoreCompletedAt` far older than the cron schedule | Either upstream isn't producing new snapshots, or every recent attempt failed |
+| `lastRestoreCompletedAt` far older than the replica's expected cadence | Either no new snapshots are arriving, or every recent attempt failed |
 | `phase: Restoring` for > 30 min | kopia restore Job pod is slow or stuck; check the Job pod logs |
 | `phase: Switching` for > 30 min | Schema migration likely stuck, or postgres Deployment not coming Ready |
 | `RestoreCreationBlocked: True` | Too-many-restores guardrail tripped — sweep isn't pruning |
-| `RestoreSchedulingSuspended: True` | Legacy condition (older operator versions only — suspension has been removed); means failure backoff is in effect |
 | `SchemaMigrationPartial` events on the replica | Migration succeeded but some statement errors were tolerated; some objects may need regenerating upstream |
 
 ## Investigating failures
@@ -89,6 +90,13 @@ Filter to a specific replica:
 grep -aE "$NS" /tmp/op.txt \
   | grep -aoE '"message":"[^"]+"' \
   | sort | uniq -c | sort -rn | head -10
+```
+
+If nothing is being dispatched at all, check the link to Canopy: errors mentioning canopy in the same log, and the sidecar's own log.
+
+```bash
+grep -aiE 'canopy' /tmp/op.txt | grep -aE '"level":"(WARN|ERROR)"' | tail -10
+kubectl logs -n pgro-system deployment/postgres-restore-operator -c tailscale --tail=30
 ```
 
 Events for the replica's namespace (Kubernetes default TTL ~1h, so only recent activity):
