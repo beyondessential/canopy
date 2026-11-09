@@ -1,0 +1,650 @@
+// spec: USER
+
+use std::{collections::HashSet, time::Duration};
+
+use k8s_openapi::api::core::v1::{Pod, Secret};
+use kube::{
+	Api, Client, ResourceExt,
+	api::{ListParams, Portforwarder},
+};
+use socket2::{SockRef, TcpKeepalive};
+use tokio::net::TcpStream;
+use tokio_postgres::NoTls;
+use tracing::{debug, info, warn};
+
+use crate::error::{Error, Result};
+
+pub const DEFAULT_PG_VERSION: i32 = 18;
+
+/// TCP keepalive parameters for operator-side libpq sockets. Matches the
+/// settings the migration Job uses in its libpq URI (see [[fix(migration)
+/// TCP keepalives]]). Detects NAT-evicted / silently-dead sockets within
+/// ~90s so reconciles can fail and retry instead of hanging forever.
+/// Keepalives fire on the kernel's own timer regardless of in-flight
+/// queries, so a legitimately long-running `DROP SCHEMA ... CASCADE` on
+/// a populated dbt schema is fine — only dead sockets are killed.
+const KEEPALIVE_IDLE: Duration = Duration::from_secs(60);
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
+const KEEPALIVE_RETRIES: u32 = 3;
+
+/// Bound on establishing the TCP connection only, not on anything run over
+/// it. An in-cluster connect completes in milliseconds; one that doesn't is a
+/// pod IP that has gone away, which otherwise holds the reconcile for the
+/// kernel's ~2 minutes of SYN retries.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+fn set_tcp_keepalive(stream: &TcpStream) -> Result<()> {
+	let ka = TcpKeepalive::new()
+		.with_time(KEEPALIVE_IDLE)
+		.with_interval(KEEPALIVE_INTERVAL)
+		.with_retries(KEEPALIVE_RETRIES);
+	SockRef::from(stream)
+		.set_tcp_keepalive(&ka)
+		.map_err(|e| Error::MissingField(format!("failed to set TCP keepalive: {e}")))?;
+	Ok(())
+}
+
+/// Holds a Postgres client and any resources that must stay alive for the
+/// duration of the connection (e.g. a port-forwarder).
+pub struct PgConnection {
+	pub client: tokio_postgres::Client,
+	_port_forwarder: Option<Portforwarder>,
+}
+
+/// Connect to a Postgres instance inside a Kubernetes pod via the kube
+/// API port-forward mechanism. This works both in-cluster and
+/// out-of-cluster (e.g. CI with a kind cluster).
+async fn connect_via_port_forward(
+	client: &Client,
+	namespace: &str,
+	pod_name: &str,
+	dbname: &str,
+	user: &str,
+	password: &str,
+) -> Result<PgConnection> {
+	let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
+	let mut pf = pods.portforward(pod_name, &[5432]).await?;
+	let stream = pf
+		.take_stream(5432)
+		.ok_or_else(|| Error::MissingField("port-forward stream not available on 5432".into()))?;
+
+	let mut config = tokio_postgres::Config::new();
+	config.user(user);
+	config.password(password);
+	config.dbname(dbname);
+
+	let (pg, conn) = config.connect_raw(stream, NoTls).await?;
+	tokio::spawn(async move {
+		if let Err(e) = conn.await {
+			warn!(error = %e, "port-forwarded database connection error");
+		}
+	});
+
+	Ok(PgConnection {
+		client: pg,
+		_port_forwarder: Some(pf),
+	})
+}
+
+/// Connect to a Postgres instance via direct TCP (in-cluster networking).
+async fn connect_via_tcp(
+	host: &str,
+	port: u16,
+	dbname: &str,
+	user: &str,
+	password: &str,
+) -> Result<PgConnection> {
+	let addr = format!("{host}:{port}");
+	let stream = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(&addr))
+		.await
+		.map_err(|_| {
+			Error::MissingField(format!(
+				"timed out connecting to {addr} after {}s",
+				CONNECT_TIMEOUT.as_secs()
+			))
+		})?
+		.map_err(|e| Error::MissingField(format!("failed to connect to {addr}: {e}")))?;
+	set_tcp_keepalive(&stream)?;
+
+	let mut config = tokio_postgres::Config::new();
+	config.user(user);
+	config.password(password);
+	config.dbname(dbname);
+
+	let (pg, conn) = config.connect_raw(stream, NoTls).await?;
+	tokio::spawn(async move {
+		if let Err(e) = conn.await {
+			warn!(error = %e, "TCP database connection error");
+		}
+	});
+
+	Ok(PgConnection {
+		client: pg,
+		_port_forwarder: None,
+	})
+}
+
+/// Find the name of a running pod that matches the given label selector.
+pub async fn find_pod_by_label(
+	client: &Client,
+	namespace: &str,
+	label_selector: &str,
+) -> Result<String> {
+	let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
+	let lp = ListParams::default().labels(label_selector);
+	let list = pods.list(&lp).await?;
+	let pod = list
+		.items
+		.into_iter()
+		.find(|p| p.status.as_ref().and_then(|s| s.phase.as_deref()) == Some("Running"))
+		.ok_or_else(|| {
+			Error::MissingField(format!(
+				"no running pod found with label {label_selector} in {namespace}"
+			))
+		})?;
+	Ok(pod.name_any())
+}
+
+/// Find the IP of a running pod that matches the given label selector.
+pub async fn find_pod_ip_by_label(
+	client: &Client,
+	namespace: &str,
+	label_selector: &str,
+) -> Result<String> {
+	let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
+	let lp = ListParams::default().labels(label_selector);
+	let list = pods.list(&lp).await?;
+	let pod = list
+		.items
+		.into_iter()
+		.find(|p| p.status.as_ref().and_then(|s| s.phase.as_deref()) == Some("Running"))
+		.ok_or_else(|| {
+			Error::MissingField(format!(
+				"no running pod found with label {label_selector} in {namespace}"
+			))
+		})?;
+	let ip = pod
+		.status
+		.as_ref()
+		.and_then(|s| s.pod_ip.as_ref())
+		.ok_or_else(|| Error::MissingField(format!("pod {} has no podIP", pod.name_any())))?;
+	Ok(ip.clone())
+}
+
+/// Connect to a restore's Postgres instance.
+///
+/// When `use_port_forward` is true, finds the restore pod by label and
+/// connects via port-forward. Otherwise connects directly via the pod IP.
+pub async fn connect_to_restore(
+	client: &Client,
+	namespace: &str,
+	restore_name: &str,
+	dbname: &str,
+	user: &str,
+	password: &str,
+	use_port_forward: bool,
+) -> Result<PgConnection> {
+	// The restore's Jobs (kopia restore, credential reset, version detect,
+	// migration) carry the restore label too, and none of them serve 5432.
+	let label_selector = format!("pgro.bes.au/restore={restore_name},!job-name");
+
+	if use_port_forward {
+		let pod_name = find_pod_by_label(client, namespace, &label_selector).await?;
+		debug!(pod = %pod_name, "connecting to restore database via port-forward");
+		connect_via_port_forward(client, namespace, &pod_name, dbname, user, password).await
+	} else {
+		let pod_ip = find_pod_ip_by_label(client, namespace, &label_selector).await?;
+		debug!(ip = %pod_ip, restore = %restore_name, "connecting to restore database via TCP");
+		connect_via_tcp(&pod_ip, 5432, dbname, user, password).await
+	}
+}
+
+/// Read a UTF-8 string field from a Kubernetes Secret.
+pub fn read_secret_field(secret: &Secret, key: &str) -> Result<String> {
+	let data = secret
+		.data
+		.as_ref()
+		.ok_or_else(|| Error::MissingField("secret has no data".to_string()))?;
+	let bytes = data
+		.get(key)
+		.ok_or_else(|| Error::MissingField(format!("secret missing key: {key}")))?;
+	String::from_utf8(bytes.0.clone())
+		.map_err(|_| Error::MissingField(format!("secret key {key} is not valid UTF-8")))
+}
+
+/// Connect to the restore's `postgres` database and find the largest
+/// non-system database by size. This is the database whose schemas we
+/// use for schema migration.
+pub async fn discover_restore_database(
+	client: &Client,
+	namespace: &str,
+	restore_name: &str,
+	reader_user: &str,
+	reader_password: &str,
+	use_port_forward: bool,
+) -> Result<String> {
+	let conn = connect_to_restore(
+		client,
+		namespace,
+		restore_name,
+		"postgres",
+		reader_user,
+		reader_password,
+		use_port_forward,
+	)
+	.await?;
+	let sizes = list_database_sizes(&conn.client).await?;
+
+	match application_database(&sizes) {
+		Some(name) => {
+			debug!(
+				restore = restore_name,
+				database = %name,
+				"discovered main database in restore by size"
+			);
+			Ok(name.to_string())
+		}
+		None => Err(Error::NoApplicationDatabase),
+	}
+}
+
+/// The largest database postgres did not create itself. `None` means the
+/// cluster holds no application data at all.
+pub fn application_database(sizes: &[(String, u64)]) -> Option<&str> {
+	sizes
+		.iter()
+		.filter(|(name, _)| !matches!(name.as_str(), "postgres" | "template0" | "template1"))
+		.max_by_key(|(_, size)| *size)
+		.map(|(name, _)| name.as_str())
+}
+
+/// Query the on-disk size of the current database on an already-open
+/// connection. The connection-opening variant is `measure_database_size`,
+/// kept for callers that only need this single query; prefer this when
+/// you're going to make multiple queries on the same database so the
+/// connection can be reused.
+pub async fn database_size_on(pg: &tokio_postgres::Client) -> Result<u64> {
+	let row = pg
+		.query_one("SELECT pg_database_size(current_database())", &[])
+		.await?;
+	let size: i64 = row.get(0);
+	Ok(size as u64)
+}
+
+/// Per-database on-disk sizes in bytes, keyed by database name, excluding
+/// the `template0`/`template1` templates. Runs on an already-open
+/// connection (typically to the `postgres` database). Used to build the
+/// `sizes` map in the canopy restore-verification `health_details`.
+pub async fn list_database_sizes(pg: &tokio_postgres::Client) -> Result<Vec<(String, u64)>> {
+	let rows = pg
+		.query(
+			"SELECT datname, pg_database_size(datname) FROM pg_database \
+			 WHERE datname NOT IN ('template0', 'template1') AND datallowconn \
+			 ORDER BY pg_database_size(datname) DESC",
+			&[],
+		)
+		.await?;
+	Ok(rows
+		.iter()
+		.map(|r| {
+			let name: String = r.get(0);
+			let size: i64 = r.get(1);
+			(name, size.max(0) as u64)
+		})
+		.collect())
+}
+
+/// Read the `fixes` map the restore's init recorded into
+/// `_pgro.restore_info` — an arbitrary JSON object like
+/// `{"locale": true, "reindex": false, "reset_wal": false, ...}`. Read as
+/// text and parsed here so we don't need tokio_postgres's serde_json
+/// feature. Absent row/column (older restores) reads as an empty object.
+/// Runs on an already-open connection to the `postgres` database.
+pub async fn read_restore_fixes(pg: &tokio_postgres::Client) -> Result<serde_json::Value> {
+	let row = pg
+		.query_opt(
+			"SELECT coalesce(fixes::text, '{}') FROM _pgro.restore_info WHERE id = 1",
+			&[],
+		)
+		.await?;
+	let text: String = match row {
+		Some(r) => r.get(0),
+		None => return Ok(serde_json::json!({})),
+	};
+	Ok(serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({})))
+}
+
+/// Progress of the locale reindex the readiness probe waits on, as an opaque
+/// string that changes whenever the rebuild moves. `None` when no such reindex
+/// is pending, or the restore predates `_pgro.locale_reindex_progress()`.
+/// Runs on an already-open connection to the `postgres` database.
+pub async fn read_locale_reindex_progress(pg: &tokio_postgres::Client) -> Result<Option<String>> {
+	let has_function: bool = pg
+		.query_one(
+			"SELECT to_regprocedure('_pgro.locale_reindex_progress()') IS NOT NULL",
+			&[],
+		)
+		.await?
+		.get(0);
+	if !has_function {
+		return Ok(None);
+	}
+	Ok(pg
+		.query_one("SELECT _pgro.locale_reindex_progress()", &[])
+		.await?
+		.get(0))
+}
+
+/// Flip `_pgro.restore_info.stage` to `outgoing` on a restore the Service has
+/// just stopped pointing at.
+///
+/// The stage column exists for readers inside the database. A client connected
+/// over libpq cannot see a switchover happen — its connection stays pinned to
+/// this instance until the sweep deletes it, minutes later — so this is the
+/// only channel that reaches it. `restored`, `reindexing` and `ready` are the
+/// stages a restore passes through on the way up; `outgoing` is the one it
+/// leaves on.
+///
+/// Replicas run with `default_transaction_read_only = on`, so the session has
+/// to ask for a writable transaction first — the same thing the init script
+/// does with `PGOPTIONS`.
+pub async fn mark_restore_outgoing(pg: &tokio_postgres::Client) -> Result<()> {
+	pg.execute("SET default_transaction_read_only = off", &[])
+		.await?;
+	pg.execute(
+		"UPDATE _pgro.restore_info SET stage = 'outgoing', last_transition_time = now() WHERE id = 1",
+		&[],
+	)
+	.await?;
+	Ok(())
+}
+
+/// Query the on-disk size of the given database (bytes) via `pg_database_size()`.
+pub async fn measure_database_size(
+	client: &Client,
+	namespace: &str,
+	restore_name: &str,
+	dbname: &str,
+	user: &str,
+	password: &str,
+	use_port_forward: bool,
+) -> Result<u64> {
+	let conn = connect_to_restore(
+		client,
+		namespace,
+		restore_name,
+		dbname,
+		user,
+		password,
+		use_port_forward,
+	)
+	.await?;
+	database_size_on(&conn.client).await
+}
+
+/// Escape a SQL identifier by double-quoting it.
+pub fn quote_ident(s: &str) -> String {
+	format!("\"{}\"", s.replace('"', "\"\""))
+}
+
+/// Return the subset of `candidates` that exist as schemas in the
+/// database the connection is bound to. Reusable on an open connection.
+pub async fn existing_schemas_on(
+	pg: &tokio_postgres::Client,
+	candidates: &[String],
+) -> Result<Vec<String>> {
+	if candidates.is_empty() {
+		return Ok(Vec::new());
+	}
+	let rows = pg
+		.query(
+			"SELECT nspname FROM pg_catalog.pg_namespace WHERE nspname = ANY($1)",
+			&[&candidates],
+		)
+		.await?;
+	let found: HashSet<String> = rows.iter().map(|r| r.get::<_, String>(0)).collect();
+	Ok(candidates
+		.iter()
+		.filter(|s| found.contains(s.as_str()))
+		.cloned()
+		.collect())
+}
+
+/// Whether the connected role holds `SUPERUSER`. The analytics credential
+/// the operator holds is one while the restore is writable and a bare
+/// `pg_read_all_data` member once it's locked read-only; `GRANT` on objects
+/// it doesn't own needs the former.
+pub async fn is_superuser_on(pg: &tokio_postgres::Client) -> Result<bool> {
+	let row = pg
+		.query_one(
+			"SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user",
+			&[],
+		)
+		.await?;
+	Ok(row.get(0))
+}
+
+/// Every connectable database. `template1` is deliberately included: it's
+/// the byte-for-byte template for databases created later, so grants that
+/// skip it don't reach them.
+pub async fn connectable_databases_on(pg: &tokio_postgres::Client) -> Result<Vec<String>> {
+	let rows = pg
+		.query(
+			"SELECT datname FROM pg_catalog.pg_database \
+			 WHERE datallowconn AND datname <> 'template0' \
+			 ORDER BY datname",
+			&[],
+		)
+		.await?;
+	Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
+}
+
+/// Read access for `username` on `schema`, including default privileges so
+/// tables `owner` creates in it later are readable too. Mirrors the grant
+/// step in `controllers::restore::builders::database_lockdown_block`; kept
+/// pure so the SQL is testable without a server.
+pub fn schema_read_grants(username: &str, schema: &str, owner: &str) -> Vec<String> {
+	let user = quote_ident(username);
+	let ns = quote_ident(schema);
+	vec![
+		format!("GRANT USAGE ON SCHEMA {ns} TO {user}"),
+		format!("GRANT SELECT ON ALL TABLES IN SCHEMA {ns} TO {user}"),
+		format!("GRANT SELECT ON ALL SEQUENCES IN SCHEMA {ns} TO {user}"),
+		format!(
+			"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA {ns} GRANT SELECT ON TABLES TO {user}",
+			owner = quote_ident(owner),
+		),
+	]
+}
+
+/// Apply [[schema_read_grants]] on whichever of `schemas` exist in the
+/// current database, returning those. Absent ones are skipped.
+pub async fn grant_schema_read_on(
+	pg: &tokio_postgres::Client,
+	username: &str,
+	schemas: &[String],
+	owner: &str,
+) -> Result<Vec<String>> {
+	let present = existing_schemas_on(pg, schemas).await?;
+	for schema in &present {
+		for stmt in schema_read_grants(username, schema, owner) {
+			debug!(user = username, schema = schema, sql = %stmt, "granting schema read");
+			pg.execute(stmt.as_str(), &[]).await?;
+		}
+	}
+	Ok(present)
+}
+
+/// Terminate every other client backend connected to the current database.
+/// The operator owns each restore's database fully until handover, so any
+/// other session is a transient or stray client whose lock-holding would
+/// block our DDL. Best-effort: rows where `pg_terminate_backend` returns
+/// false (already gone, raced with another terminator) are ignored.
+///
+/// Note: this only dislodges sessions PG can interrupt. A backend stuck in
+/// an uninterruptible kernel wait (rare but it happens — e.g. a long-dead
+/// client whose TCP socket the kernel hasn't reaped) will not exit. For
+/// those, the restore pod must be restarted.
+pub async fn terminate_other_backends(pg: &tokio_postgres::Client) -> Result<u64> {
+	let row = pg
+		.query_one(
+			"SELECT count(*) FILTER (WHERE pg_terminate_backend(pid)) \
+			 FROM pg_stat_activity \
+			 WHERE datname = current_database() \
+			   AND backend_type = 'client backend' \
+			   AND pid <> pg_backend_pid()",
+			&[],
+		)
+		.await?;
+	let killed: i64 = row.get(0);
+	if killed > 0 {
+		info!(count = killed, "terminated other client backends");
+	}
+	Ok(killed as u64)
+}
+
+/// Drop the given schemas (and all contents) on an already-open connection.
+/// Terminates other client backends on the database first so stray sessions
+/// holding locks on the target schemas don't queue our DDL behind them.
+/// Idempotent: missing schemas are skipped via `DROP SCHEMA IF EXISTS`.
+pub async fn drop_schemas_on(pg: &tokio_postgres::Client, schemas: &[String]) -> Result<()> {
+	terminate_other_backends(pg).await?;
+	for schema in schemas {
+		let stmt = format!("DROP SCHEMA IF EXISTS {} CASCADE", quote_ident(schema));
+		debug!(schema = schema, "dropping schema");
+		pg.execute(stmt.as_str(), &[]).await?;
+	}
+	Ok(())
+}
+
+/// Drop the given schemas (and all their contents) from the named database
+/// in the restore. Idempotent: schemas that do not exist are silently
+/// skipped via `DROP SCHEMA IF EXISTS`. Used to wipe persistent_schemas in
+/// a new restore before the migration writes the persistent copies from
+/// the previous restore.
+///
+/// Assumes the connecting user owns each schema (the restore's init script
+/// reassigns ownership to the analytics user at startup, see
+/// `controllers::restore::builders`).
+#[expect(
+	clippy::too_many_arguments,
+	reason = "mirrors the surrounding connect_to_restore signature; refactoring all of them is out of scope"
+)]
+pub async fn drop_schemas_in_restore(
+	client: &Client,
+	namespace: &str,
+	restore_name: &str,
+	dbname: &str,
+	user: &str,
+	password: &str,
+	schemas: &[String],
+	use_port_forward: bool,
+) -> Result<()> {
+	if schemas.is_empty() {
+		return Ok(());
+	}
+	let conn = connect_to_restore(
+		client,
+		namespace,
+		restore_name,
+		dbname,
+		user,
+		password,
+		use_port_forward,
+	)
+	.await?;
+	drop_schemas_on(&conn.client, schemas).await
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn quote_ident_plain() {
+		assert_eq!(quote_ident("public"), "\"public\"");
+	}
+
+	#[test]
+	fn quote_ident_with_quotes() {
+		assert_eq!(quote_ident("my\"schema"), "\"my\"\"schema\"");
+	}
+
+	fn sizes(pairs: &[(&str, u64)]) -> Vec<(String, u64)> {
+		pairs.iter().map(|(n, s)| ((*n).to_string(), *s)).collect()
+	}
+
+	#[test]
+	fn application_database_is_the_largest_one_postgres_did_not_create() {
+		// `postgres` outsizing the app database must not make it the answer.
+		let sizes = sizes(&[("postgres", 900), ("myapp", 500), ("scratch", 100)]);
+		assert_eq!(application_database(&sizes), Some("myapp"));
+	}
+
+	#[test]
+	fn a_cluster_of_only_system_databases_has_no_application_database() {
+		let sizes = sizes(&[
+			("postgres", 8_000_000),
+			("template1", 8_000_000),
+			("template0", 8_000_000),
+		]);
+		assert_eq!(application_database(&sizes), None);
+		assert_eq!(application_database(&[]), None);
+	}
+
+	#[test]
+	fn schema_read_grants_covers_usage_tables_sequences_and_defaults() {
+		let stmts = schema_read_grants("reporting", "dbt", "analytics");
+		assert_eq!(
+			stmts,
+			vec![
+				"GRANT USAGE ON SCHEMA \"dbt\" TO \"reporting\"",
+				"GRANT SELECT ON ALL TABLES IN SCHEMA \"dbt\" TO \"reporting\"",
+				"GRANT SELECT ON ALL SEQUENCES IN SCHEMA \"dbt\" TO \"reporting\"",
+				"ALTER DEFAULT PRIVILEGES FOR ROLE \"analytics\" IN SCHEMA \"dbt\" GRANT SELECT ON TABLES TO \"reporting\"",
+			]
+		);
+	}
+
+	/// Role and schema names come from the CRD, so none is spliced in raw.
+	#[test]
+	fn schema_read_grants_quotes_every_identifier() {
+		let stmts = schema_read_grants("odd\"user", "odd\"schema", "odd\"owner");
+		for stmt in &stmts {
+			assert!(
+				stmt.contains("\"odd\"\"schema\""),
+				"schema not quoted in: {stmt}"
+			);
+			assert!(
+				stmt.contains("\"odd\"\"user\""),
+				"username not quoted in: {stmt}"
+			);
+		}
+		assert!(
+			stmts[3].contains("FOR ROLE \"odd\"\"owner\""),
+			"owner not quoted in: {}",
+			stmts[3]
+		);
+	}
+
+	/// Read-only whatever the replica's own read_only flag says.
+	#[test]
+	fn schema_read_grants_are_read_only() {
+		for stmt in schema_read_grants("reporting", "dbt", "analytics") {
+			for forbidden in [
+				"INSERT",
+				"UPDATE",
+				"DELETE",
+				"TRUNCATE",
+				"CREATE",
+				"ALL PRIVILEGES",
+				"GRANT ALL",
+			] {
+				assert!(
+					!stmt.contains(forbidden),
+					"{forbidden} must not appear in a read grant: {stmt}"
+				);
+			}
+		}
+	}
+}

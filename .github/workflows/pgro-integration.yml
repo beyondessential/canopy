@@ -1,0 +1,533 @@
+name: pgro integration
+
+# The kind-cluster tests take a while and need nothing from the rest of Canopy,
+# so the `changes` job decides whether a change can affect them, and the
+# matrix is skipped when it cannot. The workflow itself always runs, on the
+# merge queue as well, because the final check is required and a required check
+# a workflow never reports ejects the pull request from the queue.
+on:
+  workflow_dispatch:
+  merge_group:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-slim
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pgro: ${{ steps.filter.outputs.pgro }}
+    steps:
+      - name: Check whether the change can affect pgro
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.merge_group.base_sha || github.event.before }}
+          AFTER: ${{ github.event.merge_group.head_sha || github.sha }}
+        run: |
+          # A diff that cannot be read runs the tests rather than skipping
+          # them, so no API failure passes a change through unexamined. The
+          # last page of a paginated compare carries no files at all, hence
+          # the default.
+          case "$EVENT" in
+            pull_request)
+              files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename') \
+                || files=crates/pgro/
+              ;;
+            push | merge_group)
+              if [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+                files=crates/pgro/
+              else
+                files=$(gh api --paginate "repos/$REPO/compare/$BEFORE...$AFTER" \
+                  --jq '(.files // [])[].filename') || files=crates/pgro/
+              fi
+              ;;
+            *)
+              files=crates/pgro/
+              ;;
+          esac
+          echo "$files"
+          if echo "$files" | grep -Eq '^(crates/pgro/|crates/canopy-api/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/pgro-integration\.yml$)'; then
+            echo "pgro=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pgro=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  integration:
+    name: Integration (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.pgro == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: lifecycle
+            namespaces: >-
+              test-lifecycle
+              test-rw-schema
+              test-ro-schema
+            needs_non_pg_snapshot: false
+          - name: error_paths
+            namespaces: >-
+              test-non-pg-data
+              test-wrong-bucket
+            needs_non_pg_snapshot: true
+
+          - name: ttls
+            namespaces: >-
+              test-min-ttl
+            needs_non_pg_snapshot: false
+
+          - name: switchover
+            namespaces: >-
+              test-switchover
+            needs_non_pg_snapshot: false
+
+          - name: persistent_schemas
+            namespaces: >-
+              test-persistent-schemas
+              test-ps-conflict
+              test-ps-skip-missing
+              test-ps-all-missing
+            needs_non_pg_snapshot: false
+
+          - name: redaction
+            namespaces: >-
+              test-redaction
+            needs_non_pg_snapshot: false
+            needs_pg18_snapshot: true
+
+          - name: ephemeral
+            namespaces: >-
+              test-ephemeral
+            needs_non_pg_snapshot: false
+
+          - name: migration
+            namespaces: >-
+              test-migration
+            needs_non_pg_snapshot: false
+
+          - name: schema_build
+            namespaces: >-
+              test-schema-build
+              test-schema-build-absent
+            needs_non_pg_snapshot: false
+
+          - name: locale_fix
+            namespaces: >-
+              test-locale-fix
+            needs_non_pg_snapshot: false
+            needs_locale_snapshot: true
+
+          - name: extra_users
+            namespaces: >-
+              test-extra-users
+            needs_non_pg_snapshot: false
+
+          - name: extra_user_grants
+            namespaces: >-
+              test-extra-user-grants
+            needs_non_pg_snapshot: false
+
+          # pgro names these namespaces itself, so the failure dump finds
+          # them by their `int-` prefix.
+          - name: canopy_integration
+            namespaces: ""
+            needs_non_pg_snapshot: false
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build operator
+        run: cargo build -p pgro --bin pgro --bin canopy-proxy
+
+      - name: Generate CRDs
+        run: cargo run -p pgro --bin gen-crds > crates/pgro/crds.yaml
+
+      - name: Install crane
+        run: |
+          CRANE_VERSION=v0.20.3
+          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+            | sudo tar -xzf - -C /usr/local/bin crane
+
+      - name: Install kind
+        run: |
+          curl -fsSLo ./kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Create kind cluster
+        run: |
+          cat <<EOF | kind create cluster --config=-
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+          EOF
+          kubectl cluster-info
+          kubectl wait --for=condition=Ready nodes --all --timeout=120s
+
+      - name: Apply CRDs
+        run: kubectl apply -f crates/pgro/crds.yaml
+
+      - name: Create operator namespace and config
+        run: |
+          kubectl create namespace pgro-system
+
+          # Expose the host-network operator to in-cluster jobs so the
+          # snapshot-list callback can reach it.
+          HOST_IP=$(docker inspect kind-control-plane \
+            --format '{{ .NetworkSettings.Networks.kind.Gateway }}')
+          echo "Host IP (from kind network gateway): $HOST_IP"
+
+          kubectl apply -f - <<EOF
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: postgres-restore-operator
+            namespace: pgro-system
+          spec:
+            ports:
+              - name: http
+                port: 8080
+                targetPort: 8080
+              - name: broker
+                port: 9091
+                targetPort: 9091
+          ---
+          apiVersion: v1
+          kind: Endpoints
+          metadata:
+            name: postgres-restore-operator
+            namespace: pgro-system
+          subsets:
+            - addresses:
+                - ip: "$HOST_IP"
+              ports:
+                - name: http
+                  port: 8080
+                - name: broker
+                  port: 9091
+          ---
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: postgres-restore-operator-config
+            namespace: pgro-system
+          data:
+            maxConcurrentRestores: "4"
+            usePortForward: "true"
+          EOF
+
+      - name: Pre-pull images on kind node
+        run: |
+          load_image() {
+            local image="$1"
+            local archive="/tmp/$(echo "$image" | tr '/:' '_').tar"
+            crane pull --platform linux/amd64 "$image" "$archive"
+            kind load image-archive "$archive"
+            rm -f "$archive"
+          }
+
+          load_image rustfs/rustfs:1.0.0
+          load_image amazon/aws-cli:2.37.3
+          load_image kopia/kopia:0.22.3
+          load_image postgres:16
+          load_image postgres:16-alpine
+          load_image alpine:latest
+
+          if [ "${{ matrix.needs_pg18_snapshot }}" = "true" ]; then
+            load_image postgres:18
+          fi
+
+      - name: Deploy MinIO
+        run: |
+          kubectl apply -f crates/pgro/tests/fixtures/minio.yaml
+          kubectl wait --namespace minio --for=condition=Available deployment/minio --timeout=120s
+          echo "MinIO is ready"
+
+      - name: Set up test kopia repository (postgres data)
+        run: |
+          kubectl apply -f crates/pgro/tests/fixtures/setup-kopia-repo.yaml
+          for i in $(seq 1 60); do
+            STATUS=$(kubectl get job/setup-kopia-repo -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
+            FAILED=$(kubectl get job/setup-kopia-repo -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)
+            if [ "$STATUS" = "True" ]; then
+              echo "Setup job completed successfully"
+              break
+            fi
+            if [ "$FAILED" = "True" ]; then
+              echo "Setup job failed!"
+              kubectl describe job/setup-kopia-repo
+              kubectl get pods -l job-name=setup-kopia-repo -o wide
+              kubectl logs job/setup-kopia-repo --all-containers --prefix
+              exit 1
+            fi
+            if [ "$i" = "60" ]; then
+              echo "Setup job timed out after 300s"
+              kubectl describe job/setup-kopia-repo
+              kubectl get pods -l job-name=setup-kopia-repo -o wide
+              kubectl describe pods -l job-name=setup-kopia-repo
+              kubectl logs job/setup-kopia-repo --all-containers --prefix 2>/dev/null || true
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "--- Setup job logs ---"
+          kubectl logs job/setup-kopia-repo --all-containers --prefix
+          echo "--- Kopia repository ready ---"
+
+      - name: Set up PG-18 kopia snapshot
+        if: matrix.needs_pg18_snapshot
+        run: |
+          kubectl apply -f crates/pgro/tests/fixtures/setup-kopia-repo-pg18.yaml
+          for i in $(seq 1 60); do
+            STATUS=$(kubectl get job/setup-kopia-repo-pg18 -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
+            FAILED=$(kubectl get job/setup-kopia-repo-pg18 -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)
+            if [ "$STATUS" = "True" ]; then
+              echo "PG-18 setup job completed successfully"
+              break
+            fi
+            if [ "$FAILED" = "True" ]; then
+              echo "PG-18 setup job failed!"
+              kubectl describe job/setup-kopia-repo-pg18
+              kubectl logs job/setup-kopia-repo-pg18 --all-containers --prefix
+              exit 1
+            fi
+            if [ "$i" = "60" ]; then
+              echo "PG-18 setup job timed out after 300s"
+              kubectl describe job/setup-kopia-repo-pg18
+              kubectl logs job/setup-kopia-repo-pg18 --all-containers --prefix 2>/dev/null || true
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "--- PG-18 setup job logs ---"
+          kubectl logs job/setup-kopia-repo-pg18 --all-containers --prefix
+
+      - name: Set up non-postgres kopia snapshot
+        if: matrix.needs_non_pg_snapshot
+        run: |
+          kubectl apply -f crates/pgro/tests/fixtures/setup-non-postgres-snapshot.yaml
+          for i in $(seq 1 60); do
+            STATUS=$(kubectl get job/setup-non-postgres-snapshot -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
+            FAILED=$(kubectl get job/setup-non-postgres-snapshot -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)
+            if [ "$STATUS" = "True" ]; then
+              echo "Non-postgres snapshot job completed successfully"
+              break
+            fi
+            if [ "$FAILED" = "True" ]; then
+              echo "Non-postgres snapshot job failed!"
+              kubectl describe job/setup-non-postgres-snapshot
+              kubectl logs job/setup-non-postgres-snapshot --all-containers --prefix
+              exit 1
+            fi
+            if [ "$i" = "60" ]; then
+              echo "Non-postgres snapshot job timed out after 300s"
+              kubectl describe job/setup-non-postgres-snapshot
+              kubectl logs job/setup-non-postgres-snapshot --all-containers --prefix 2>/dev/null || true
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "--- Non-postgres snapshot job logs ---"
+          kubectl logs job/setup-non-postgres-snapshot --all-containers --prefix
+
+      - name: Set up non-C-locale kopia snapshot
+        if: matrix.needs_locale_snapshot
+        run: |
+          kubectl apply -f crates/pgro/tests/fixtures/setup-locale-snapshot.yaml
+          for i in $(seq 1 60); do
+            STATUS=$(kubectl get job/setup-locale-snapshot -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
+            FAILED=$(kubectl get job/setup-locale-snapshot -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)
+            if [ "$STATUS" = "True" ]; then
+              echo "Locale snapshot job completed successfully"
+              break
+            fi
+            if [ "$FAILED" = "True" ]; then
+              echo "Locale snapshot job failed!"
+              kubectl describe job/setup-locale-snapshot
+              kubectl logs job/setup-locale-snapshot --all-containers --prefix
+              exit 1
+            fi
+            if [ "$i" = "60" ]; then
+              echo "Locale snapshot job timed out after 300s"
+              kubectl describe job/setup-locale-snapshot
+              kubectl logs job/setup-locale-snapshot --all-containers --prefix 2>/dev/null || true
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "--- Locale snapshot job logs ---"
+          kubectl logs job/setup-locale-snapshot --all-containers --prefix
+
+      # Host-side, not in-cluster: the operator is what fetches the
+      # redaction manifest, and it runs out-of-cluster here, so a
+      # Service DNS name would not resolve for it. Served under v1.0.0/
+      # to match the currentVersion the PG-18 snapshot fixture seeds,
+      # which is what the replica's versionQuery resolves.
+      - name: Serve the redaction manifest
+        if: matrix.needs_pg18_snapshot
+        run: |
+          mkdir -p /tmp/manifest-server/v1.0.0
+          cp crates/pgro/tests/fixtures/redaction-manifest.json \
+            /tmp/manifest-server/v1.0.0/manifest.json
+          python3 -m http.server 8099 --bind 127.0.0.1 \
+            --directory /tmp/manifest-server > /tmp/manifest-server.log 2>&1 &
+          echo $! > /tmp/manifest-server.pid
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8099/v1.0.0/manifest.json > /dev/null; then
+              echo "Manifest server is ready"
+              break
+            fi
+            if [ "$i" = "30" ]; then
+              echo "Manifest server failed to become ready"
+              cat /tmp/manifest-server.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+      # The restore Jobs' proxy sidecar is a binary of this crate, so it is built
+      # into an image here and loaded into the cluster rather than pulled.
+      - name: Build the proxy sidecar image
+        run: |
+          mkdir /tmp/proxy-image
+          cp target/debug/canopy-proxy crates/pgro/tests/fixtures/canopy-proxy.Containerfile /tmp/proxy-image/
+          docker build -t pgro-canopy-proxy:ci -f /tmp/proxy-image/canopy-proxy.Containerfile /tmp/proxy-image
+          kind load docker-image pgro-canopy-proxy:ci
+
+      # Canopy is the stub the tests run in their own process, on this address.
+      # The sidecar reaches the object store at its in-cluster address, and the
+      # operator is told so, since the store is not AWS.
+      - name: Start operator (out-of-cluster)
+        run: |
+          RUST_LOG=info,tower_http=debug \
+          OPERATOR_NAMESPACE=pgro-system \
+          OPERATOR_SERVICE_NAME=postgres-restore-operator \
+          CANOPY_TAILNET_URL=http://127.0.0.1:8098 \
+          CANOPY_SOCKS5_PROXY= \
+          CANOPY_RECONCILE_INTERVAL_SECS=5 \
+          CANOPY_S3_ENDPOINT=http://minio.minio.svc:9000 \
+          CANOPY_PROXY_IMAGE=pgro-canopy-proxy:ci \
+          KUBECONFIG="${HOME}/.kube/config" \
+            ./target/debug/pgro > /tmp/operator.log 2>&1 &
+          echo $! > /tmp/operator.pid
+
+          # Wait for operator to be ready
+          for i in $(seq 1 30); do
+            if curl -sf http://[::1]:8080/readyz > /dev/null 2>&1; then
+              echo "Operator is ready"
+              break
+            fi
+            if [ "$i" = "30" ]; then
+              echo "Operator failed to become ready"
+              cat /tmp/operator.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Run integration tests
+        run: |
+          cargo test -p pgro --test it -- "${{ matrix.name }}::" --include-ignored --nocapture
+        env:
+          RUST_LOG: info
+
+      - name: Operator logs
+        if: always()
+        run: |
+          echo "--- Operator logs ---"
+          cat /tmp/operator.log || true
+
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          echo "=== Namespaces ==="
+          kubectl get ns
+
+          namespaces="${{ matrix.namespaces }} $(kubectl get ns -o name | sed 's|^namespace/||' | grep '^int-' || true)"
+
+          echo "=== All resources in test namespaces ==="
+          for ns in $namespaces; do
+            echo "--- Namespace: $ns ---"
+            kubectl get all -n "$ns" 2>/dev/null || true
+          done
+
+          echo "=== PostgresPhysicalReplicas ==="
+          kubectl get postgresphysicalreplicas -A -o yaml 2>/dev/null || true
+
+          echo "=== PostgresPhysicalRestores ==="
+          kubectl get postgresphysicalrestores -A -o yaml 2>/dev/null || true
+
+          echo "=== Jobs ==="
+          kubectl get jobs -A -o wide 2>/dev/null || true
+
+          echo "=== Pods ==="
+          kubectl get pods -A -o wide 2>/dev/null || true
+
+          echo "=== PVCs ==="
+          kubectl get pvc -A -o wide 2>/dev/null || true
+
+          echo "=== Events in test namespaces ==="
+          for ns in $namespaces; do
+            echo "--- Events in $ns ---"
+            kubectl get events -n "$ns" --sort-by=.lastTimestamp 2>/dev/null || true
+          done
+
+          echo "=== Failed pod logs ==="
+          for ns in $namespaces; do
+            for pod in $(kubectl get pods -n "$ns" --no-headers -o custom-columns=":metadata.name" 2>/dev/null); do
+              echo "--- Pod: $ns/$pod ---"
+              kubectl logs -n "$ns" "$pod" --all-containers 2>/dev/null || true
+            done
+          done
+
+      - name: Stop operator
+        if: always()
+        run: |
+          if [ -f /tmp/operator.pid ]; then
+            kill "$(cat /tmp/operator.pid)" 2>/dev/null || true
+          fi
+          if [ -f /tmp/manifest-server.pid ]; then
+            kill "$(cat /tmp/manifest-server.pid)" 2>/dev/null || true
+          fi
+
+  all-green:
+    name: All integrations green
+    if: always()
+    needs: [changes, integration]
+    runs-on: ubuntu-slim
+    steps:
+      - name: Check job results
+        run: |
+          result='${{ toJSON(needs) }}'
+          echo "$result" | jq .
+          echo "$result" | jq -e '.changes.result == "success" and (.integration.result == "success" or (.changes.outputs.pgro == "false" and .integration.result == "skipped"))'
+

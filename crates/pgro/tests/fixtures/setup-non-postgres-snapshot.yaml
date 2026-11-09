@@ -1,0 +1,74 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+    name: setup-non-postgres-snapshot
+    namespace: default
+spec:
+    backoffLimit: 3
+    template:
+        spec:
+            initContainers:
+                - name: create-bucket
+                  image: amazon/aws-cli:2.37.3
+                  imagePullPolicy: IfNotPresent
+                  command: ["/bin/sh", "-c"]
+                  env:
+                      - name: AWS_ACCESS_KEY_ID
+                        value: minioadmin
+                      - name: AWS_SECRET_ACCESS_KEY
+                        value: minioadmin
+                      - name: AWS_DEFAULT_REGION
+                        value: us-east-1
+                  args:
+                      - |
+                          set -e
+                          S3="aws --endpoint-url http://minio.minio.svc:9000"
+                          $S3 s3api head-bucket --bucket non-postgres-bucket 2>/dev/null || $S3 s3 mb s3://non-postgres-bucket
+                          echo "Bucket created"
+            containers:
+                - name: create-snapshot
+                  image: kopia/kopia:0.22.3
+                  imagePullPolicy: IfNotPresent
+                  command: ["/bin/sh", "-c"]
+                  args:
+                      - |
+                          set -e
+
+                          mkdir -p /tmp/kopia/config /tmp/kopia/logs /tmp/kopia/cache
+
+                          mkdir -p /data/random-stuff/subdir
+                          echo "this is not a postgres database" > /data/random-stuff/readme.txt
+                          dd if=/dev/urandom of=/data/random-stuff/random.bin bs=1024 count=10 2>/dev/null
+                          echo "another file" > /data/random-stuff/subdir/other.txt
+
+                          echo "Creating kopia repository in non-postgres-bucket..."
+                          kopia repository create s3 \
+                            --bucket=non-postgres-bucket \
+                            --endpoint=minio.minio.svc:9000 \
+                            --region=us-east-1 \
+                            --access-key=minioadmin \
+                            --secret-access-key=minioadmin \
+                            --password=test-repo-password \
+                            --disable-tls \
+                            --disable-tls-verification
+
+                          echo "Creating snapshot of non-postgres data..."
+                          kopia snapshot create /data/random-stuff
+
+                          echo "Verifying snapshot..."
+                          kopia snapshot list --json --all
+
+                          echo "Done"
+                  env:
+                      - name: KOPIA_CONFIG_PATH
+                        value: /tmp/kopia/config/repository.config
+                      - name: KOPIA_LOG_DIR
+                        value: /tmp/kopia/logs
+                      - name: KOPIA_CACHE_DIRECTORY
+                        value: /tmp/kopia/cache
+                      - name: KOPIA_PASSWORD
+                        value: test-repo-password
+                      - name: USER
+                        value: kopia
+            restartPolicy: Never

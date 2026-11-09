@@ -1,0 +1,759 @@
+use k8s_openapi::apimachinery::pkg::{api::resource::Quantity, apis::meta::v1::Time};
+use kube::api::ObjectMeta;
+use kube_quantity::ParsedQuantity;
+use rust_decimal::Decimal;
+
+use crate::{kopia::Snapshot, placement::PodPlacement, types::*, util::TimeSpan};
+
+use jiff::{SignedDuration, Timestamp};
+
+use crate::controllers::restore::builders::CanopyProxyArgs;
+
+use super::{
+	extra_users_with_schemas, generate_password, no_successful_restore,
+	persistent_schemas_migration_settled,
+	resources::{build_snapshot_list_job, compute_storage_size},
+	restore_in_progress,
+	scheduling::deployment_ready_timeout,
+	snapshot_already_covered,
+};
+
+/// A larger data dir takes longer to open and replay WAL. One cluster-wide
+/// timeout means either the large replicas fail spuriously or the small ones
+/// take far too long to be declared broken.
+#[test]
+fn ready_timeout_scales_with_snapshot_size() {
+	let small = deployment_ready_timeout(None, &Quantity("1Gi".into()), 1800);
+	let large = deployment_ready_timeout(None, &Quantity("200Gi".into()), 1800);
+	assert!(
+		large > small,
+		"a bigger snapshot must get a longer budget, got {large:?} vs {small:?}"
+	);
+}
+
+/// The operator-wide setting is a floor, so raising it still lifts everything.
+#[test]
+fn ready_timeout_never_drops_below_the_global_default() {
+	let derived = deployment_ready_timeout(None, &Quantity("1Mi".into()), 1800);
+	assert_eq!(derived, SignedDuration::from_secs(1800));
+}
+
+/// An explicit per-replica value wins outright, including below the default —
+/// it's the escape hatch for a replica that's slow for reasons unrelated to
+/// its size.
+#[test]
+fn explicit_ready_timeout_overrides_the_derived_value() {
+	let explicit = TimeSpan(jiff::Span::new().minutes(90));
+	let derived = deployment_ready_timeout(Some(&explicit), &Quantity("1Gi".into()), 1800);
+	assert_eq!(derived, SignedDuration::from_secs(90 * 60));
+}
+
+/// The syncer always sets `storageSizeOverride` from its intent config
+/// (50Gi for `analytics`), which must not cap a replica whose snapshot is
+/// larger than that — doing so restores into a volume that fills partway
+/// through.
+#[test]
+fn storage_size_override_does_not_cap_a_larger_snapshot() {
+	const SNAPSHOT_BYTES: u64 = 120 * 1024 * 1024 * 1024;
+	let size = compute_storage_size(
+		ParsedQuantity::from(Decimal::from(SNAPSHOT_BYTES)),
+		Some(&Quantity("50Gi".into())),
+		&Quantity("2Ti".into()),
+		false,
+		None,
+	)
+	.expect("under the 2Ti maximum");
+
+	let bytes = ParsedQuantity::try_from(size).unwrap();
+	let snapshot_bytes = ParsedQuantity::from(Decimal::from(SNAPSHOT_BYTES));
+	assert!(
+		bytes > snapshot_bytes,
+		"PVC must be larger than the snapshot it holds, got {bytes:?}"
+	);
+}
+
+/// The floor is what keeps a small snapshot from getting a PVC too tight for
+/// postgres to run in — 1.1x of a 250MB snapshot is under 300MB. Guards
+/// against "fixing" the override by simply ignoring it.
+#[test]
+fn storage_size_override_is_a_floor_for_small_snapshots() {
+	let snapshot = ParsedQuantity::from(Decimal::from(250u64 * 1024 * 1024));
+	let size = compute_storage_size(
+		snapshot,
+		Some(&Quantity("50Gi".into())),
+		&Quantity("2Ti".into()),
+		false,
+		None,
+	)
+	.expect("under the 2Ti maximum");
+
+	assert_eq!(
+		ParsedQuantity::try_from(size).unwrap(),
+		ParsedQuantity::try_from("50Gi").unwrap()
+	);
+}
+
+/// A floor above the maximum is contradictory configuration, not a replica
+/// that's too big — the maximum simply wins. Erroring here wedges a small
+/// replica whose operator capped it below the intent's floor: it can hold its
+/// snapshot many times over, but no restore can ever be created.
+#[test]
+fn floor_above_the_maximum_clamps_rather_than_failing() {
+	let snapshot = ParsedQuantity::from(Decimal::from(250u64 * 1024 * 1024));
+	let size = compute_storage_size(
+		snapshot,
+		Some(&Quantity("50Gi".into())),
+		&Quantity("10Gi".into()),
+		false,
+		None,
+	)
+	.expect("a floor over the cap clamps to the cap");
+
+	assert_eq!(
+		ParsedQuantity::try_from(size).unwrap(),
+		ParsedQuantity::try_from("10Gi").unwrap()
+	);
+}
+
+/// The guardrail still fires for what it's actually for: a snapshot too large
+/// to fit the configured maximum. Truncating there would restore into a volume
+/// that fills partway through, which is the failure the maximum exists to
+/// prevent.
+#[test]
+fn storage_size_maximum_still_rejects_an_oversized_snapshot() {
+	let snapshot = ParsedQuantity::from(Decimal::from(500u64 * 1024 * 1024 * 1024));
+	let err = compute_storage_size(
+		snapshot,
+		Some(&Quantity("50Gi".into())),
+		&Quantity("100Gi".into()),
+		false,
+		None,
+	)
+	.expect_err("a 500Gi snapshot cannot fit a 100Gi maximum");
+
+	assert!(
+		matches!(err, crate::error::Error::StorageLimitExceeded { .. }),
+		"got {err:?}"
+	);
+}
+
+fn make_replica(
+	persistent_schemas: Option<Vec<String>>,
+	schema_migration_phase: Option<SchemaMigrationPhase>,
+) -> PostgresPhysicalReplica {
+	PostgresPhysicalReplica {
+		metadata: ObjectMeta {
+			name: Some("test".into()),
+			namespace: Some("default".into()),
+			..Default::default()
+		},
+		spec: PostgresPhysicalReplicaSpec {
+			pre_migrate_drop_schemas: None,
+			pre_migrate_sql: None,
+			migrate_to: None,
+			builder_image: None,
+			canopy_source: CanopySource {
+				group: "00000000-0000-0000-0000-000000000000".into(),
+				r#type: "tamanu-postgres".into(),
+			},
+			schedule: "0 * * * *".into(),
+			schedule_jitter: TimeSpan(jiff::Span::new()),
+			minimum_ttl: None,
+			switchover_grace_period: TimeSpan(jiff::Span::new()),
+			analytics_username: "analytics".into(),
+			extra_users: vec![],
+			storage_class: None,
+			storage_size_override: None,
+			resources: None,
+			resources_floor: None,
+			resources_maximum: None,
+			deployment_ready_timeout: None,
+			shm_size_floor: None,
+			service_annotations: None,
+			pod_annotations: None,
+			affinity: None,
+			tolerations: vec![],
+			read_only: true,
+			ephemeral: false,
+			postgres_extra_config: None,
+			persistent_schemas,
+			redaction: None,
+			storage_size_maximum: k8s_openapi::apimachinery::pkg::api::resource::Quantity(
+				"2Ti".to_string(),
+			),
+		},
+		status: schema_migration_phase.map(|p| PostgresPhysicalReplicaStatus {
+			schema_migration_phase: Some(p),
+			..Default::default()
+		}),
+	}
+}
+
+/// Schema-less extra user spec, for tests that only care about name handling.
+fn eu(name: &str) -> ExtraUserSpec {
+	ExtraUserSpec {
+		name: name.to_string(),
+		schemas: vec![],
+	}
+}
+
+#[test]
+fn extra_users_trims_dedupes_and_excludes_analytics() {
+	let mut replica = make_replica(None, None);
+	replica.spec.analytics_username = "analytics".into();
+	replica.spec.extra_users = vec![
+		eu(" reporting "),
+		eu("etl"),
+		eu("reporting"),
+		eu(""),
+		eu("analytics"),
+	];
+	assert_eq!(replica.extra_users(), vec![eu("reporting"), eu("etl")]);
+}
+
+#[test]
+fn extra_user_schemas_are_trimmed_and_deduped() {
+	let mut replica = make_replica(None, None);
+	replica.spec.extra_users = vec![ExtraUserSpec {
+		name: "reporting".to_string(),
+		schemas: vec![
+			" dbt ".to_string(),
+			"dbt".to_string(),
+			"".to_string(),
+			"staging".to_string(),
+		],
+	}];
+	assert_eq!(
+		replica.extra_users(),
+		vec![ExtraUserSpec {
+			name: "reporting".to_string(),
+			schemas: vec!["dbt".to_string(), "staging".to_string()]
+		}]
+	);
+}
+
+/// An empty `schemas` list means "no access of its own", which the grant
+/// step must not quietly upgrade.
+#[test]
+fn grant_step_targets_only_users_that_declare_schemas() {
+	let mut replica = make_replica(None, None);
+	replica.spec.extra_users = vec![
+		eu("writer"),
+		ExtraUserSpec {
+			name: "reporting".to_string(),
+			schemas: vec!["dbt".to_string()],
+		},
+	];
+	assert_eq!(
+		extra_users_with_schemas(&replica),
+		vec![ExtraUserSpec {
+			name: "reporting".to_string(),
+			schemas: vec!["dbt".to_string()],
+		}]
+	);
+}
+
+/// Nothing to grant means no connection is opened at all.
+#[test]
+fn grant_step_is_a_no_op_without_schema_scoped_users() {
+	let mut replica = make_replica(None, None);
+	assert!(extra_users_with_schemas(&replica).is_empty());
+	replica.spec.extra_users = vec![eu("writer"), eu("etl")];
+	assert!(extra_users_with_schemas(&replica).is_empty());
+}
+
+/// Reads `extra_users()`, not `spec.extra_users`, so trimming and the
+/// analytics-user exclusion apply here too.
+#[test]
+fn grant_step_uses_the_cleaned_up_user_list() {
+	let mut replica = make_replica(None, None);
+	replica.spec.analytics_username = "analytics".into();
+	replica.spec.extra_users = vec![
+		ExtraUserSpec {
+			name: "analytics".to_string(),
+			schemas: vec!["dbt".to_string()],
+		},
+		ExtraUserSpec {
+			name: " reporting ".to_string(),
+			schemas: vec![" dbt ".to_string(), "dbt".to_string()],
+		},
+	];
+	assert_eq!(
+		extra_users_with_schemas(&replica),
+		vec![ExtraUserSpec {
+			name: "reporting".to_string(),
+			schemas: vec!["dbt".to_string()],
+		}]
+	);
+}
+
+#[test]
+fn extra_user_secret_name_is_derived_from_replica_and_username() {
+	let replica = make_replica(None, None);
+	assert_eq!(
+		replica.extra_user_secret_name("reporting"),
+		"test-user-reporting-creds"
+	);
+}
+
+#[test]
+fn extra_user_secret_name_slugs_characters_k8s_rejects() {
+	let replica = make_replica(None, None);
+	assert_eq!(
+		replica.extra_user_secret_name("tupaia_read"),
+		"test-user-tupaia-read-creds"
+	);
+}
+
+#[test]
+fn migration_settled_when_persistent_schemas_unset() {
+	let replica = make_replica(None, None);
+	assert!(persistent_schemas_migration_settled(&replica));
+}
+
+#[test]
+fn migration_settled_when_no_status() {
+	let replica = make_replica(Some(vec!["dbt".into()]), None);
+	assert!(persistent_schemas_migration_settled(&replica));
+}
+
+#[test]
+fn migration_settled_in_terminal_phases() {
+	let terminal = [
+		SchemaMigrationPhase::Complete,
+		SchemaMigrationPhase::Partial,
+		SchemaMigrationPhase::TimeoutSkipped,
+		SchemaMigrationPhase::Failed("stuff".into()),
+	];
+	for phase in terminal {
+		let replica = make_replica(Some(vec!["dbt".into()]), Some(phase.clone()));
+		assert!(
+			persistent_schemas_migration_settled(&replica),
+			"phase {phase:?} should let sweep proceed"
+		);
+	}
+}
+
+#[test]
+fn migration_blocks_sweep_only_when_active() {
+	let replica = make_replica(Some(vec!["dbt".into()]), Some(SchemaMigrationPhase::Active));
+	assert!(
+		!persistent_schemas_migration_settled(&replica),
+		"active phase must block sweep so we don't delete the migration source"
+	);
+}
+
+#[test]
+fn generate_password_length_and_charset() {
+	let pw = generate_password();
+	assert_eq!(pw.len(), 32);
+	assert!(pw.chars().all(|c| c.is_ascii_alphanumeric()));
+}
+
+#[test]
+fn generate_password_is_random() {
+	let pw1 = generate_password();
+	let pw2 = generate_password();
+	assert_ne!(pw1, pw2);
+}
+
+#[test]
+fn parse_kopia_snapshot_list() {
+	let raw = r#"[
+		{
+			"id": "abc123def",
+			"description": "",
+			"source": {"host": "db-prod-01", "userName": "kopia", "path": "/data"},
+			"tags": {},
+			"startTime": "2024-06-15T12:00:00Z",
+			"stats": {"totalSize": 5368709120}
+		},
+		{
+			"id": "xyz789ghi",
+			"description": "daily backup",
+			"source": {"host": "db-prod-02", "userName": "kopia", "path": "/data"},
+			"tags": {"tag:env": "prod"},
+			"startTime": "2024-06-16T12:00:00Z",
+			"stats": {"totalSize": 1073741824}
+		}
+	]"#;
+	let snaps: Vec<Snapshot> = serde_json::from_str(raw).unwrap();
+	assert_eq!(snaps.len(), 2);
+	assert_eq!(snaps[0].id, "abc123def");
+	assert_eq!(snaps[0].hostname(), "db-prod-01");
+	assert_eq!(snaps[0].total_size_bytes(), 5368709120);
+	assert_eq!(snaps[1].id, "xyz789ghi");
+	assert_eq!(snaps[1].description, "daily backup");
+	assert_eq!(snaps[1].total_size_bytes(), 1073741824);
+}
+
+#[test]
+fn parse_kopia_snapshot_list_empty() {
+	let raw = "[]";
+	let snaps: Vec<Snapshot> = serde_json::from_str(raw).unwrap();
+	assert!(snaps.is_empty());
+}
+
+#[test]
+fn parse_kopia_snapshot_missing_optional_fields() {
+	let raw = r#"[{"id": "snap0"}]"#;
+	let snaps: Vec<Snapshot> = serde_json::from_str(raw).unwrap();
+	assert_eq!(snaps.len(), 1);
+	assert_eq!(snaps[0].id, "snap0");
+	assert_eq!(snaps[0].total_size_bytes(), 0);
+	assert_eq!(snaps[0].hostname(), "");
+}
+
+#[test]
+fn parse_kopia_snapshot_with_backslash_paths() {
+	let raw = r#"[{
+		"id": "snap1",
+		"source": {"host": "win-server", "userName": "admin", "path": "C:\\Users\\backup\\data"},
+		"startTime": "2024-06-15T12:00:00Z",
+		"stats": {"totalSize": 1024}
+	}]"#;
+	let snaps: Vec<Snapshot> = serde_json::from_str(raw).unwrap();
+	assert_eq!(snaps[0].source.path, r"C:\Users\backup\data");
+}
+
+fn snapshot_list_test_replica() -> PostgresPhysicalReplica {
+	PostgresPhysicalReplica {
+		metadata: ObjectMeta {
+			name: Some("test".into()),
+			namespace: Some("default".into()),
+			uid: Some("uid".into()),
+			..Default::default()
+		},
+		spec: PostgresPhysicalReplicaSpec {
+			pre_migrate_drop_schemas: None,
+			pre_migrate_sql: None,
+			migrate_to: None,
+			builder_image: None,
+			canopy_source: CanopySource {
+				group: "00000000-0000-0000-0000-000000000000".into(),
+				r#type: "tamanu-postgres".into(),
+			},
+			schedule: "0 * * * *".into(),
+			schedule_jitter: TimeSpan(jiff::Span::new()),
+			minimum_ttl: None,
+			switchover_grace_period: TimeSpan(jiff::Span::new()),
+			analytics_username: "analytics".into(),
+			extra_users: vec![],
+			storage_class: None,
+			storage_size_override: None,
+			resources: None,
+			resources_floor: None,
+			resources_maximum: None,
+			deployment_ready_timeout: None,
+			shm_size_floor: None,
+			service_annotations: None,
+			pod_annotations: None,
+			affinity: None,
+			tolerations: vec![],
+			read_only: true,
+			ephemeral: false,
+			postgres_extra_config: None,
+			persistent_schemas: None,
+			redaction: None,
+			storage_size_maximum: k8s_openapi::apimachinery::pkg::api::resource::Quantity(
+				"2Ti".to_string(),
+			),
+		},
+		status: None,
+	}
+}
+
+#[test]
+fn snapshot_list_job_rotates_kopia_logs() {
+	// Snapshot-list jobs run on every scheduled reconcile (many times
+	// per day per replica). Without log rotation kopia's CLI logs
+	// accumulate in the pod's writable layer / cache PVC over time and
+	// eventually contribute to filling it. Confirm the script applies
+	// the global log-rotation flags to every kopia invocation.
+	let replica = snapshot_list_test_replica();
+
+	let job = build_snapshot_list_job(
+		&replica,
+		"test-snap",
+		"default",
+		"kopia:latest",
+		"http://x",
+		&snapshot_list_proxy(),
+		&PodPlacement::default(),
+	)
+	.expect("job builds");
+	let script = job.spec.unwrap().template.spec.unwrap().containers[0]
+		.args
+		.as_ref()
+		.unwrap()[0]
+		.clone();
+	assert!(
+		script.contains("--log-dir-max-files=20"),
+		"snapshot-list script must rotate kopia logs by file count"
+	);
+	assert!(
+		script.contains("--log-dir-max-age=24h"),
+		"snapshot-list script must rotate kopia logs by age"
+	);
+}
+
+fn make_restore(snapshot: &str, phase: Option<RestorePhase>) -> PostgresPhysicalRestore {
+	PostgresPhysicalRestore {
+		metadata: ObjectMeta {
+			name: Some(format!("test-{snapshot}")),
+			namespace: Some("default".into()),
+			..Default::default()
+		},
+		spec: PostgresPhysicalRestoreSpec {
+			migrate_to: None,
+			builder_image: None,
+			replica: k8s_openapi::api::core::v1::LocalObjectReference {
+				name: "test".into(),
+			},
+			snapshot: snapshot.into(),
+			snapshot_size: k8s_openapi::apimachinery::pkg::api::resource::Quantity("1Gi".into()),
+			snapshot_time: None,
+			storage_size: k8s_openapi::apimachinery::pkg::api::resource::Quantity("2Gi".into()),
+		},
+		status: phase.map(|p| PostgresPhysicalRestoreStatus {
+			phase: Some(p),
+			..Default::default()
+		}),
+	}
+}
+
+/// A restore with a `migrateTo` target sits in `Migrating` between Ready and
+/// Switching. Missed here the replica reads as idle: it lists snapshots on
+/// every reconcile and can start a second restore beside the first.
+#[test]
+fn a_migrating_restore_is_in_progress() {
+	let restore = make_restore("snapA", Some(RestorePhase::Migrating));
+	assert!(restore_in_progress(&restore));
+}
+
+#[test]
+fn every_pre_switchover_phase_is_in_progress() {
+	for phase in [
+		RestorePhase::Pending,
+		RestorePhase::Restoring,
+		RestorePhase::Migrating,
+		RestorePhase::Ready,
+	] {
+		let restore = make_restore("snapA", Some(phase.clone()));
+		assert!(
+			restore_in_progress(&restore),
+			"a {phase:?} restore must stop the replica starting another"
+		);
+	}
+}
+
+#[test]
+fn a_finished_restore_is_not_in_progress() {
+	for phase in [RestorePhase::Active, RestorePhase::Failed] {
+		let restore = make_restore("snapA", Some(phase.clone()));
+		assert!(!restore_in_progress(&restore), "{phase:?} is not in flight");
+	}
+}
+
+/// An ephemeral replica deletes its restore once the snapshot is proved, so
+/// `verifiedSnapshotId` is all that's left to say a restore ever succeeded.
+/// Read as never-restored it takes the immediate-trigger path on every
+/// reconcile and lists snapshots every few seconds.
+#[test]
+fn verified_snapshot_counts_as_a_successful_restore() {
+	let status = PostgresPhysicalReplicaStatus {
+		verified_snapshot_id: Some("snapA".into()),
+		..Default::default()
+	};
+	assert!(!no_successful_restore(Some(&status)));
+}
+
+#[test]
+fn completed_restore_counts_as_a_successful_restore() {
+	let status = PostgresPhysicalReplicaStatus {
+		last_restore_completed_at: Some(Time(Timestamp::now())),
+		..Default::default()
+	};
+	assert!(!no_successful_restore(Some(&status)));
+}
+
+/// A replica with neither marker has genuinely never restored and must still
+/// trigger immediately rather than idling until the first cron tick.
+#[test]
+fn fresh_replica_has_no_successful_restore() {
+	assert!(no_successful_restore(None));
+	assert!(no_successful_restore(Some(
+		&PostgresPhysicalReplicaStatus::default()
+	)));
+}
+
+#[test]
+fn snapshot_covered_by_verified_marker() {
+	// Ephemeral `verify` replica: the restore has been torn down (no live
+	// restores) but the marker records that we already verified the
+	// snapshot, so we must not restore it again and double-report.
+	assert!(snapshot_already_covered("snapA", Some("snapA"), &[]));
+	assert!(!snapshot_already_covered("snapB", Some("snapA"), &[]));
+}
+
+#[test]
+fn snapshot_covered_by_live_restore() {
+	for phase in [
+		RestorePhase::Pending,
+		RestorePhase::Restoring,
+		RestorePhase::Ready,
+		RestorePhase::Switching,
+		RestorePhase::Active,
+	] {
+		let restores = [make_restore("snapA", Some(phase.clone()))];
+		assert!(
+			snapshot_already_covered("snapA", None, &restores),
+			"a {phase:?} restore on the snapshot must count as covered"
+		);
+	}
+}
+
+#[test]
+fn failed_restore_does_not_cover_snapshot() {
+	// A Failed restore is allowed to be retried via the failure backoff
+	// path, so it must not block a fresh restore of the same snapshot.
+	let restores = [make_restore("snapA", Some(RestorePhase::Failed))];
+	assert!(!snapshot_already_covered("snapA", None, &restores));
+}
+
+#[test]
+fn uncovered_snapshot_is_created() {
+	// No marker, and the only live restore is for a different snapshot.
+	let restores = [make_restore("snapOld", Some(RestorePhase::Active))];
+	assert!(!snapshot_already_covered("snapNew", None, &restores));
+	// A restore with no status yet (phase None) still counts as live.
+	let pending = [make_restore("snapNew", None)];
+	assert!(snapshot_already_covered("snapNew", None, &pending));
+}
+
+/// The snapshot-list job is a pod like any other and must land on the
+/// configured tier rather than wherever the cluster's default node pool is.
+#[test]
+fn snapshot_list_job_carries_the_placement_defaults() {
+	let replica = snapshot_list_test_replica();
+	let placement = PodPlacement::parse("bes.node.purpose=workload", "a=b", "");
+	let job = build_snapshot_list_job(
+		&replica,
+		"test-snap",
+		"default",
+		"kopia:latest",
+		"http://x",
+		&snapshot_list_proxy(),
+		&placement,
+	)
+	.expect("job builds");
+
+	let template = job.spec.unwrap().template;
+	assert_eq!(
+		template
+			.spec
+			.unwrap()
+			.node_selector
+			.unwrap()
+			.get("bes.node.purpose")
+			.unwrap(),
+		"workload"
+	);
+	assert_eq!(
+		template
+			.metadata
+			.unwrap()
+			.annotations
+			.unwrap()
+			.get("a")
+			.unwrap(),
+		"b"
+	);
+}
+
+/// An `upgrade` replica migrates each restore to the next version in place,
+/// so it needs the same headroom as a persistent schema migration. Sized as a
+/// plain restore, a 77GB snapshot got an 80Gi volume with no room to migrate.
+#[test]
+fn a_replica_that_migrates_writes_into_its_restore() {
+	let mut migrating = make_replica(None, None);
+	migrating.spec.migrate_to = Some(MigrationTarget {
+		version: "2.64.2".into(),
+		version_id: "55555555-5555-5555-5555-555555555555".into(),
+	});
+
+	assert!(migrating.writes_into_restore());
+	assert!(make_replica(Some(vec!["reporting".into()]), None).writes_into_restore());
+	assert!(!make_replica(None, None).writes_into_restore());
+}
+
+#[test]
+fn a_restore_written_into_gets_headroom_beyond_the_plain_margin() {
+	let snapshot = ParsedQuantity::from(Decimal::from(77_400_000_000u64));
+	let size = |writes_into_restore| {
+		ParsedQuantity::try_from(
+			compute_storage_size(
+				snapshot.clone(),
+				None,
+				&Quantity("2Ti".into()),
+				writes_into_restore,
+				None,
+			)
+			.expect("under the 2Ti maximum"),
+		)
+		.unwrap()
+	};
+
+	assert!(size(true) >= size(false) + ParsedQuantity::try_from("5Gi").unwrap());
+}
+
+fn snapshot_list_proxy() -> CanopyProxyArgs<'static> {
+	CanopyProxyArgs {
+		image: "ghcr.io/beyondessential/canopy:latest",
+		broker_base_url: "http://operator.pgro-system.svc:9091",
+		stats_callback_url: "http://operator.pgro-system.svc:8080/api/v1/canopy-stats/ns/job",
+		progress_callback_url: None,
+		run_id: None,
+		s3_endpoint: None,
+	}
+}
+
+/// The snapshot-list Job reaches the repository through the same sidecar, so a
+/// custom S3 endpoint has to reach its sidecar too.
+#[test]
+fn snapshot_list_sidecar_carries_the_s3_endpoint() {
+	let replica = snapshot_list_test_replica();
+	let proxy = CanopyProxyArgs {
+		s3_endpoint: Some("http://minio.minio.svc:9000"),
+		..snapshot_list_proxy()
+	};
+	let job = build_snapshot_list_job(
+		&replica,
+		"test-snap",
+		"default",
+		"kopia:latest",
+		"http://x",
+		&proxy,
+		&PodPlacement::default(),
+	)
+	.expect("job builds");
+
+	let sidecar = job
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.init_containers
+		.unwrap()
+		.into_iter()
+		.find(|c| c.name == "canopy-proxy")
+		.expect("canopy-proxy sidecar");
+	let endpoint = sidecar
+		.env
+		.unwrap_or_default()
+		.into_iter()
+		.find(|e| e.name == "PGRO_S3_ENDPOINT")
+		.and_then(|e| e.value);
+	assert_eq!(endpoint.as_deref(), Some("http://minio.minio.svc:9000"));
+}

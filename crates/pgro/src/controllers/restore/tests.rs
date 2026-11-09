@@ -1,0 +1,3661 @@
+use std::collections::BTreeMap;
+
+use jiff::Span;
+use k8s_openapi::api::core::v1::{
+	Affinity, LocalObjectReference, NodeAffinity, NodeSelector, NodeSelectorRequirement,
+	NodeSelectorTerm, ResourceRequirements,
+};
+use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
+
+use kube::{ResourceExt, runtime::reflector::ObjectRef};
+
+use super::builders::{
+	build_deployment, build_restore_job, build_version_detect_job, resolve_postgres_resources,
+};
+use crate::{placement::PodPlacement, types::*, util::TimeSpan};
+
+fn proxy_args() -> super::builders::CanopyProxyArgs<'static> {
+	super::builders::CanopyProxyArgs {
+		image: "ghcr.io/beyondessential/canopy:latest",
+		broker_base_url: "http://operator.pgro-system.svc:9091",
+		stats_callback_url: "http://operator.pgro-system.svc:8080/api/v1/canopy-stats/ns/job",
+		progress_callback_url: None,
+		run_id: None,
+		s3_endpoint: None,
+	}
+}
+
+#[test]
+fn deployment_uses_affinity_not_node_selector() {
+	let mut replica = PostgresPhysicalReplica::new(
+		"test-replica",
+		PostgresPhysicalReplicaSpec {
+			pre_migrate_drop_schemas: None,
+			pre_migrate_sql: None,
+			migrate_to: None,
+			builder_image: None,
+			canopy_source: CanopySource {
+				group: "11111111-1111-1111-1111-111111111111".to_string(),
+				r#type: "tamanu-postgres".to_string(),
+			},
+			schedule: "0 */6 * * *".into(),
+			schedule_jitter: TimeSpan(Span::new().minutes(10)),
+			minimum_ttl: None,
+			switchover_grace_period: TimeSpan(Span::new().minutes(5)),
+			analytics_username: "analytics".to_string(),
+			extra_users: vec![],
+			storage_class: None,
+			storage_size_override: None,
+			resources: None,
+			resources_floor: None,
+			resources_maximum: None,
+			deployment_ready_timeout: None,
+			shm_size_floor: None,
+			service_annotations: None,
+			pod_annotations: None,
+			affinity: None,
+			tolerations: vec![],
+			read_only: true,
+			ephemeral: false,
+			postgres_extra_config: None,
+
+			persistent_schemas: None,
+			redaction: None,
+			storage_size_maximum: Quantity("2Ti".to_string()),
+		},
+	);
+	replica.spec.affinity = Some(Affinity {
+		node_affinity: Some(NodeAffinity {
+			required_during_scheduling_ignored_during_execution: Some(NodeSelector {
+				node_selector_terms: vec![NodeSelectorTerm {
+					match_expressions: Some(vec![NodeSelectorRequirement {
+						key: "kubernetes.io/os".to_string(),
+						operator: "In".to_string(),
+						values: Some(vec!["linux".to_string()]),
+					}]),
+					..Default::default()
+				}],
+			}),
+			..Default::default()
+		}),
+		pod_affinity: None,
+		pod_anti_affinity: None,
+	});
+
+	let mut restore = PostgresPhysicalRestore::new(
+		"test-restore",
+		PostgresPhysicalRestoreSpec {
+			migrate_to: None,
+			builder_image: None,
+			replica: LocalObjectReference {
+				name: "test-replica".to_string(),
+			},
+			snapshot: "snap123".to_string(),
+			snapshot_size: Quantity("10Gi".to_string()),
+			snapshot_time: None,
+			storage_size: Quantity("11Gi".to_string()),
+		},
+	);
+	restore.metadata.uid = Some("uid-123".to_string());
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = deploy
+		.spec
+		.as_ref()
+		.unwrap()
+		.template
+		.spec
+		.as_ref()
+		.unwrap();
+	assert!(
+		pod_spec.affinity.is_some(),
+		"pod spec must have affinity set"
+	);
+	assert!(
+		pod_spec.node_selector.is_none(),
+		"pod spec must not have node_selector"
+	);
+}
+
+fn test_restore_and_replica() -> (PostgresPhysicalRestore, PostgresPhysicalReplica) {
+	let replica = PostgresPhysicalReplica::new(
+		"test-replica",
+		PostgresPhysicalReplicaSpec {
+			pre_migrate_drop_schemas: None,
+			pre_migrate_sql: None,
+			migrate_to: None,
+			builder_image: None,
+			canopy_source: CanopySource {
+				group: "11111111-1111-1111-1111-111111111111".to_string(),
+				r#type: "tamanu-postgres".to_string(),
+			},
+			schedule: "0 */6 * * *".into(),
+			schedule_jitter: TimeSpan(Span::new().minutes(10)),
+			minimum_ttl: None,
+			switchover_grace_period: TimeSpan(Span::new().minutes(5)),
+			analytics_username: "analytics".to_string(),
+			extra_users: vec![],
+			storage_class: None,
+			storage_size_override: None,
+			resources: None,
+			resources_floor: None,
+			resources_maximum: None,
+			deployment_ready_timeout: None,
+			shm_size_floor: None,
+			service_annotations: None,
+			pod_annotations: None,
+			affinity: None,
+			tolerations: vec![],
+			read_only: true,
+			ephemeral: false,
+			postgres_extra_config: None,
+
+			persistent_schemas: None,
+			redaction: None,
+			storage_size_maximum: Quantity("2Ti".to_string()),
+		},
+	);
+
+	let mut restore = PostgresPhysicalRestore::new(
+		"test-restore",
+		PostgresPhysicalRestoreSpec {
+			migrate_to: None,
+			builder_image: None,
+			replica: LocalObjectReference {
+				name: "test-replica".to_string(),
+			},
+			snapshot: "snap123".to_string(),
+			snapshot_size: Quantity("10Gi".to_string()),
+			snapshot_time: None,
+			storage_size: Quantity("11Gi".to_string()),
+		},
+	);
+	restore.metadata.uid = Some("uid-123".to_string());
+
+	(restore, replica)
+}
+
+/// The `setup-auth` init container's inline script, which carries the locale,
+/// WAL and reindex fix steps.
+fn setup_auth_script() -> String {
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let setup_auth = deploy
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.init_containers
+		.unwrap()
+		.into_iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist");
+	setup_auth.args.unwrap().remove(0)
+}
+
+/// The `postgres` container's inline script, which carries the background
+/// reindex hook and its stage bookkeeping.
+fn postgres_container_script() -> String {
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let postgres = deploy
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.containers
+		.into_iter()
+		.find(|c| c.name == "postgres")
+		.expect("postgres container must exist");
+	postgres.args.unwrap().remove(0)
+}
+
+/// Memory in bytes. Compared numerically because the derived value is ceiled
+/// to whole Mi, so `2Gi` legitimately comes back as `2048Mi`.
+fn mem(r: &ResourceRequirements, which: &str) -> u64 {
+	let map = match which {
+		"limits" => r.limits.as_ref(),
+		_ => r.requests.as_ref(),
+	};
+	let q = map.unwrap().get("memory").unwrap().clone();
+	parsed_bytes(&q)
+}
+
+fn gib(n: u64) -> u64 {
+	n * (1 << 30)
+}
+
+fn cpu(r: &ResourceRequirements, which: &str) -> Option<String> {
+	let map = match which {
+		"limits" => r.limits.as_ref(),
+		_ => r.requests.as_ref(),
+	};
+	map.and_then(|m| m.get("cpu")).map(|q| q.0.clone())
+}
+
+/// A pinned `resources` is the operator's explicit intent (or a canopy
+/// parameter) and must beat anything derived from the snapshot.
+#[test]
+fn pinned_resources_win_over_the_derived_value() {
+	let (restore, mut replica) = test_restore_and_replica();
+	replica.spec.resources = Some(ResourceRequirements {
+		limits: Some(BTreeMap::from([(
+			"memory".to_string(),
+			Quantity("3Gi".to_string()),
+		)])),
+		..Default::default()
+	});
+	replica.spec.resources_floor = Some(ResourceRequirements {
+		limits: Some(BTreeMap::from([(
+			"memory".to_string(),
+			Quantity("8Gi".to_string()),
+		)])),
+		..Default::default()
+	});
+
+	let resolved =
+		resolve_postgres_resources(&replica, &restore.spec.snapshot_size).expect("pinned");
+	assert_eq!(mem(&resolved, "limits"), gib(3));
+}
+
+/// With nothing pinned the memory comes from the snapshot, while CPU is
+/// carried over from the floor — CPU tracks query concurrency, not data size.
+#[test]
+fn derived_memory_scales_but_cpu_comes_from_the_floor() {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	restore.spec.snapshot_size = Quantity("200Gi".to_string());
+	replica.spec.resources = None;
+	replica.spec.resources_floor = Some(ResourceRequirements {
+		requests: Some(BTreeMap::from([
+			("cpu".to_string(), Quantity("500m".to_string())),
+			("memory".to_string(), Quantity("2Gi".to_string())),
+		])),
+		limits: Some(BTreeMap::from([
+			("cpu".to_string(), Quantity("4".to_string())),
+			("memory".to_string(), Quantity("8Gi".to_string())),
+		])),
+		..Default::default()
+	});
+
+	let resolved =
+		resolve_postgres_resources(&replica, &restore.spec.snapshot_size).expect("derived");
+
+	assert_eq!(mem(&resolved, "limits"), gib(20), "10% of a 200Gi snapshot");
+	assert_eq!(cpu(&resolved, "limits").as_deref(), Some("4"));
+	assert_eq!(cpu(&resolved, "requests").as_deref(), Some("500m"));
+}
+
+/// A small replica must not inherit a large replica's reservation.
+#[test]
+fn derived_memory_falls_back_to_the_floor_for_a_small_snapshot() {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	restore.spec.snapshot_size = Quantity("300Mi".to_string());
+	replica.spec.resources = None;
+	replica.spec.resources_floor = Some(ResourceRequirements {
+		limits: Some(BTreeMap::from([(
+			"memory".to_string(),
+			Quantity("2Gi".to_string()),
+		)])),
+		..Default::default()
+	});
+
+	let resolved =
+		resolve_postgres_resources(&replica, &restore.spec.snapshot_size).expect("derived");
+	assert_eq!(mem(&resolved, "limits"), gib(2));
+}
+
+/// The derived memory request must equal the limit. Requests are the only
+/// figure the cluster acts on — instance selection, bin-packing, consolidation,
+/// eviction order — so understating one puts the pod on a node that cannot
+/// satisfy its own limit and marks the node as spare capacity.
+#[test]
+fn derived_memory_request_equals_limit() {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	restore.spec.snapshot_size = Quantity("200Gi".to_string());
+	replica.spec.resources = None;
+	replica.spec.resources_floor = Some(ResourceRequirements {
+		limits: Some(BTreeMap::from([(
+			"memory".to_string(),
+			Quantity("8Gi".to_string()),
+		)])),
+		..Default::default()
+	});
+
+	let resolved =
+		resolve_postgres_resources(&replica, &restore.spec.snapshot_size).expect("derived");
+	assert_eq!(mem(&resolved, "limits"), gib(20));
+	assert_eq!(mem(&resolved, "requests"), gib(20));
+}
+
+/// A floor that omits the CPU limit must produce resources with no CPU limit.
+/// `resolve_postgres_resources` copies CPU from the floor's requests and limits
+/// independently, so this holds without special-casing — but it's load-bearing
+/// for the analytics intent and implicit in the merge, so pin it.
+#[test]
+fn absent_cpu_limit_in_the_floor_stays_absent() {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	restore.spec.snapshot_size = Quantity("200Gi".to_string());
+	replica.spec.resources = None;
+	replica.spec.resources_floor = Some(ResourceRequirements {
+		requests: Some(BTreeMap::from([
+			("cpu".to_string(), Quantity("2".to_string())),
+			("memory".to_string(), Quantity("2Gi".to_string())),
+		])),
+		limits: Some(BTreeMap::from([(
+			"memory".to_string(),
+			Quantity("8Gi".to_string()),
+		)])),
+		..Default::default()
+	});
+
+	let resolved =
+		resolve_postgres_resources(&replica, &restore.spec.snapshot_size).expect("derived");
+
+	assert_eq!(cpu(&resolved, "requests").as_deref(), Some("2"));
+	assert_eq!(
+		cpu(&resolved, "limits"),
+		None,
+		"a floor without a CPU limit must not grow one"
+	);
+	assert_eq!(mem(&resolved, "limits"), gib(20));
+}
+
+#[test]
+fn canopy_restore_job_proxy_is_native_sidecar() {
+	// Regression: the canopy-proxy must be an init container with
+	// restartPolicy=Always (a native sidecar), NOT a plain container. As a
+	// plain container it keeps the Pod Running after the main `restore`
+	// container exits, so the Job never succeeds and eventually hits
+	// activeDeadlineSeconds → DeadlineExceeded.
+	let (restore, replica) = test_restore_and_replica();
+	let proxy = super::builders::CanopyProxyArgs {
+		image: "ghcr.io/beyondessential/postgres-restore-operator:latest",
+		broker_base_url: "http://operator.pgro-system.svc:9091",
+		stats_callback_url: "http://operator.pgro-system.svc:8080/api/v1/canopy-stats/ns/job",
+		progress_callback_url: None,
+		run_id: Some("44444444-4444-4444-4444-444444444444"),
+		s3_endpoint: None,
+	};
+	let job = build_restore_job(
+		&restore,
+		"test-restore-restore",
+		"default",
+		&replica,
+		"kopia:latest",
+		"http://operator/api/v1/cache-pressure/default/test-restore",
+		&proxy,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = job.spec.unwrap().template.spec.unwrap();
+
+	// The proxy is NOT a regular container.
+	assert!(
+		!pod_spec.containers.iter().any(|c| c.name == "canopy-proxy"),
+		"canopy-proxy must not be a plain container (Pod would never complete)"
+	);
+	// It IS an init container with restartPolicy=Always.
+	let init = pod_spec
+		.init_containers
+		.as_ref()
+		.expect("canopy path must declare init containers");
+	let sidecar = init
+		.iter()
+		.find(|c| c.name == "canopy-proxy")
+		.expect("canopy-proxy must be a native sidecar (init container)");
+	assert_eq!(
+		sidecar.restart_policy.as_deref(),
+		Some("Always"),
+		"native sidecar must set restartPolicy=Always"
+	);
+	assert!(
+		pod_spec.termination_grace_period_seconds.unwrap_or(0) > 0,
+		"canopy Pod must allow grace time for the sidecar to flush stats on SIGTERM"
+	);
+}
+
+#[test]
+fn canopy_restore_job_sidecar_carries_run_id() {
+	// The run_id passed in CanopyProxyArgs must reach the sidecar as
+	// PGRO_RUN_ID so its credential requests are attributed to the run; when
+	// no run_id is given (non-run credential consumers) the env is absent.
+	let (restore, replica) = test_restore_and_replica();
+
+	let run_id_env = |run_id: Option<&str>| {
+		let proxy = super::builders::CanopyProxyArgs {
+			image: "ghcr.io/beyondessential/postgres-restore-operator:latest",
+			broker_base_url: "http://operator.pgro-system.svc:9091",
+			stats_callback_url: "http://operator.pgro-system.svc:8080/api/v1/canopy-stats/ns/job",
+			progress_callback_url: None,
+			run_id,
+			s3_endpoint: None,
+		};
+		let job = build_restore_job(
+			&restore,
+			"test-restore-restore",
+			"default",
+			&replica,
+			"kopia:latest",
+			"http://operator/api/v1/cache-pressure/default/test-restore",
+			&proxy,
+			&PodPlacement::default(),
+		)
+		.unwrap();
+		let sidecar = job
+			.spec
+			.unwrap()
+			.template
+			.spec
+			.unwrap()
+			.init_containers
+			.unwrap()
+			.into_iter()
+			.find(|c| c.name == "canopy-proxy")
+			.expect("canopy-proxy sidecar");
+		sidecar
+			.env
+			.unwrap_or_default()
+			.into_iter()
+			.find(|e| e.name == "PGRO_RUN_ID")
+			.and_then(|e| e.value)
+	};
+
+	assert_eq!(
+		run_id_env(Some("44444444-4444-4444-4444-444444444444")).as_deref(),
+		Some("44444444-4444-4444-4444-444444444444"),
+	);
+	assert_eq!(
+		run_id_env(None),
+		None,
+		"no run_id → no PGRO_RUN_ID env on the sidecar"
+	);
+}
+
+#[test]
+fn restore_job_has_ttl_seconds_after_finished() {
+	let (restore, replica) = test_restore_and_replica();
+	let job = build_restore_job(
+		&restore,
+		"test-restore-restore",
+		"default",
+		&replica,
+		"kopia:latest",
+		"http://operator/api/v1/cache-pressure/default/test-restore",
+		&proxy_args(),
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let ttl = job
+		.spec
+		.as_ref()
+		.unwrap()
+		.ttl_seconds_after_finished
+		.expect("restore job must set ttlSecondsAfterFinished");
+	assert!(ttl > 0, "ttlSecondsAfterFinished must be positive");
+}
+
+#[test]
+fn restore_job_has_the_four_hour_deadline() {
+	let job = restore_job_for("10Gi");
+	assert_eq!(job.spec.unwrap().active_deadline_seconds, Some(14400));
+}
+
+#[test]
+fn restore_job_mounts_persistent_kopia_cache() {
+	// Kopia's cache and logs used to land on the pod's writable layer at
+	// /tmp/kopia, causing the restore pod to be evicted under
+	// ephemeral-storage pressure (observed in production at ~10 GiB
+	// usage). Mount a per-replica PVC at /tmp/kopia so the cache persists
+	// across restores and doesn't count toward ephemeral-storage.
+	let (restore, replica) = test_restore_and_replica();
+	let job = build_restore_job(
+		&restore,
+		"test-restore-restore",
+		"default",
+		&replica,
+		"kopia:latest",
+		"http://operator/api/v1/cache-pressure/default/test-restore",
+		&proxy_args(),
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = job.spec.unwrap().template.spec.unwrap();
+
+	let volumes = pod_spec.volumes.as_ref().expect("pod must declare volumes");
+	let cache_volume = volumes
+		.iter()
+		.find(|v| v.name == "kopia-cache")
+		.expect("restore Job pod must include a kopia-cache volume");
+	let claim_name = cache_volume
+		.persistent_volume_claim
+		.as_ref()
+		.expect("kopia-cache volume must reference a PVC")
+		.claim_name
+		.as_str();
+	assert_eq!(
+		claim_name,
+		super::builders::kopia_cache_pvc_name(&restore.spec.replica.name),
+		"kopia-cache volume must reference the per-replica cache PVC"
+	);
+
+	let mounts = pod_spec.containers[0]
+		.volume_mounts
+		.as_ref()
+		.expect("restore container must declare volume mounts");
+	assert!(
+		mounts
+			.iter()
+			.any(|m| m.name == "kopia-cache" && m.mount_path == "/tmp/kopia"),
+		"restore container must mount kopia-cache at /tmp/kopia"
+	);
+}
+
+#[test]
+fn kopia_cache_pvc_owned_by_replica() {
+	let (restore, replica) = test_restore_and_replica();
+	let pvc =
+		super::builders::build_kopia_cache_pvc(&replica, &restore.spec.snapshot_size, "default");
+
+	let owner_refs = pvc
+		.metadata
+		.owner_references
+		.as_ref()
+		.expect("cache PVC must have owner references");
+	assert_eq!(owner_refs.len(), 1);
+	assert_eq!(owner_refs[0].kind, "PostgresPhysicalReplica");
+	assert_eq!(owner_refs[0].name, replica.name_any());
+
+	let access_modes = pvc
+		.spec
+		.as_ref()
+		.unwrap()
+		.access_modes
+		.as_ref()
+		.expect("cache PVC must declare access modes");
+	assert_eq!(access_modes, &vec!["ReadWriteOnce".to_string()]);
+}
+
+#[test]
+fn kopia_content_cache_mb_floor_for_small_pvc() {
+	// 10Gi PVC (the floor for small snapshots): reserve = max(2Gi,
+	// 30% × 10Gi) = 3Gi → content cache = 7Gi.
+	let small = Quantity("1Gi".to_string());
+	let mb = super::builders::kopia_content_cache_mb(&small);
+	let pvc_mb = 10 * 1024;
+	let proportional = (pvc_mb as f64 * super::builders::KOPIA_CACHE_RESERVE_FRACTION) as u64;
+	let reserve = proportional.max(super::builders::KOPIA_CACHE_RESERVE_MIN_MB);
+	let expected = pvc_mb - reserve;
+	assert_eq!(mb, expected);
+	assert!(
+		mb >= super::builders::KOPIA_CONTENT_CACHE_FLOOR_MB,
+		"content cache must always be at least the floor"
+	);
+}
+
+#[test]
+fn kopia_content_cache_mb_scales_with_snapshot() {
+	// 100Gi snapshot → 20Gi PVC. Reserve = max(2Gi, 30% × 20Gi) = 6Gi
+	// → content cache = 14Gi.
+	let big = Quantity("100Gi".to_string());
+	let mb = super::builders::kopia_content_cache_mb(&big);
+	let pvc_mb = 20 * 1024;
+	let proportional = (pvc_mb as f64 * super::builders::KOPIA_CACHE_RESERVE_FRACTION) as u64;
+	let reserve = proportional.max(super::builders::KOPIA_CACHE_RESERVE_MIN_MB);
+	let expected = pvc_mb - reserve;
+	assert_eq!(mb, expected);
+}
+
+#[test]
+fn next_cache_pvc_size_after_pressure_bumps_and_caps() {
+	// 10Gi PVC → first bump → 11.5Gi. Eventually caps at 2×10Gi = 20Gi.
+	let snapshot = Quantity("1Gi".to_string());
+	let mut size = Quantity("10Gi".to_string());
+	let original_bytes = parsed_bytes(&size);
+	let max_bytes = parsed_bytes(&super::builders::kopia_cache_pvc_max(&snapshot));
+	assert_eq!(max_bytes, original_bytes * 2);
+
+	let first = super::builders::next_cache_pvc_size_after_pressure(&size, &snapshot);
+	let first_bytes = parsed_bytes(&first);
+	assert!(first_bytes > original_bytes, "first bump must grow");
+	assert!(first_bytes <= max_bytes, "first bump must not exceed cap");
+
+	// Loop until we hit the cap. Should take a bounded number of steps.
+	for _ in 0..50 {
+		size = super::builders::next_cache_pvc_size_after_pressure(&size, &snapshot);
+		if parsed_bytes(&size) >= max_bytes {
+			break;
+		}
+	}
+	assert!(
+		parsed_bytes(&size) >= max_bytes,
+		"repeated bumps must eventually reach the cap; got {}",
+		size.0
+	);
+
+	// Once at the cap, further bumps don't push past it.
+	let after_cap = super::builders::next_cache_pvc_size_after_pressure(&size, &snapshot);
+	assert!(
+		parsed_bytes(&after_cap) <= max_bytes,
+		"at-cap bump must not exceed cap"
+	);
+}
+
+fn parsed_bytes(q: &Quantity) -> u64 {
+	kube_quantity::ParsedQuantity::try_from(q.clone())
+		.ok()
+		.and_then(|p| p.to_bytes_f64())
+		.map(|b| b as u64)
+		.unwrap_or(0)
+}
+
+/// The sidecar can only sample progress if the Job tells it where to post.
+#[test]
+fn canopy_restore_job_sidecar_carries_progress_callback_url() {
+	let (restore, replica) = test_restore_and_replica();
+	let url = "http://operator.pgro-system.svc:8080/api/v1/canopy-progress/ns/job";
+	let proxy = super::builders::CanopyProxyArgs {
+		image: "ghcr.io/beyondessential/postgres-restore-operator:latest",
+		broker_base_url: "http://operator.pgro-system.svc:9091",
+		stats_callback_url: "http://operator.pgro-system.svc:8080/api/v1/canopy-stats/ns/job",
+		progress_callback_url: Some(url),
+		run_id: Some("22222222-2222-2222-2222-222222222222"),
+		s3_endpoint: None,
+	};
+	let job = build_restore_job(
+		&restore,
+		"test-restore-restore",
+		"default",
+		&replica,
+		"kopia:latest",
+		"http://operator/api/v1/cache-pressure/default/test-restore",
+		&proxy,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let sidecar = job
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.init_containers
+		.unwrap()
+		.into_iter()
+		.find(|c| c.name == "canopy-proxy")
+		.expect("canopy-proxy sidecar");
+
+	let got = sidecar
+		.env
+		.unwrap()
+		.into_iter()
+		.find(|e| e.name == "PGRO_PROGRESS_CALLBACK_URL")
+		.and_then(|e| e.value);
+	assert_eq!(got.as_deref(), Some(url));
+}
+
+/// A custom S3 endpoint (MinIO in the cluster tests) reaches the sidecar as
+/// `PGRO_S3_ENDPOINT`, and is absent when none is configured, which leaves the
+/// sidecar on AWS.
+#[test]
+fn canopy_restore_job_sidecar_carries_the_s3_endpoint() {
+	let (restore, replica) = test_restore_and_replica();
+	let endpoint_env = |s3_endpoint: Option<&str>| {
+		let proxy = super::builders::CanopyProxyArgs {
+			s3_endpoint,
+			..proxy_args()
+		};
+		let job = build_restore_job(
+			&restore,
+			"test-restore-restore",
+			"default",
+			&replica,
+			"kopia:latest",
+			"http://operator/api/v1/cache-pressure/default/test-restore",
+			&proxy,
+			&PodPlacement::default(),
+		)
+		.unwrap();
+		job.spec
+			.unwrap()
+			.template
+			.spec
+			.unwrap()
+			.init_containers
+			.unwrap()
+			.into_iter()
+			.find(|c| c.name == "canopy-proxy")
+			.expect("canopy-proxy sidecar")
+			.env
+			.unwrap_or_default()
+			.into_iter()
+			.find(|e| e.name == "PGRO_S3_ENDPOINT")
+			.and_then(|e| e.value)
+	};
+
+	assert_eq!(
+		endpoint_env(Some("http://minio.minio.svc:9000")).as_deref(),
+		Some("http://minio.minio.svc:9000"),
+	);
+	assert_eq!(endpoint_env(None), None);
+}
+
+fn restore_job_for(snapshot_size: &str) -> k8s_openapi::api::batch::v1::Job {
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.spec.snapshot_size = Quantity(snapshot_size.to_string());
+	build_restore_job(
+		&restore,
+		"test-restore-restore",
+		"default",
+		&replica,
+		"kopia:latest",
+		"http://operator/api/v1/cache-pressure/default/test-restore",
+		&proxy_args(),
+		&PodPlacement::default(),
+	)
+	.unwrap()
+}
+
+/// kopia sizes its worker pool from the CPUs it can see on the node, not from
+/// the container's cgroup limit, so it spawns far more workers than it has CPU
+/// to run them on. Pin the parallelism to what the container is actually
+/// allowed to use.
+#[test]
+fn restore_job_pins_kopia_parallelism_to_its_cpu_limit() {
+	let job = restore_job_for("10Gi");
+	let pod_spec = job.spec.unwrap().template.spec.unwrap();
+	let container = &pod_spec.containers[0];
+	let cpu_limit = container
+		.resources
+		.as_ref()
+		.and_then(|r| r.limits.as_ref())
+		.and_then(|m| m.get("cpu"))
+		.expect("restore container must cap CPU")
+		.0
+		.clone();
+	let script = container.args.as_ref().unwrap().join(" ");
+	assert!(
+		script.contains("--parallel=\"$KOPIA_PARALLEL\""),
+		"restore must pass --parallel to kopia"
+	);
+
+	let parallel = container
+		.env
+		.as_ref()
+		.unwrap()
+		.iter()
+		.find(|e| e.name == "KOPIA_PARALLEL")
+		.and_then(|e| e.value.clone())
+		.expect("KOPIA_PARALLEL must be set");
+	assert_eq!(
+		parallel, cpu_limit,
+		"parallelism must match the container's CPU limit"
+	);
+}
+
+/// A restore holding far more data gets more memory to work in, rather than
+/// every restore sharing whatever suited the first one.
+#[test]
+fn restore_job_memory_scales_with_snapshot_size() {
+	let mem_of = |job: k8s_openapi::api::batch::v1::Job| -> u64 {
+		let pod_spec = job.spec.unwrap().template.spec.unwrap();
+		let q = pod_spec.containers[0]
+			.resources
+			.as_ref()
+			.unwrap()
+			.limits
+			.as_ref()
+			.unwrap()
+			.get("memory")
+			.unwrap()
+			.clone();
+		parsed_bytes(&q)
+	};
+
+	let small = mem_of(restore_job_for("1Gi"));
+	let large = mem_of(restore_job_for("500Gi"));
+	assert!(
+		large > small,
+		"a much larger snapshot must get more memory, got {large} vs {small}"
+	);
+	assert_eq!(small, gib(4), "small restores keep today's 4Gi floor");
+}
+
+#[test]
+fn restore_job_passes_cache_caps_and_log_rotation() {
+	// The restore Job's pod spec must set KOPIA_CONTENT_CACHE_MB and
+	// KOPIA_METADATA_CACHE_MB so the embedded script can cap kopia's
+	// caches, and the script must rotate CLI logs. Without these the
+	// cache PVC fills up and every subsequent restore Job pod exits
+	// in 1–2 minutes ("no space left on device").
+	let (restore, replica) = test_restore_and_replica();
+	let job = build_restore_job(
+		&restore,
+		"test-restore-restore",
+		"default",
+		&replica,
+		"kopia:latest",
+		"http://operator/api/v1/cache-pressure/default/test-restore",
+		&proxy_args(),
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = job.spec.unwrap().template.spec.unwrap();
+	let container = &pod_spec.containers[0];
+	let env = container.env.as_ref().expect("container must declare env");
+	let names: Vec<&str> = env.iter().map(|e| e.name.as_str()).collect();
+	assert!(
+		names.contains(&"KOPIA_CONTENT_CACHE_MB"),
+		"restore Job env must include KOPIA_CONTENT_CACHE_MB"
+	);
+	assert!(
+		names.contains(&"KOPIA_METADATA_CACHE_MB"),
+		"restore Job env must include KOPIA_METADATA_CACHE_MB"
+	);
+
+	let script = &container.args.as_ref().unwrap()[0];
+	assert!(
+		script.contains("--content-cache-size-mb=\"$KOPIA_CONTENT_CACHE_MB\""),
+		"connect command must cap content cache via env var"
+	);
+	assert!(
+		script.contains("--metadata-cache-size-mb=\"$KOPIA_METADATA_CACHE_MB\""),
+		"connect command must cap metadata cache"
+	);
+	assert!(
+		script.contains("--content-cache-size-limit-mb=\"$KOPIA_CONTENT_CACHE_MB\""),
+		"connect command must hard-cap content cache, the soft cap alone overshoots"
+	);
+	assert!(
+		script.contains("--metadata-cache-size-limit-mb=\"$KOPIA_METADATA_CACHE_MB\""),
+		"connect command must hard-cap metadata cache"
+	);
+	assert!(
+		script.contains("--log-dir-max-files=20"),
+		"kopia invocations must rotate CLI logs by file count"
+	);
+	assert!(
+		script.contains("--log-dir-max-age=24h"),
+		"kopia invocations must rotate CLI logs by age"
+	);
+	assert!(
+		names.contains(&"CACHE_PRESSURE_CALLBACK_URL"),
+		"restore Job env must include CACHE_PRESSURE_CALLBACK_URL"
+	);
+	assert!(
+		script.contains("PGRO_CACHE_PRESSURE"),
+		"restore script must emit pre-flight pressure marker"
+	);
+	assert!(
+		script.contains("$CACHE_PRESSURE_CALLBACK_URL"),
+		"restore script must POST to the cache-pressure callback URL on pressure"
+	);
+}
+
+#[test]
+fn cache_size_needs_grow_ratchet() {
+	let small = Quantity("10Gi".to_string());
+	let bigger = Quantity("20Gi".to_string());
+	assert!(
+		super::builders::cache_size_needs_grow(&small, &bigger),
+		"must grow when desired > current"
+	);
+	assert!(
+		!super::builders::cache_size_needs_grow(&bigger, &small),
+		"must NOT shrink when desired < current"
+	);
+	assert!(
+		!super::builders::cache_size_needs_grow(&small, &small),
+		"equal sizes must not trigger a grow"
+	);
+}
+
+#[test]
+fn kopia_cache_pvc_size_floors_at_10gi() {
+	// For a small snapshot, 20% would be sub-Gi; the floor catches that.
+	let small = Quantity("1Gi".to_string());
+	let size = super::builders::kopia_cache_pvc_size(&small);
+	let parsed = kube_quantity::ParsedQuantity::try_from(size).unwrap();
+	let floor = kube_quantity::ParsedQuantity::try_from("10Gi").unwrap();
+	assert!(
+		parsed >= floor,
+		"sub-floor snapshot must clamp to at least 10Gi"
+	);
+}
+
+#[test]
+fn kopia_cache_pvc_size_scales_with_snapshot() {
+	// For a 100Gi snapshot, 20% = 20Gi which is above the 10Gi floor.
+	let big = Quantity("100Gi".to_string());
+	let size = super::builders::kopia_cache_pvc_size(&big);
+	let parsed = kube_quantity::ParsedQuantity::try_from(size).unwrap();
+	let expected = kube_quantity::ParsedQuantity::try_from("20Gi").unwrap();
+	let floor = kube_quantity::ParsedQuantity::try_from("10Gi").unwrap();
+	assert!(parsed > floor, "100Gi snapshot must not hit the floor");
+	assert_eq!(
+		parsed, expected,
+		"100Gi snapshot must produce exactly 20Gi cache"
+	);
+}
+
+#[test]
+fn version_detect_job_has_ttl_seconds_after_finished() {
+	let (restore, _replica) = test_restore_and_replica();
+	let job = build_version_detect_job(
+		&restore,
+		"test-version-detect",
+		"default",
+		"test-pvc",
+		&PodPlacement::default(),
+	);
+	let ttl = job
+		.spec
+		.as_ref()
+		.unwrap()
+		.ttl_seconds_after_finished
+		.expect("version-detect job must set ttlSecondsAfterFinished");
+	assert!(ttl > 0, "ttlSecondsAfterFinished must be positive");
+}
+
+#[test]
+fn deployment_has_dshm_volume_with_default_resources() {
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = deploy.spec.unwrap().template.spec.unwrap();
+
+	let dshm_vol = pod_spec
+		.volumes
+		.as_ref()
+		.unwrap()
+		.iter()
+		.find(|v| v.name == "dshm")
+		.expect("dshm volume must exist");
+
+	let empty_dir = dshm_vol.empty_dir.as_ref().expect("dshm must be emptyDir");
+	assert_eq!(empty_dir.medium.as_deref(), Some("Memory"));
+	// Default 1Gi request: min(512Mi, ceil(36% of 1Gi)) = min(512Mi, 369Mi) = 369Mi
+	assert_eq!(empty_dir.size_limit.as_ref().unwrap().0, "369Mi");
+}
+
+#[test]
+fn deployment_has_dshm_volume_with_custom_resources() {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	replica.spec.resources = Some(ResourceRequirements {
+		requests: Some(BTreeMap::from([(
+			"memory".to_string(),
+			Quantity("4Gi".to_string()),
+		)])),
+		limits: Some(BTreeMap::from([(
+			"memory".to_string(),
+			Quantity("8Gi".to_string()),
+		)])),
+		..Default::default()
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = deploy.spec.unwrap().template.spec.unwrap();
+
+	let dshm_vol = pod_spec
+		.volumes
+		.as_ref()
+		.unwrap()
+		.iter()
+		.find(|v| v.name == "dshm")
+		.expect("dshm volume must exist");
+
+	let empty_dir = dshm_vol.empty_dir.as_ref().expect("dshm must be emptyDir");
+	assert_eq!(empty_dir.medium.as_deref(), Some("Memory"));
+	// 4Gi request, 8Gi limit: min(4Gi/2, ceil(36% of 8Gi)) = min(2048Mi, 2950Mi) = 2048Mi
+	assert_eq!(empty_dir.size_limit.as_ref().unwrap().0, "2048Mi");
+}
+
+#[test]
+fn deployment_mounts_dshm_on_postgres_and_setup_auth() {
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = deploy.spec.unwrap().template.spec.unwrap();
+
+	let postgres = &pod_spec.containers[0];
+	assert_eq!(postgres.name, "postgres");
+	let pg_mounts = postgres.volume_mounts.as_ref().unwrap();
+	let pg_shm = pg_mounts
+		.iter()
+		.find(|m| m.mount_path == "/dev/shm")
+		.expect("postgres container must mount /dev/shm");
+	assert_eq!(pg_shm.name, "dshm");
+
+	let setup_auth = pod_spec
+		.init_containers
+		.as_ref()
+		.unwrap()
+		.iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist");
+	let sa_mounts = setup_auth.volume_mounts.as_ref().unwrap();
+	assert!(
+		!sa_mounts.iter().any(|m| m.mount_path == "/dev/shm"),
+		"setup-auth must NOT mount /dev/shm (it never uses shared memory)"
+	);
+}
+
+#[test]
+fn deployment_init_script_sets_shared_buffers() {
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = deploy.spec.unwrap().template.spec.unwrap();
+
+	let setup_auth = pod_spec
+		.init_containers
+		.as_ref()
+		.unwrap()
+		.iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist");
+	let script = &setup_auth.args.as_ref().unwrap()[0];
+
+	// Default 1Gi: SHM=369Mi, shared_buffers = floor(70% of 369) = 258MB
+	assert!(
+		script.contains("shared_buffers = 258MB"),
+		"init script must set shared_buffers to computed value, got script containing: {}",
+		script
+			.lines()
+			.find(|l| l.contains("shared_buffers"))
+			.unwrap_or("<not found>")
+	);
+
+	// The sed block must strip shared_buffers from source config
+	assert!(
+		script.contains("shared_buffers[[:space:]]*="),
+		"sed must strip shared_buffers from source config"
+	);
+}
+
+/// The analytics role is reset to a known state on every restore, whether it
+/// already exists or not, so a name colliding with a role in the source
+/// cluster doesn't keep production's attributes and grants.
+#[test]
+fn analytics_role_is_normalised_on_every_restore() {
+	let setup_auth = setup_auth_with_extra_users(vec![]);
+	let script = setup_auth.args.unwrap().remove(0);
+
+	assert!(
+		script.contains("echo \"Resetting analytics role...\""),
+		"the analytics role must go through the shared reset block"
+	);
+	assert!(
+		script.contains(
+			"SELECT format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', :'pgro_username', :'pgro_password') \\gexec"
+		),
+		"the analytics role's attributes must be reset unconditionally"
+	);
+	assert!(
+		script.contains("SELECT format('CREATE ROLE %I', :'pgro_username') \\gexec"),
+		"a missing analytics role is created bare, then normalised by the same ALTER"
+	);
+	assert!(
+		!script.contains("SET default_transaction_read_only = on', :'pgro_username'"),
+		"the analytics role's read-only-ness is decided by the permission branch, not pinned here"
+	);
+	assert!(
+		script.contains("REVOKE %I FROM %I"),
+		"memberships inherited from the source cluster must be revoked"
+	);
+
+	let normalise = script
+		.lines()
+		.position(|l| l.contains("WITH LOGIN NOSUPERUSER NOCREATEDB"))
+		.expect("the normalising ALTER runs somewhere");
+	let revoke = script
+		.lines()
+		.position(|l| l.contains("REVOKE %I FROM %I"))
+		.expect("the revoke runs somewhere");
+	let grant = script
+		.lines()
+		.position(|l| l.contains("GRANT pg_read_all_data TO ${ANALYTICS_USERNAME}"))
+		.expect("the read grant runs somewhere");
+	assert!(
+		normalise < revoke && revoke < grant,
+		"the role must be reset and stripped before the branch grants it anything"
+	);
+}
+
+/// Normalising must not cost a read-write replica its superuser: the branch
+/// re-applies it after the reset.
+#[test]
+fn analytics_role_is_still_superuser_after_normalising() {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	replica.spec.read_only = false;
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("18".to_string()),
+		..Default::default()
+	});
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let script = deploy
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.init_containers
+		.unwrap()
+		.into_iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist")
+		.args
+		.unwrap()
+		.remove(0);
+
+	let normalise = script
+		.lines()
+		.position(|l| l.contains("WITH LOGIN NOSUPERUSER NOCREATEDB"))
+		.expect("the normalising ALTER runs somewhere");
+	let superuser = script
+		.lines()
+		.position(|l| l.contains("ALTER ROLE ${ANALYTICS_USERNAME} WITH SUPERUSER"))
+		.expect("the superuser grant runs somewhere");
+	assert!(
+		normalise < superuser,
+		"the reset must precede the superuser grant, not undo it"
+	);
+}
+
+#[test]
+fn deployment_init_script_grants_superuser_for_read_write() {
+	// Read-write restores grant SUPERUSER to the analytics user. The
+	// granular pg_*_all_data + pg_maintain + CREATE ON DATABASE set was
+	// tried and didn't cover DDL on existing schemas the user does not own
+	// (CREATE TABLE in public on PG >= 15, dropping persistent_schemas
+	// owned by other users on migration). Falling back to superuser keeps
+	// the use cases working on every PG version.
+	let (mut restore, mut replica) = test_restore_and_replica();
+	replica.spec.read_only = false;
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("18".to_string()),
+		..Default::default()
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = deploy.spec.unwrap().template.spec.unwrap();
+	let setup_auth = pod_spec
+		.init_containers
+		.as_ref()
+		.unwrap()
+		.iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist");
+	let script = &setup_auth.args.as_ref().unwrap()[0];
+
+	assert!(
+		script.contains("ALTER ROLE ${ANALYTICS_USERNAME} WITH SUPERUSER"),
+		"read-write init script must grant superuser to analytics"
+	);
+	assert!(
+		!script.contains("GRANT pg_write_all_data"),
+		"read-write init script must not use the predefined pg_write_all_data role"
+	);
+}
+
+#[test]
+fn deployment_init_script_grants_read_only_on_pg14_plus() {
+	// PG >= 14 read-only uses pg_read_all_data instead of superuser to keep
+	// the surface area minimal. Below PG 14 the read-only path falls through
+	// to the superuser branch (no predefined read role).
+	let (mut restore, mut replica) = test_restore_and_replica();
+	replica.spec.read_only = true;
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("18".to_string()),
+		..Default::default()
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = deploy.spec.unwrap().template.spec.unwrap();
+	let setup_auth = pod_spec
+		.init_containers
+		.as_ref()
+		.unwrap()
+		.iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist");
+	let script = &setup_auth.args.as_ref().unwrap()[0];
+
+	assert!(
+		script.contains("GRANT pg_read_all_data TO ${ANALYTICS_USERNAME}"),
+		"read-only init script must grant pg_read_all_data"
+	);
+}
+
+#[test]
+fn deployment_init_script_two_stage_pg_resetwal_fallback() {
+	// When a snapshot is taken mid-online-backup the trailing WAL isn't
+	// included, and postgres recovery fails with "WAL ends before end of
+	// online backup" (or a similar signature). For an analytics replica
+	// we prefer "comes up at the snapshotted state" over "permanently
+	// stuck", so the init script runs `pg_resetwal -f` as a fallback.
+	//
+	// Two stages:
+	//   - Detected WAL signature → short-circuit straight to pg_resetwal
+	//     (retrying the same command won't help when recovery itself is
+	//     blocking startup).
+	//   - Undetected failure → retry once with the same settings (could
+	//     be a transient I/O / catalog blip), then pg_resetwal as a
+	//     last resort.
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let setup_auth = deploy
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.init_containers
+		.unwrap()
+		.into_iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist");
+	let script = setup_auth.args.unwrap().remove(0);
+
+	// pg_resetwal appears multiple times — once in each fallback branch.
+	let resetwal_calls = script.matches("pg_resetwal -f").count();
+	assert!(
+		resetwal_calls >= 2,
+		"init script must reference pg_resetwal -f in both the detected and last-resort branches (saw {resetwal_calls})"
+	);
+	// Detection signatures.
+	for sig in [
+		"WAL ends before end of online backup",
+		"invalid record length at",
+		"database system was interrupted while in recovery",
+	] {
+		assert!(
+			script.contains(sig),
+			"fallback must detect WAL signature: {sig}"
+		);
+	}
+	// Stage-2 retry message — verifies the script attempts the same
+	// command once more before reset when no signature matched.
+	assert!(
+		script.contains("retrying once before falling back to pg_resetwal"),
+		"init script must do a same-settings retry before the last-resort reset"
+	);
+	assert!(
+		script.contains("last resort"),
+		"init script must label the second pg_resetwal as a last resort"
+	);
+}
+
+#[test]
+fn deployment_init_script_flags_full_reindex_after_resetwal() {
+	// pg_resetwal bypasses WAL replay, so any in-flight index write at
+	// snapshot time can leave torn pages (postgres later surfaces these
+	// as "unexpected zero page at block N" when queries hit the index).
+	// Every pg_resetwal call must therefore touch /pgdata/needs-reindex-all
+	// so the main container's startup hook runs REINDEX DATABASE on every
+	// user database before the readiness probe lets traffic in.
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let setup_auth = deploy
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.init_containers
+		.unwrap()
+		.into_iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist");
+	let script = setup_auth.args.unwrap().remove(0);
+
+	// The flag must be set every time pg_resetwal -f runs (currently
+	// twice — detected-signature branch and last-resort branch). The
+	// quick check: at least one `touch /pgdata/needs-reindex-all`
+	// follows each pg_resetwal invocation, and the count of the touch
+	// matches the count of resets.
+	// Count actual invocations (the literal command line) — using just
+	// "pg_resetwal -f" picks up comments and echo messages too.
+	let resetwal_calls = script.matches("pg_resetwal -f \"$PGDATA\"").count();
+	let touch_calls = script.matches("touch /pgdata/needs-reindex-all").count();
+	assert_eq!(
+		touch_calls, resetwal_calls,
+		"every pg_resetwal -f invocation must be paired with `touch /pgdata/needs-reindex-all` (got {touch_calls} touches for {resetwal_calls} resets)"
+	);
+	assert!(
+		resetwal_calls >= 2,
+		"expected at least two pg_resetwal invocation sites; got {resetwal_calls}"
+	);
+}
+
+#[test]
+fn deployment_init_script_detects_locale_mismatch_before_rewriting() {
+	// The single-user pass is where the locale rewrite actually happens, so
+	// it is the only place that can observe whether a rewrite was needed:
+	// once it runs, every database conforms and a later query can no longer
+	// tell. `postgres --single` reports no row count, so the rewrite must be
+	// preceded by a labelled count probe in the same session.
+	let script = setup_auth_script();
+
+	assert!(
+		script.contains("pgro_locale_mismatch"),
+		"single-user locale pass must probe for non-conforming databases under a distinctive label before rewriting them"
+	);
+	let probe_call = script
+		.find(r#"postgres_single_or_resetwal "SELECT count(*) AS pgro_locale_mismatch"#)
+		.expect("the probe must be submitted through the single-user helper");
+	assert!(
+		script[probe_call..].starts_with(
+			r#"postgres_single_or_resetwal "SELECT count(*) AS pgro_locale_mismatch FROM pg_database WHERE $LOCALE_MISMATCH_WHERE;
+$LOCALE_REWRITE""#
+		),
+		"the rewrite must be submitted in the same single-user session, on the line after the probe: single-user mode ends a statement at the newline, and a separate session would probe a database the rewrite had already fixed"
+	);
+}
+
+#[test]
+fn single_user_postgres_overrides_shared_buffers() {
+	// The init containers run under a 256Mi limit, while postgresql.conf carries the main
+	// container's shared_buffers, which is gigabytes on a large restore.
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	let reset_job = super::build_credential_reset_job(
+		&restore,
+		&replica,
+		"cred-reset",
+		"default",
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let reset_container = &reset_job.spec.unwrap().template.spec.unwrap().containers[0];
+	let reset_script = reset_container
+		.command
+		.iter()
+		.chain(reset_container.args.iter())
+		.flatten()
+		.cloned()
+		.collect::<Vec<_>>()
+		.join("\n");
+
+	for (what, script) in [
+		("setup-auth", setup_auth_script()),
+		("credential reset", reset_script),
+	] {
+		let invocations: Vec<&str> = script
+			.lines()
+			.filter(|line| line.contains("| postgres --single"))
+			.collect();
+		assert!(
+			!invocations.is_empty(),
+			"{what}: expected a postgres --single invocation"
+		);
+		for line in invocations {
+			assert!(
+				line.contains("postgres --single -c shared_buffers=32MB "),
+				"{what}: single-user postgres must cap shared_buffers: {line}"
+			);
+		}
+	}
+}
+
+#[test]
+fn deployment_init_script_records_locale_fix_from_sticky_flag() {
+	// `fixes.locale` must be driven by a flag file the rewrite touches, the
+	// same way reset_wal and recreated_pg_wal are. The previous shell
+	// variable was set to 1 by the single-user pass and then unconditionally
+	// overwritten by the post-startup fallback's row count — always 0,
+	// because the single-user pass had already fixed every database — so the
+	// flag could never report true.
+	let script = setup_auth_script();
+
+	assert!(
+		script.contains("touch /pgdata/fix-locale"),
+		"a locale rewrite must record itself in a flag file"
+	);
+	assert!(
+		script.contains("if [ -f /pgdata/fix-locale ]; then PGRO_LOCALE=true"),
+		"PGRO_LOCALE must be read back from the flag file, not from a shell variable a later step can clobber"
+	);
+	assert!(
+		!script.contains("LOCALE_CHANGED=1\n"),
+		"the unconditional LOCALE_CHANGED=1 must be gone — it was overwritten by the post-startup fallback before it was ever read"
+	);
+}
+
+#[test]
+fn deployment_init_script_pairs_locale_rewrite_with_reindex_flag() {
+	// Rewriting datcollate changes collation semantics, so every text btree
+	// built under the old collation is potentially misordered. Each site
+	// that records a locale rewrite must also raise needs-reindex, which
+	// gates the readiness probe until the rebuild finishes.
+	let script = setup_auth_script();
+
+	let locale_flags = script.matches("touch /pgdata/fix-locale").count();
+	// Trailing newline: `needs-reindex-all` shares this prefix.
+	let reindex_flags = script.matches("touch /pgdata/needs-reindex\n").count();
+	assert!(
+		locale_flags >= 1,
+		"expected at least one locale-rewrite site; got {locale_flags}"
+	);
+	assert_eq!(
+		reindex_flags, locale_flags,
+		"every locale rewrite must be paired with `touch /pgdata/needs-reindex` (got {reindex_flags} reindex flags for {locale_flags} locale rewrites)"
+	);
+}
+
+#[test]
+fn deployment_runtime_reindex_handles_full_database_flag() {
+	// The main container's startup hook handles the broad flag
+	// (needs-reindex-all) via blind REINDEX DATABASE on every user DB.
+	// The earlier amcheck-driven smart pass turned out to hit the same
+	// postgres-internal pathology that wedges other vanilla DDL on
+	// the prod data — bt_index_check burned 100% CPU forever on
+	// individual indexes. REINDEX uses a different code path (reads
+	// the heap, rebuilds from scratch) and doesn't trip that wedge.
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let postgres = deploy
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.containers
+		.into_iter()
+		.find(|c| c.name == "postgres")
+		.expect("postgres container must exist");
+	let script = postgres.args.unwrap().remove(0);
+
+	assert!(
+		script.contains("/pgdata/needs-reindex-all"),
+		"runtime startup hook must check the needs-reindex-all flag"
+	);
+	assert!(
+		script.contains("REINDEX DATABASE CONCURRENTLY"),
+		"needs-reindex-all branch must run REINDEX DATABASE CONCURRENTLY on PG ≥ 12 so clients can keep querying the old indexes during the rebuild"
+	);
+	// The PG < 12 fallback uses plain REINDEX DATABASE — verify the
+	// version gate exists in the script. (We can't string-match on the
+	// literal SQL because the shell-quoted `\"` form differs from a
+	// Rust string literal.)
+	assert!(
+		script.contains(r#""$PG_MAJOR" -ge 12"#),
+		"needs-reindex-all branch must gate CONCURRENTLY behind a PG ≥ 12 check"
+	);
+	assert!(
+		!script.contains("bt_index_check("),
+		"runtime hook must not call bt_index_check — amcheck wedges on the prod data"
+	);
+	assert!(
+		script.contains("rm -f /pgdata/needs-reindex-all"),
+		"runtime hook must clear the needs-reindex-all flag after the reindex"
+	);
+}
+
+#[test]
+fn deployment_readiness_probe_only_gates_on_locale_reindex() {
+	// The readiness probe waits for the locale-only `needs-reindex`
+	// flag to clear (small, fast, finishes in seconds) but NOT for
+	// `needs-reindex-all` (the post-pg_resetwal blind REINDEX DATABASE
+	// — takes hours on prod-sized indexes; gating here would trip the
+	// operator's deployment_ready_timeout and block restores
+	// indefinitely). The -all reindex runs in the background; clients
+	// hitting a not-yet-reindexed corrupt index see the explicit
+	// "unexpected zero page" error and can retry.
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let postgres = deploy
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.containers
+		.into_iter()
+		.find(|c| c.name == "postgres")
+		.expect("postgres container must exist");
+	let probe_cmd = postgres
+		.readiness_probe
+		.expect("readiness probe must exist")
+		.exec
+		.expect("readiness probe must be an exec probe")
+		.command
+		.expect("exec probe must have a command");
+	let probe_script = probe_cmd.join(" ");
+	assert!(
+		probe_script.contains("[ ! -f /pgdata/needs-reindex ]"),
+		"readiness probe must still wait for the locale-only needs-reindex flag; got: {probe_script}"
+	);
+	assert!(
+		!probe_script.contains("needs-reindex-all"),
+		"readiness probe must NOT gate on needs-reindex-all (the long-running post-resetwal reindex); got: {probe_script}"
+	);
+}
+
+#[test]
+fn deployment_init_script_overrides_listen_addresses() {
+	// Some source backups carry `listen_addresses = 'localhost'` in
+	// postgresql.conf, which restricts the restored postgres to localhost
+	// only and breaks operator → restore connections (e.g. schema
+	// migration discovery). Strip the source value and append our own '*'
+	// so the restored pod is reachable on the pod IP.
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = deploy.spec.unwrap().template.spec.unwrap();
+
+	let setup_auth = pod_spec
+		.init_containers
+		.as_ref()
+		.unwrap()
+		.iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist");
+	let script = &setup_auth.args.as_ref().unwrap()[0];
+
+	assert!(
+		script.contains("listen_addresses[[:space:]]*="),
+		"sed must strip listen_addresses from source config"
+	);
+	assert!(
+		script.contains(r#"listen_addresses = '*'"#),
+		"init script must append listen_addresses = '*' override"
+	);
+}
+
+#[test]
+fn init_script_sets_initial_stage_based_on_reindex_flag() {
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = deploy.spec.unwrap().template.spec.unwrap();
+
+	let setup_auth = pod_spec
+		.init_containers
+		.as_ref()
+		.unwrap()
+		.iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist");
+	let script = &setup_auth.args.as_ref().unwrap()[0];
+
+	assert!(
+		script.contains("stage text NOT NULL DEFAULT 'restored'"),
+		"table must include stage column"
+	);
+	assert!(
+		script.contains("last_transition_time timestamptz NOT NULL DEFAULT now()"),
+		"table must include last_transition_time column"
+	);
+	assert!(
+		script.contains("ADD COLUMN IF NOT EXISTS stage"),
+		"must add stage column for existing tables carried in snapshot"
+	);
+	assert!(
+		script.contains("ADD COLUMN IF NOT EXISTS last_transition_time"),
+		"must add last_transition_time column for existing tables carried in snapshot"
+	);
+	assert!(
+		script.contains("PGRO_STAGE=restored") && script.contains("PGRO_STAGE=ready"),
+		"init must pick stage based on needs-reindex flag"
+	);
+	assert!(
+		script.contains("'${PGRO_STAGE}'"),
+		"insert must use the chosen stage"
+	);
+}
+
+#[test]
+fn postgres_container_updates_stage_around_reindex() {
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = deploy.spec.unwrap().template.spec.unwrap();
+
+	let postgres = pod_spec
+		.containers
+		.iter()
+		.find(|c| c.name == "postgres")
+		.expect("postgres container must exist");
+	let script = &postgres.args.as_ref().unwrap()[0];
+
+	let reindexing_pos = script
+		.find("stage = 'reindexing'")
+		.expect("must update stage to reindexing before the REINDEX loop");
+	let ready_pos = script
+		.find("stage = 'ready'")
+		.expect("must update stage to ready after the REINDEX loop");
+	assert!(
+		reindexing_pos < ready_pos,
+		"reindexing update must come before ready update"
+	);
+	assert!(
+		reindexing_pos < script.find("REINDEX INDEX").unwrap(),
+		"reindexing update must come before any REINDEX call"
+	);
+	assert!(
+		script[..ready_pos].contains("rm -f /pgdata/needs-reindex"),
+		"ready update must happen after the needs-reindex flag is cleared"
+	);
+}
+
+#[test]
+fn postgres_container_stage_updates_override_read_only() {
+	// A read-only replica runs with default_transaction_read_only = on, which
+	// rejects the stage bookkeeping the reindex hook does about itself:
+	//   ERROR: cannot execute UPDATE in a read-only transaction
+	// The stage then sticks at whatever the init container wrote and never
+	// reaches 'ready', so `_pgro.restore_info` misreports a finished reindex as
+	// still pending. Each stage update must ask for a writable session.
+	let script = postgres_container_script();
+
+	let stage_updates = script
+		.matches("UPDATE _pgro.restore_info SET stage")
+		.count();
+	let overrides = script
+		.matches("PGOPTIONS='-c default_transaction_read_only=off'")
+		.count();
+	assert!(
+		stage_updates >= 2,
+		"expected the reindexing and ready stage updates; got {stage_updates}"
+	);
+	assert_eq!(
+		overrides, stage_updates,
+		"every stage update must run with default_transaction_read_only=off (got {overrides} overrides for {stage_updates} updates)"
+	);
+}
+
+#[test]
+fn locale_reindex_targets_only_default_collation_indexes() {
+	// A datcollate rewrite only invalidates indexes ordered by the database
+	// default collation (OID 100). Catalog indexes over `name` columns carry
+	// the C collation (950) and are unaffected — and REINDEX INDEX
+	// CONCURRENTLY cannot touch a system catalog at all, so selecting them
+	// yields dozens of swallowed "cannot reindex system catalogs
+	// concurrently" errors that look like work being done.
+	let script = postgres_container_script();
+
+	assert!(
+		script.contains("a.attcollation = 100"),
+		"the locale reindex must select only indexes ordered by the default collation"
+	);
+	assert!(
+		!script.contains("a.attcollation <> 0"),
+		"selecting every collation-bearing attribute pulls in system catalogs that cannot be reindexed concurrently"
+	);
+}
+
+#[test]
+fn deployment_shared_buffers_with_custom_resources() {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	replica.spec.resources = Some(ResourceRequirements {
+		requests: Some(BTreeMap::from([(
+			"memory".to_string(),
+			Quantity("2Gi".to_string()),
+		)])),
+		..Default::default()
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod_spec = deploy.spec.unwrap().template.spec.unwrap();
+
+	let setup_auth = pod_spec
+		.init_containers
+		.as_ref()
+		.unwrap()
+		.iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist");
+	let script = &setup_auth.args.as_ref().unwrap()[0];
+
+	// 2Gi request: SHM=738Mi, shared_buffers = floor(70% of 738) = 516MB
+	assert!(
+		script.contains("shared_buffers = 516MB"),
+		"init script must set shared_buffers for 2Gi request"
+	);
+}
+
+fn migration_target() -> MigrationTarget {
+	MigrationTarget {
+		version: "2.62.0".to_string(),
+		version_id: "66666666-6666-6666-6666-666666666666".to_string(),
+	}
+}
+
+fn env_value(container: &k8s_openapi::api::core::v1::Container, name: &str) -> Option<String> {
+	container
+		.env
+		.as_ref()?
+		.iter()
+		.find(|e| e.name == name)?
+		.value
+		.clone()
+}
+
+fn env_secret_key(
+	container: &k8s_openapi::api::core::v1::Container,
+	name: &str,
+) -> Option<(String, String)> {
+	let e = container.env.as_ref()?.iter().find(|e| e.name == name)?;
+	let sel = e.value_from.as_ref()?.secret_key_ref.as_ref()?;
+	Some((sel.name.clone(), sel.key.clone()))
+}
+
+#[test]
+fn migration_job_lets_the_image_entrypoint_take_the_subcommand() {
+	let (restore, replica) = test_restore_and_replica();
+	let job = super::migration::build_migration_job(
+		&restore,
+		&replica,
+		&migration_target(),
+		"tamanu-fiji",
+		"default",
+		&PodPlacement::default(),
+	);
+	let container = &job.spec.unwrap().template.spec.unwrap().containers[0];
+
+	// The image's ENTRYPOINT dispatches the subcommand; overriding command would
+	// bypass it and run the app the wrong way.
+	assert_eq!(
+		container.command, None,
+		"command must be left to the image entrypoint"
+	);
+	assert_eq!(
+		container.args.as_deref(),
+		Some(["migrate".to_string()].as_slice())
+	);
+	assert_eq!(
+		container.image.as_deref(),
+		Some("ghcr.io/beyondessential/tamanu-central:v2.62.0"),
+		"the image must be the target version's own, since it owns the migrations"
+	);
+}
+
+#[test]
+fn migration_job_points_tamanu_at_the_restored_database() {
+	let (restore, replica) = test_restore_and_replica();
+	let job = super::migration::build_migration_job(
+		&restore,
+		&replica,
+		&migration_target(),
+		"tamanu-fiji",
+		"default",
+		&PodPlacement::default(),
+	);
+	let container = &job.spec.unwrap().template.spec.unwrap().containers[0];
+
+	// tamanu reads its db config from CONFIG_SYNC_DB_*; plain DB_* is ignored, so
+	// the job would silently target the packaged default instead.
+	assert_eq!(
+		env_value(container, "CONFIG_SYNC_DB_HOST").as_deref(),
+		Some("test-restore"),
+		"the per-restore Service, so a switchover cannot repoint it mid-migration"
+	);
+	// The restored database's own name: pgro replicas don't name the database
+	// after its owner, so the credentials username is the wrong answer.
+	assert_eq!(
+		env_value(container, "CONFIG_SYNC_DB_NAME").as_deref(),
+		Some("tamanu-fiji")
+	);
+	assert_eq!(
+		env_secret_key(container, "CONFIG_SYNC_DB_USERNAME"),
+		Some(("test-replica-creds".to_string(), "username".to_string()))
+	);
+	assert_eq!(
+		env_secret_key(container, "CONFIG_SYNC_DB_PASSWORD"),
+		Some(("test-replica-creds".to_string(), "password".to_string()))
+	);
+	assert!(
+		container
+			.env
+			.as_ref()
+			.unwrap()
+			.iter()
+			.all(|e| e.name != "DB_HOST"),
+		"no plain DB_* vars, which tamanu does not read"
+	);
+}
+
+#[test]
+fn migration_job_supplies_a_connection_url_too() {
+	let (restore, replica) = test_restore_and_replica();
+	let job = super::migration::build_migration_job(
+		&restore,
+		&replica,
+		&migration_target(),
+		"tamanu-fiji",
+		"default",
+		&PodPlacement::default(),
+	);
+	let container = &job.spec.unwrap().template.spec.unwrap().containers[0];
+
+	assert_eq!(
+		env_value(container, "DATABASE_URL").as_deref(),
+		Some(
+			"postgresql://$(CONFIG_SYNC_DB_USERNAME):$(CONFIG_SYNC_DB_PASSWORD)@test-restore:5432/tamanu-fiji"
+		),
+		"a version that prefers DATABASE_URL must reach the same database as CONFIG_SYNC_DB_*"
+	);
+
+	let env = container.env.as_ref().unwrap();
+	let position = |name: &str| env.iter().position(|e| e.name == name).unwrap();
+	assert!(
+		position("DATABASE_URL") > position("CONFIG_SYNC_DB_USERNAME")
+			&& position("DATABASE_URL") > position("CONFIG_SYNC_DB_PASSWORD"),
+		"kubelet expands $(VAR) only from entries above it, so the URL would ship the literal placeholders"
+	);
+}
+
+#[test]
+fn migration_job_does_not_retry_and_is_owned_by_the_restore() {
+	let (restore, replica) = test_restore_and_replica();
+	let job = super::migration::build_migration_job(
+		&restore,
+		&replica,
+		&migration_target(),
+		"tamanu-fiji",
+		"default",
+		&PodPlacement::default(),
+	);
+
+	// A failed migration is the finding; retrying spends the same hours to reach
+	// the same answer.
+	assert_eq!(job.spec.as_ref().unwrap().backoff_limit, Some(0));
+
+	let container = &job
+		.spec
+		.as_ref()
+		.unwrap()
+		.template
+		.spec
+		.as_ref()
+		.unwrap()
+		.containers[0];
+	let limits = container
+		.resources
+		.as_ref()
+		.expect("the job must be capped")
+		.limits
+		.as_ref()
+		.expect("limits set");
+	// Too tight and an OOMKill reads as a failed migration, filing a known issue
+	// against a version that is fine.
+	assert_eq!(limits.get("memory").expect("memory limit").0, "4Gi");
+	assert!(container.resources.as_ref().unwrap().requests.is_some());
+	assert_eq!(
+		job.spec
+			.as_ref()
+			.unwrap()
+			.template
+			.spec
+			.as_ref()
+			.unwrap()
+			.restart_policy
+			.as_deref(),
+		Some("Never")
+	);
+
+	// Owned by the restore, so tearing the restore down takes the job with it.
+	let owners = job.metadata.owner_references.as_ref().unwrap();
+	assert_eq!(owners.len(), 1);
+	assert_eq!(owners[0].uid, "uid-123");
+	assert_eq!(owners[0].kind, "PostgresPhysicalRestore");
+}
+
+#[test]
+fn deployment_lifts_read_only_for_a_migration_target() {
+	// Migrations are DDL, so a read-only replica cannot host one: a restore
+	// carrying a target is built read-write for the same reason persistent_schemas
+	// restores are. On PG >= 14 read-only means `pg_read_all_data`, which holds no
+	// DDL whatever the transaction default says.
+	let (mut restore, mut replica) = test_restore_and_replica();
+	replica.spec.read_only = true;
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("18".to_string()),
+		..Default::default()
+	});
+
+	let script_for = |restore: &PostgresPhysicalRestore| {
+		let deploy = build_deployment(
+			restore,
+			"test-restore",
+			"default",
+			&replica,
+			&PodPlacement::default(),
+		)
+		.unwrap();
+		let pod_spec = deploy.spec.unwrap().template.spec.unwrap();
+		pod_spec
+			.init_containers
+			.as_ref()
+			.unwrap()
+			.iter()
+			.find(|c| c.name == "setup-auth")
+			.expect("setup-auth init container must exist")
+			.args
+			.as_ref()
+			.unwrap()[0]
+			.clone()
+	};
+
+	// Both grant branches are in the script; the flag the operator interpolates is
+	// what picks one.
+	assert!(
+		script_for(&restore).contains(r#"[ "true" = "true" ]"#),
+		"an ordinary restore of a read-only replica stays read-only"
+	);
+
+	restore.spec.migrate_to = Some(migration_target());
+	assert!(
+		script_for(&restore).contains(r#"[ "false" = "true" ]"#),
+		"a migrating restore must take the superuser branch"
+	);
+}
+
+/// Tamanu's own `logs.migrations.stats` payload, per
+/// `MigrationLogStats` + `PreMigrationDbSnapshot`.
+fn tamanu_stats(size_bytes: i64) -> serde_json::Value {
+	serde_json::json!({
+		"durationMsPerMigration": {
+			"1721000000-addFoo.ts": 400_000,
+			"1721000001-addBar.ts": 12_500,
+		},
+		"totalMigrationsDurationMs": 412_500,
+		"preSnapshot": {
+			"databaseSizeBytes": size_bytes,
+			"tableRowEstimates": [{ "table": "public.patients", "rows": 12_000 }],
+		},
+	})
+}
+
+fn applied() -> Vec<String> {
+	vec![
+		"1721000000-addFoo.ts".to_string(),
+		"1721000001-addBar.ts".to_string(),
+	]
+}
+
+#[test]
+fn batch_result_reads_tamanu_stats() {
+	let r = super::migration::result_from_batch(
+		applied(),
+		Some(415_000),
+		Some(tamanu_stats(1_000_000)),
+		1_200_000,
+		false,
+	);
+
+	assert_eq!(r.total_elapsed_seconds, 415);
+	assert_eq!(r.data_bytes_before, 1_000_000);
+	assert_eq!(r.data_bytes_after, 1_200_000);
+	assert_eq!(r.failed_migration, None);
+	// Order comes from the batch's file list, since a JSON object has none.
+	let names: Vec<_> = r.timings.iter().map(|t| t.name.as_str()).collect();
+	assert_eq!(names, ["1721000000-addFoo.ts", "1721000001-addBar.ts"]);
+	assert_eq!(r.timings[0].elapsed_seconds, 400);
+	assert_eq!(r.timings[1].elapsed_seconds, 12);
+}
+
+#[test]
+fn batch_result_treats_unreadable_size_as_unknown() {
+	// tamanu writes -1 when pg_database_size could not be read.
+	let r = super::migration::result_from_batch(
+		applied(),
+		Some(1_000),
+		Some(tamanu_stats(-1)),
+		1_200_000,
+		false,
+	);
+	assert_eq!(
+		r.data_bytes_before, 1_200_000,
+		"an unreadable before-size must not report negative growth"
+	);
+}
+
+#[test]
+fn batch_result_names_where_a_failed_run_stopped() {
+	let mut stats = tamanu_stats(1_000);
+	stats["failedMigration"] = serde_json::json!("1721000002-addBaz.ts");
+
+	let r = super::migration::result_from_batch(applied(), None, Some(stats), 2_000, true);
+
+	assert_eq!(
+		r.failed_migration.as_deref(),
+		Some("1721000002-addBaz.ts"),
+		"the migration tamanu stopped at, not the last one that applied"
+	);
+	// No batch duration recorded, so it falls back to the sum of the timings.
+	assert_eq!(r.total_elapsed_seconds, 412);
+}
+
+#[test]
+fn batch_result_reports_an_unattributed_failure() {
+	// A target version that records a batch only once all of it applied leaves no
+	// failedMigration to read, so the failure is reported without a name rather
+	// than pinned on the last migration that did apply.
+	let r = super::migration::result_from_batch(
+		applied(),
+		None,
+		Some(tamanu_stats(1_000)),
+		2_000,
+		true,
+	);
+	assert_eq!(r.failed_migration.as_deref(), Some("unknown"));
+}
+
+#[test]
+fn deployment_with_redaction_runs_postgres_as_root_and_installs_anon() {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("18".to_string()),
+		..Default::default()
+	});
+	replica.spec.redaction = Some(RedactionSpec {
+		manifest_url: "https://example.com/m.json".into(),
+		version: None,
+		version_query: None,
+		version_fallback_to_base: false,
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod = deploy
+		.spec
+		.as_ref()
+		.unwrap()
+		.template
+		.spec
+		.as_ref()
+		.unwrap();
+
+	let postgres = pod
+		.containers
+		.iter()
+		.find(|c| c.name == "postgres")
+		.expect("postgres container must be present");
+
+	let sec = postgres
+		.security_context
+		.as_ref()
+		.expect("postgres container must override securityContext when redaction is set");
+	assert_eq!(sec.run_as_user, Some(0), "postgres must run as root");
+
+	let script = &postgres.args.as_ref().unwrap()[0];
+	assert!(
+		script.contains("postgresql_anonymizer_18"),
+		"prelude must apt-install the anon package for the restore's PG major, got: {script}"
+	);
+	assert!(
+		script.contains("/usr/lib/postgresql/18/lib"),
+		"prelude must stage anon.so into the PG-major lib dir, got: {script}"
+	);
+	assert!(
+		script.contains("exec gosu postgres postgres"),
+		"prelude must drop privileges via gosu before exec'ing postgres"
+	);
+}
+
+#[test]
+fn deployment_without_redaction_keeps_default_securitycontext() {
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("18".to_string()),
+		..Default::default()
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let pod = deploy
+		.spec
+		.as_ref()
+		.unwrap()
+		.template
+		.spec
+		.as_ref()
+		.unwrap();
+	let postgres = pod
+		.containers
+		.iter()
+		.find(|c| c.name == "postgres")
+		.unwrap();
+	assert!(
+		postgres.security_context.is_none(),
+		"postgres container must inherit the pod-level UID 999 when redaction is off"
+	);
+	let script = &postgres.args.as_ref().unwrap()[0];
+	assert!(
+		!script.contains("postgresql_anonymizer"),
+		"the anon install prelude must not be emitted when redaction is off"
+	);
+	assert!(
+		script.contains("exec postgres -D /pgdata/pgdata"),
+		"postgres must be exec'd directly when there's no privilege to drop"
+	);
+}
+
+#[test]
+fn deployment_with_redaction_builds_for_pg16() {
+	// Redaction used to be gated to PG 18+ when we relied on the
+	// extension_control_path GUC. Now the postgres container's prelude
+	// drops the files into /usr/share/postgresql/$N/extension and
+	// /usr/lib/postgresql/$N/lib of its own writable layer, so any PG
+	// major works.
+	let (mut restore, mut replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	replica.spec.redaction = Some(RedactionSpec {
+		manifest_url: "https://example.com/m.json".into(),
+		version: None,
+		version_query: None,
+		version_fallback_to_base: false,
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.expect("redaction should build on PG 16");
+	let pod = deploy
+		.spec
+		.as_ref()
+		.unwrap()
+		.template
+		.spec
+		.as_ref()
+		.unwrap();
+	let postgres = pod
+		.containers
+		.iter()
+		.find(|c| c.name == "postgres")
+		.unwrap();
+	let script = &postgres.args.as_ref().unwrap()[0];
+	assert!(
+		script.contains("postgresql_anonymizer_16"),
+		"prelude must use the restore's PG major (16), got: {script}"
+	);
+}
+
+#[test]
+fn deployment_with_redaction_forces_writable() {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("18".to_string()),
+		..Default::default()
+	});
+	replica.spec.read_only = true;
+	replica.spec.redaction = Some(RedactionSpec {
+		manifest_url: "https://example.com/m.json".into(),
+		version: None,
+		version_query: None,
+		version_fallback_to_base: false,
+	});
+
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let script = deploy_init_setup_auth_script(&deploy);
+	// The init script uses `if [ "<read_only>" = "true" ]` and we want
+	// that variable substituted to "false" when redaction is set so the
+	// conditional doesn't fire at runtime.
+	assert!(
+		script.contains("if [ \"false\" = \"true\" ]"),
+		"redaction must defer read-only by substituting read_only=false into the init script"
+	);
+}
+
+fn deploy_init_setup_auth_script(deploy: &k8s_openapi::api::apps::v1::Deployment) -> String {
+	let pod = deploy
+		.spec
+		.as_ref()
+		.unwrap()
+		.template
+		.spec
+		.as_ref()
+		.unwrap();
+	let setup_auth = pod
+		.init_containers
+		.as_ref()
+		.unwrap()
+		.iter()
+		.find(|c| c.name == "setup-auth")
+		.unwrap();
+	setup_auth.args.as_ref().unwrap()[0].clone()
+}
+
+/// Every pod the operator creates has to carry the cluster's placement
+/// defaults. A builder that forgets puts a database — or the job restoring one
+/// — wherever the cluster's default node pool happens to be, which is the
+/// failure this configuration exists to prevent. Covers the builders reachable
+/// from these fixtures; `build_snapshot_list_job` and
+/// `build_schema_migration_job` are covered in their own modules.
+#[test]
+fn every_builder_stamps_the_placement_defaults() {
+	let placement = PodPlacement::parse(
+		"bes.node.purpose=workload",
+		"karpenter.sh/do-not-disrupt=true",
+		"bes.node.group=db-replica:NoSchedule",
+	);
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("17".to_string()),
+		..Default::default()
+	});
+
+	let deployment =
+		build_deployment(&restore, "test-restore", "default", &replica, &placement).unwrap();
+	let templates = vec![
+		(
+			"postgres deployment",
+			deployment.spec.unwrap().template.clone(),
+		),
+		(
+			"restore job",
+			build_restore_job(
+				&restore,
+				"test-restore-restore",
+				"default",
+				&replica,
+				"kopia:latest",
+				"http://operator/cache-pressure",
+				&proxy_args(),
+				&placement,
+			)
+			.unwrap()
+			.spec
+			.unwrap()
+			.template,
+		),
+		(
+			"version detect job",
+			build_version_detect_job(&restore, "detect", "default", "test-pvc", &placement)
+				.spec
+				.unwrap()
+				.template,
+		),
+		(
+			"credential reset job",
+			super::build_credential_reset_job(
+				&restore,
+				&replica,
+				"cred-reset",
+				"default",
+				&placement,
+			)
+			.unwrap()
+			.spec
+			.unwrap()
+			.template,
+		),
+		(
+			"migration job",
+			super::migration::build_migration_job(
+				&restore,
+				&replica,
+				&migration_target(),
+				"tamanu",
+				"default",
+				&placement,
+			)
+			.spec
+			.unwrap()
+			.template,
+		),
+	];
+
+	for (what, template) in templates {
+		let selector = template
+			.spec
+			.as_ref()
+			.and_then(|s| s.node_selector.as_ref())
+			.unwrap_or_else(|| panic!("{what} must carry a nodeSelector"));
+		assert_eq!(
+			selector.get("bes.node.purpose").map(String::as_str),
+			Some("workload"),
+			"{what} must be pinned to the configured node purpose"
+		);
+
+		let annotations = template
+			.metadata
+			.as_ref()
+			.and_then(|m| m.annotations.as_ref())
+			.unwrap_or_else(|| panic!("{what} must carry the configured pod annotations"));
+		assert_eq!(
+			annotations
+				.get("karpenter.sh/do-not-disrupt")
+				.map(String::as_str),
+			Some("true"),
+			"{what} must carry the configured pod annotations"
+		);
+
+		let tolerations = template
+			.spec
+			.as_ref()
+			.and_then(|s| s.tolerations.as_ref())
+			.unwrap_or_else(|| panic!("{what} must carry the configured tolerations"));
+		assert!(
+			tolerations
+				.iter()
+				.any(|t| t.key.as_deref() == Some("bes.node.group")
+					&& t.value.as_deref() == Some("db-replica")
+					&& t.effect.as_deref() == Some("NoSchedule")),
+			"{what} must tolerate the configured taint"
+		);
+	}
+}
+
+/// The default placement must leave every builder's output as it was, so an
+/// operator with no ConfigMap entries sees no behaviour change.
+#[test]
+fn empty_placement_adds_nothing() {
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("17".to_string()),
+		..Default::default()
+	});
+	let deployment = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let template = deployment.spec.unwrap().template;
+	assert!(template.spec.unwrap().node_selector.is_none());
+}
+
+/// The Service selector requires this label, so a pod that comes up without it
+/// is invisible to clients until the operator notices and patches it. Declaring
+/// it in the pod template means a replacement pod — eviction, node loss, OOM —
+/// rejoins the Service the moment it is Ready.
+#[test]
+fn deployment_pod_template_carries_the_ready_for_traffic_label() {
+	let (mut restore, replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("17".to_string()),
+		..Default::default()
+	});
+
+	let deployment = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+
+	let labels = deployment
+		.spec
+		.unwrap()
+		.template
+		.metadata
+		.expect("pod template has metadata")
+		.labels
+		.expect("pod template has labels");
+
+	assert_eq!(
+		labels
+			.get(crate::controllers::READY_FOR_TRAFFIC_LABEL)
+			.map(String::as_str),
+		Some("true"),
+		"a replacement pod must rejoin the Service without waiting for a reconcile"
+	);
+	// The restore label is what the Deployment's own selector matches on, so
+	// adding the traffic label must not have displaced it.
+	assert_eq!(
+		labels.get("pgro.bes.au/restore").map(String::as_str),
+		Some("test-restore")
+	);
+}
+
+/// A restore can land a data directory on a base image whose ICU/glibc differs
+/// from the machine the snapshot came from. Postgres records a version per
+/// collation and an index ordered by a mismatched one may sort wrongly, which
+/// shows up as an index scan quietly missing rows. Detection has to be its own
+/// flag: it is independent of the locale rewrite that drives `needs-reindex`.
+#[test]
+fn setup_auth_flags_collation_version_mismatches() {
+	let script = setup_auth_script();
+
+	assert!(
+		script.contains("touch /pgdata/needs-collation-refresh"),
+		"a version mismatch must raise its own flag, not ride on needs-reindex"
+	);
+	assert!(
+		script.contains("pg_collation_actual_version"),
+		"detection must compare the recorded version against the OS"
+	);
+	// A missing function fails the query at parse time however the runtime
+	// branches, so the probe is what keeps this working on older servers.
+	assert!(
+		script.contains("to_regprocedure('pg_collation_actual_version(oid)')"),
+		"detection must probe for the function rather than assume a version cutoff"
+	);
+	// The script runs under `set -e`; non-numeric input to the arithmetic would
+	// abort the init container and fail the restore outright.
+	assert!(
+		script.contains("tr -cd '0-9'"),
+		"the mismatch count must be sanitised before it reaches shell arithmetic"
+	);
+}
+
+#[test]
+fn collation_refresh_rebuilds_then_refreshes() {
+	let script = postgres_container_script();
+
+	assert!(
+		script.contains("if [ -f /pgdata/needs-collation-refresh ]; then"),
+		"the background block must handle the collation flag"
+	);
+	assert!(
+		script.contains("|| [ -f /pgdata/needs-collation-refresh ]"),
+		"the flag must be able to start the background block on its own, with \
+		 neither reindex flag set"
+	);
+
+	let rebuild = script
+		.find("Collation version refresh:")
+		.expect("collation branch announces itself");
+	let refresh = script
+		.find("ALTER COLLATION $coll REFRESH VERSION;")
+		.expect("recorded versions get refreshed");
+	assert!(
+		rebuild < refresh,
+		"indexes must be rebuilt before their collation's version is refreshed; \
+		 refreshing first trades a correctness warning for silence"
+	);
+}
+
+/// The rebuild loop tolerates individual failures to keep making progress. If
+/// the refresh ran anyway it would stamp the current OS version onto a
+/// collation whose indexes are still wrongly ordered, and postgres would stop
+/// warning about a problem that is still there.
+#[test]
+fn collation_refresh_is_skipped_when_a_rebuild_failed() {
+	let script = postgres_container_script();
+
+	assert!(
+		script.contains("FAILED=$((FAILED + 1))"),
+		"rebuild failures must be counted, not just swallowed"
+	);
+	assert!(
+		script.contains(r#"if [ "$FAILED" = "0" ]; then"#),
+		"the refresh must be gated on a clean rebuild"
+	);
+	// `cmd | while` runs the loop in a subshell, so the counter would be
+	// discarded exactly when it matters.
+	assert!(
+		script.contains(r#"done < "$IDX_FILE""#),
+		"the rebuild loop must read from a file so the failure count survives it"
+	);
+}
+
+/// The locale branch avoids catalog indexes only incidentally — they carry the
+/// C collation, which its `= 100` predicate misses. Matching on collation
+/// version instead sweeps them back in, and REINDEX CONCURRENTLY cannot touch a
+/// system catalog, so the exclusion has to be explicit.
+#[test]
+fn collation_refresh_excludes_system_namespaces() {
+	let script = postgres_container_script();
+
+	assert!(script.contains("n.nspname NOT IN ('pg_catalog', 'information_schema')"));
+	assert!(script.contains("n.nspname NOT LIKE 'pg_toast%'"));
+	assert!(script.contains("n.nspname NOT LIKE 'pg_temp%'"));
+}
+
+/// Database-level collation version tracking, and the statement that clears it,
+/// only exist from PG 15 — but the operator restores older servers too.
+#[test]
+fn database_level_refresh_is_version_gated() {
+	let script = postgres_container_script();
+
+	let gate = script
+		.find(r#"if [ "$SERVER_VERSION_NUM" -ge 150000 ]; then"#)
+		.expect("database-level refresh is gated on server_version_num");
+	let stmt = script
+		.find("REFRESH COLLATION VERSION")
+		.expect("database-level refresh is issued");
+	assert!(gate < stmt, "the gate must precede the statement it guards");
+}
+
+/// The collation branch must not displace the existing ones: a restore can need
+/// any combination of the three, and the stage bookkeeping still has to land on
+/// `ready` afterwards.
+#[test]
+fn collation_branch_runs_alongside_the_reindex_branches() {
+	let script = postgres_container_script();
+
+	let locale_branch = script
+		.find("if [ -f /pgdata/needs-reindex ]; then")
+		.expect("locale reindex branch still present");
+	let collation_branch = script
+		.find("if [ -f /pgdata/needs-collation-refresh ]; then")
+		.expect("collation branch present");
+	let ready = script
+		.find("stage = 'ready'")
+		.expect("stage still ends at ready");
+
+	assert!(
+		locale_branch < collation_branch,
+		"the collation branch is additional to the reindex branches, not an elif on them"
+	);
+	assert!(
+		collation_branch < ready,
+		"the collation work must finish before the replica is marked ready"
+	);
+	assert!(script.contains("rm -f /pgdata/needs-collation-refresh"));
+}
+
+/// The operator ships two non-trivial shell scripts into containers, where a
+/// syntax error surfaces as a crash-looping pod partway through a restore
+/// rather than as a build failure. Parse them here instead.
+///
+/// This catches parse errors, not portability problems: on a host where
+/// `/bin/sh` is bash, `sh -n` accepts bashisms the container's shell would
+/// reject. Worth having anyway — a dropped `fi` is the failure mode that
+/// actually happens when editing a script embedded in Rust.
+#[test]
+fn generated_shell_scripts_are_valid_posix_sh() {
+	use std::io::Write;
+	use std::process::{Command, Stdio};
+
+	for (name, script) in [
+		("setup-auth", setup_auth_script()),
+		("postgres container", postgres_container_script()),
+	] {
+		let spawned = Command::new("sh")
+			.arg("-n")
+			.stdin(Stdio::piped())
+			.stderr(Stdio::piped())
+			.spawn();
+		let mut child = match spawned {
+			Ok(child) => child,
+			// No POSIX shell on this host — nothing to check against, and
+			// failing here would only punish the developer's machine.
+			Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+			Err(e) => panic!("could not run sh: {e}"),
+		};
+
+		child
+			.stdin
+			.take()
+			.expect("stdin piped")
+			.write_all(script.as_bytes())
+			.expect("write script to sh");
+
+		let output = child.wait_with_output().expect("sh runs to completion");
+		assert!(
+			output.status.success(),
+			"the {name} script is not valid POSIX sh:\n{}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+	}
+}
+
+/// The operator marks the outgoing restore at switchover using the analytics
+/// credentials — the only ones it holds for a restore. On a read-only replica
+/// that role gets `pg_read_all_data` and nothing else, which reads the row but
+/// cannot update it, so the write needs an explicit grant. Without this the
+/// marking fails silently on exactly the replicas that need it most.
+#[test]
+fn restore_info_is_writable_by_the_analytics_user() {
+	let script = setup_auth_script();
+
+	assert!(
+		script.contains("GRANT USAGE ON SCHEMA _pgro TO"),
+		"the analytics user needs schema access to reach restore_info"
+	);
+	assert!(
+		script.contains("GRANT SELECT, UPDATE ON _pgro.restore_info TO"),
+		"the analytics user must be able to update the stage column"
+	);
+
+	// Scoped to the one table: a blanket grant over the schema would hand out
+	// write access to anything added to it later.
+	assert!(
+		!script.contains("GRANT ALL"),
+		"the grant must stay narrow — no blanket privileges on _pgro"
+	);
+
+	let table_created = script
+		.find("CREATE TABLE IF NOT EXISTS _pgro.restore_info")
+		.expect("restore_info is created");
+	let granted = script
+		.find("GRANT SELECT, UPDATE ON _pgro.restore_info")
+		.expect("restore_info is granted");
+	assert!(
+		table_created < granted,
+		"the table has to exist before it can be granted on"
+	);
+}
+
+/// A restore with no snapshot time must still get a `_pgro.restore_info` row.
+///
+/// Postgres folds constant subexpressions at plan time, including ones in CASE
+/// arms that are never entered, so the previous
+/// `CASE WHEN '' = '' THEN NULL ELSE ''::timestamptz END` failed on the
+/// unreachable cast and took the whole INSERT down with it. The restore then
+/// had no row at all: no stage for a client to read, and an empty fixes map in
+/// the canopy health report.
+#[test]
+fn restore_info_insert_tolerates_an_absent_snapshot_time() {
+	let script = setup_auth_script();
+
+	assert!(
+		script.contains("NULLIF('${PGRO_SNAPSHOT_TIME}', '')::timestamptz"),
+		"an empty snapshot time must reach the cast as NULL, not as an empty string"
+	);
+	assert!(
+		!script.contains("ELSE '${PGRO_SNAPSHOT_TIME}'::timestamptz"),
+		"the CASE form is plan-time unsafe: postgres evaluates the unreachable arm"
+	);
+}
+
+/// Build the `setup-auth` init container for a replica carrying the given
+/// extra users (by name, with no schema access), so tests can inspect both
+/// its env and its inline script.
+fn setup_auth_with_extra_users(names: Vec<String>) -> k8s_openapi::api::core::v1::Container {
+	setup_auth_with_extra_user_specs(
+		names
+			.into_iter()
+			.map(|name| ExtraUserSpec {
+				name,
+				schemas: vec![],
+			})
+			.collect(),
+	)
+}
+
+/// As [`setup_auth_with_extra_users`], but for tests that need to set schema
+/// access rather than just names.
+fn setup_auth_with_extra_user_specs(
+	extra_users: Vec<ExtraUserSpec>,
+) -> k8s_openapi::api::core::v1::Container {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	replica.spec.extra_users = extra_users;
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	deploy
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.init_containers
+		.unwrap()
+		.into_iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist")
+}
+
+#[test]
+fn extra_users_get_indexed_env_and_role_sql() {
+	let setup_auth = setup_auth_with_extra_users(vec!["reporting".to_string(), "etl".to_string()]);
+
+	let env = setup_auth.env.clone().unwrap();
+	let name0 = env
+		.iter()
+		.find(|e| e.name == "EXTRA_USER_NAME_0")
+		.expect("first extra user's name env");
+	assert_eq!(name0.value.as_deref(), Some("reporting"));
+	let name1 = env
+		.iter()
+		.find(|e| e.name == "EXTRA_USER_NAME_1")
+		.expect("second extra user's name env");
+	assert_eq!(name1.value.as_deref(), Some("etl"));
+
+	// The password comes from the per-user Secret, not an inline value.
+	let pw0 = env
+		.iter()
+		.find(|e| e.name == "EXTRA_USER_PW_0")
+		.expect("first extra user's password env");
+	let secret_ref = pw0
+		.value_from
+		.as_ref()
+		.unwrap()
+		.secret_key_ref
+		.as_ref()
+		.unwrap();
+	assert_eq!(secret_ref.name, "test-replica-user-reporting-creds");
+	assert_eq!(secret_ref.key, "password");
+
+	let script = setup_auth.args.unwrap().remove(0);
+	assert!(
+		script.contains("$EXTRA_USER_NAME_0") && script.contains("$EXTRA_USER_NAME_1"),
+		"both users must be provisioned by index"
+	);
+	assert!(
+		script.contains("SELECT format('CREATE ROLE %I', :'pgro_username') \\gexec"),
+		"a missing extra user is created bare, then normalised below"
+	);
+	assert!(
+		script.contains(
+			"ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L"
+		),
+		"every extra user is normalised to a plain LOGIN role, created or not"
+	);
+}
+
+/// Extra users are read-only on every replica, so a writable one (here, a
+/// migrating restore) must still provision them without SUPERUSER.
+#[test]
+fn extra_users_are_read_only_even_on_a_writable_replica() {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	restore.spec.migrate_to = Some(migration_target());
+	replica.spec.read_only = false;
+	replica.spec.extra_users = vec![ExtraUserSpec {
+		name: "reporting".to_string(),
+		schemas: vec![],
+	}];
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let script = deploy
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.init_containers
+		.unwrap()
+		.into_iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist")
+		.args
+		.unwrap()
+		.remove(0);
+
+	assert!(
+		script.contains("ALTER ROLE ${ANALYTICS_USERNAME} WITH SUPERUSER"),
+		"this fixture must be a writable restore, or the test proves nothing"
+	);
+	assert!(
+		!script.contains("WITH LOGIN SUPERUSER"),
+		"an extra user must never be provisioned as a superuser"
+	);
+	assert!(script.contains("WITH LOGIN NOSUPERUSER"));
+}
+
+/// The operator provisions the account, not what it can see: an extra user
+/// gets no grant of any kind, so it reads nothing beyond what `PUBLIC` already
+/// carries until someone grants it something.
+#[test]
+fn extra_users_are_granted_nothing() {
+	let setup_auth = setup_auth_with_extra_users(vec!["reporting".to_string()]);
+	let script = setup_auth.args.unwrap().remove(0);
+	// Scoped to just this one extra user's own reset block, not the rest of
+	// the script — the unconditional lockdown and the analytics permission
+	// branch both run afterwards and legitimately contain "GRANT" themselves
+	// (GRANT pg_read_all_data, GRANT EXECUTE), which isn't what this test is
+	// about.
+	let mut extra_user_lines = Vec::new();
+	for l in script
+		.lines()
+		.skip_while(|l| !l.contains("Resetting extra user (index 0) role"))
+	{
+		extra_user_lines.push(l);
+		if l.trim() == "SQLEOF" {
+			break;
+		}
+	}
+	let extra_user_sql = extra_user_lines.join("\n");
+
+	assert!(
+		extra_user_sql.contains("ALTER ROLE %I SET default_transaction_read_only = on"),
+		"the fixture must actually contain the extra-user block"
+	);
+	assert!(
+		!extra_user_sql.contains("GRANT"),
+		"an extra user's own reset block must contain no grants, got: {extra_user_sql}"
+	);
+}
+
+/// `pg_read_all_data` grants SELECT but doesn't stop a session from opening a
+/// write transaction on a writable replica, so the role setting is what pins
+/// the sessions read-only. It has to land while the database still accepts
+/// writes.
+#[test]
+fn extra_users_sessions_are_pinned_read_only() {
+	let setup_auth = setup_auth_with_extra_users(vec!["writer".to_string()]);
+	let script = setup_auth.args.unwrap().remove(0);
+	assert!(
+		script.contains("ALTER ROLE %I SET default_transaction_read_only = on"),
+		"an extra user's sessions must default to read-only"
+	);
+	assert!(
+		!script.contains("SET default_transaction_read_only = off"),
+		"nothing may opt an extra user back into read-write sessions"
+	);
+
+	let read_only_line = script
+		.lines()
+		.position(|l| {
+			l.contains(r#"default_transaction_read_only = on" >> "$PGDATA/postgresql.conf""#)
+		})
+		.expect("read-only mode is enabled somewhere in the setup script");
+	let alter_role_line = script
+		.lines()
+		.position(|l| l.contains("ALTER ROLE %I SET default_transaction_read_only = on"))
+		.expect("the extra user's role setting is applied somewhere");
+	assert!(
+		alter_role_line < read_only_line,
+		"the role setting must be applied while the database is still writable"
+	);
+}
+
+/// A name can collide with a role restored from the source cluster, arriving
+/// with production's attributes and grants. The reset is unconditional — the
+/// `\if`/`\endif` only decides whether `CREATE ROLE` runs first — so a
+/// colliding name ends up with exactly the same access as a fresh one.
+#[test]
+fn an_existing_extra_user_is_stripped_of_inherited_privileges() {
+	let setup_auth = setup_auth_with_extra_users(vec!["reporting".to_string()]);
+	let script = setup_auth.args.unwrap().remove(0);
+	// The heredoc opener (`<< 'SQLEOF'`) also contains the string "SQLEOF", so
+	// only the closing delimiter — a line that is *exactly* "SQLEOF" once
+	// trimmed — marks the end of this extra user's block.
+	let mut block_lines = Vec::new();
+	for l in script
+		.lines()
+		.skip_while(|l| !l.contains("Resetting extra user (index 0) role"))
+	{
+		block_lines.push(l);
+		if l.trim() == "SQLEOF" {
+			break;
+		}
+	}
+	let block = block_lines.join("\n");
+
+	assert!(
+		block.contains("SELECT format('CREATE ROLE %I', :'pgro_username') \\gexec"),
+		"a missing role is created bare, so the reset below is what gives it its access"
+	);
+	assert!(
+		block.contains(
+			"ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L"
+		),
+		"the reset must run for every extra user, not just newly created ones"
+	);
+	assert!(
+		block.contains("ALTER ROLE %I SET default_transaction_read_only = on"),
+		"the reset must pin sessions read-only regardless of prior state"
+	);
+	assert!(
+		block.contains("REVOKE %I FROM %I"),
+		"memberships inherited from the source cluster must be revoked"
+	);
+	assert!(
+		!block.contains("\\else"),
+		"there must be no branch that leaves an existing role's access untouched"
+	);
+}
+
+/// `USAGE` on `public` reaches an otherwise ungranted role through the `PUBLIC`
+/// pseudo-role, and postgres has no per-role deny, so the grant has to come off
+/// `PUBLIC` itself — in every connectable database, and in every schema, not
+/// just `public`.
+#[test]
+fn extra_users_cannot_reach_the_public_schema() {
+	let setup_auth = setup_auth_with_extra_users(vec!["reporting".to_string()]);
+	let script = setup_auth.args.unwrap().remove(0);
+	assert!(
+		script.contains("SELECT format('REVOKE ALL ON SCHEMA %I FROM PUBLIC', nspname)"),
+		"every non-system schema must be closed to PUBLIC, not just the literal `public` schema"
+	);
+	assert!(
+		script.contains(
+			"SELECT datname FROM pg_database WHERE datallowconn AND datname <> 'template0'"
+		),
+		"the revoke must cover every connectable database, not just postgres"
+	);
+
+	// The lockdown also strips ownership and direct grants from every managed
+	// role via REASSIGN OWNED BY / DROP OWNED BY, which requires the role to
+	// already exist — so it runs after role creation now, the reverse of the
+	// old PUBLIC-only revoke's ordering.
+	let provision_line = script
+		.lines()
+		.position(|l| l.contains("Resetting extra user (index 0) role"))
+		.expect("the provisioning block is present");
+	let revoke_line = script
+		.lines()
+		.position(|l| l.contains("SELECT format('REVOKE ALL ON SCHEMA %I FROM PUBLIC', nspname)"))
+		.expect("the revoke runs somewhere");
+	assert!(
+		provision_line < revoke_line,
+		"every managed role must exist before the lockdown's REASSIGN OWNED BY / DROP OWNED BY can target it"
+	);
+}
+
+/// The revoke changes what every role in the database can do, so a replica that
+/// runs unconditionally — a replica with no extra users still gets it, since
+/// gating it on `extraUsers` is what left a one-way, undocumented revoke
+/// behind when a replica's last extra user was later removed.
+#[test]
+fn the_lockdown_runs_even_with_no_extra_users() {
+	let setup_auth = setup_auth_with_extra_users(vec![]);
+	let script = setup_auth.args.unwrap().remove(0);
+	assert!(
+		script.contains("SELECT format('REVOKE ALL ON SCHEMA %I FROM PUBLIC', nspname)"),
+		"the lockdown must run whether or not the replica declares extra users"
+	);
+	assert!(
+		script.contains("SELECT format('REASSIGN OWNED BY %I TO postgres', :'analytics_username')"),
+		"the analytics role's ownership must be stripped even with no extra users"
+	);
+}
+
+/// A stored procedure needs `REVOKE ... ON PROCEDURE`, not `ON FUNCTION` — the
+/// wrong keyword errors. Regression test for a real bug: a `DO` block looping
+/// over every `pg_proc` row with one unconditional `ON FUNCTION` revoke hit
+/// this on the first procedure it found, and because a `DO` block is one
+/// statement, the error rolled back every revoke the block had already run,
+/// including the schema-level ones — silently leaving `PUBLIC` with full
+/// access to `public` on a live cluster despite the lockdown "running".
+#[test]
+fn function_and_procedure_revokes_use_the_right_keyword() {
+	let setup_auth = setup_auth_with_extra_users(vec!["reporting".to_string()]);
+	let script = setup_auth.args.unwrap().remove(0);
+	assert!(
+		script.contains("CASE WHEN p.prokind = 'p' THEN 'REVOKE ALL ON PROCEDURE %s FROM PUBLIC'"),
+		"procedures must be revoked with ON PROCEDURE, not ON FUNCTION"
+	);
+	assert!(
+		script.contains("ELSE 'REVOKE ALL ON FUNCTION %s FROM PUBLIC' END"),
+		"ordinary functions, aggregates, and window functions still use ON FUNCTION"
+	);
+}
+
+/// Every lockdown revoke is generated by a `SELECT ... \gexec`, not a `DO`
+/// block, so a failure on one object's statement can't silently roll back
+/// every revoke already applied before it in the same block.
+#[test]
+fn lockdown_revokes_run_as_independent_gexec_statements_not_one_do_block() {
+	let setup_auth = setup_auth_with_extra_users(vec!["reporting".to_string()]);
+	let script = setup_auth.args.unwrap().remove(0);
+
+	let lockdown_start = script
+		.lines()
+		.position(|l| l.contains("Closing PUBLIC's implicit access"))
+		.expect("the lockdown block is present");
+	let reassign_start = script
+		.lines()
+		.position(|l| l.contains("SELECT format('REASSIGN OWNED BY %I TO postgres'"))
+		.expect("the reassign step follows the revokes");
+	assert!(
+		lockdown_start < reassign_start,
+		"the reassign step must come after the lockdown starts"
+	);
+	let revoke_section =
+		script.lines().collect::<Vec<_>>()[lockdown_start..reassign_start].join("\n");
+	assert!(
+		!revoke_section.contains("DO $$"),
+		"the lockdown's revokes must not be wrapped in a DO block, got: {revoke_section}"
+	);
+	for expected in [
+		"SELECT format('REVOKE ALL ON SCHEMA %I FROM PUBLIC', nspname)",
+		"SELECT format('REVOKE ALL ON %I.%I FROM PUBLIC', n.nspname, c.relname)",
+		"WHEN p.prokind = 'p' THEN 'REVOKE ALL ON PROCEDURE %s FROM PUBLIC'",
+		"'ALTER DEFAULT PRIVILEGES FOR ROLE %I %s REVOKE ALL ON %s FROM PUBLIC'",
+	] {
+		assert!(
+			revoke_section.contains(expected),
+			"missing gexec-driven statement: {expected}"
+		);
+	}
+}
+
+/// The read-only branch's `GRANT EXECUTE` sweep has the identical
+/// procedure-vs-function hazard, and previously interpolated
+/// `analyticsUsername` unescaped into a SQL string literal. Both are fixed
+/// the same way as the lockdown's own function revoke.
+#[test]
+fn execute_grant_uses_the_right_keyword_and_is_parameterized() {
+	let setup_auth = setup_auth_with_extra_users(vec![]);
+	let script = setup_auth.args.unwrap().remove(0);
+	assert!(
+		script.contains("CASE WHEN p.prokind = 'p' THEN 'GRANT EXECUTE ON PROCEDURE %s TO %I'"),
+		"procedures must be granted EXECUTE with ON PROCEDURE, not ON FUNCTION"
+	);
+	assert!(
+		script.contains("p.oid::regprocedure::text, :'analytics_username'"),
+		"the analytics username must be passed as a psql variable, not interpolated raw"
+	);
+	assert!(
+		!script.contains("TO '${ANALYTICS_USERNAME}'"),
+		"analyticsUsername must never be spliced raw into a SQL string literal"
+	);
+}
+
+/// Nothing about provisioning depends on the server version, so no restore is
+/// skipped over one.
+#[test]
+fn extra_users_are_provisioned_on_every_pg_version() {
+	let setup_auth = setup_auth_with_extra_users(vec!["reporting".to_string()]);
+	let script = setup_auth.args.unwrap().remove(0);
+	assert!(
+		script.contains("Resetting extra user (index 0) role"),
+		"the provisioning block is present"
+	);
+	assert!(
+		!script.contains("skipping extra user provisioning"),
+		"there is no version gate left to skip over"
+	);
+}
+
+#[test]
+fn no_extra_users_means_no_extra_user_env_or_sql() {
+	let setup_auth = setup_auth_with_extra_users(vec![]);
+	assert!(
+		!setup_auth
+			.env
+			.unwrap()
+			.iter()
+			.any(|e| e.name.starts_with("EXTRA_USER_")),
+		"a replica with no extra users must not carry extra-user env vars"
+	);
+	let script = setup_auth.args.unwrap().remove(0);
+	assert!(!script.contains("EXTRA_USER_NAME_"));
+}
+
+/// An extra user's `schemas` reach the pod as a plain (non-secret) env var,
+/// comma-joined since env vars are flat strings — the script splits it back
+/// apart with `string_to_array`.
+#[test]
+fn extra_user_schemas_reach_the_pod_as_an_env_var() {
+	let setup_auth = setup_auth_with_extra_user_specs(vec![ExtraUserSpec {
+		name: "reporting".to_string(),
+		schemas: vec!["dbt".to_string(), "staging".to_string()],
+	}]);
+	let env = setup_auth.env.unwrap();
+	let schemas_env = env
+		.iter()
+		.find(|e| e.name == "EXTRA_USER_SCHEMAS_0")
+		.expect("first extra user's schemas env");
+	assert_eq!(schemas_env.value.as_deref(), Some("dbt,staging"));
+}
+
+/// A user with no `schemas` still gets the env var (empty), for shape
+/// consistency across indices, but no grant SQL of any kind.
+#[test]
+fn extra_user_with_no_schemas_gets_an_empty_env_var_and_no_grants() {
+	let setup_auth = setup_auth_with_extra_users(vec!["reporting".to_string()]);
+	let env = setup_auth.env.unwrap();
+	let schemas_env = env
+		.iter()
+		.find(|e| e.name == "EXTRA_USER_SCHEMAS_0")
+		.expect("the schemas env var must be present even when empty");
+	assert_eq!(schemas_env.value.as_deref(), Some(""));
+
+	let script = setup_auth.args.unwrap().remove(0);
+	assert!(
+		!script.contains("GRANT USAGE ON SCHEMA %I TO %I', n.nspname, :'pgro_extra_user_0'"),
+		"no schema-grant SQL should be generated for a user with no schemas"
+	);
+}
+
+/// A user with `schemas` set is granted `USAGE` + `SELECT` on whichever of
+/// them exist in each database, plus default privileges so tables the
+/// analytics role creates afterwards (the persistent-schemas migration) are
+/// covered too — all scoped through a join against `pg_namespace`, never by
+/// assuming the schema exists.
+#[test]
+fn extra_user_with_schemas_is_granted_read_access_to_them() {
+	let setup_auth = setup_auth_with_extra_user_specs(vec![ExtraUserSpec {
+		name: "reporting".to_string(),
+		schemas: vec!["dbt".to_string(), "staging".to_string()],
+	}]);
+	let script = setup_auth.args.unwrap().remove(0);
+
+	for expected in [
+		"SELECT format('GRANT USAGE ON SCHEMA %I TO %I', n.nspname, :'pgro_extra_user_0')",
+		"SELECT format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO %I', n.nspname, :'pgro_extra_user_0')",
+		"SELECT format('GRANT SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', n.nspname, :'pgro_extra_user_0')",
+		"SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I GRANT SELECT ON TABLES TO %I', :'analytics_username', n.nspname, :'pgro_extra_user_0')",
+	] {
+		assert!(
+			script.contains(expected),
+			"missing grant statement: {expected}"
+		);
+	}
+	assert!(
+		script.contains("FROM unnest(string_to_array(:'pgro_extra_user_schemas_0', ','))"),
+		"the schema list must come from the per-user env var, split back into an array"
+	);
+	assert!(
+		script.contains("JOIN pg_namespace n ON n.nspname = trim(s.name)"),
+		"a schema that doesn't exist in a given database must be silently skipped, not error"
+	);
+}
+
+/// `DROP OWNED BY` revokes every direct grant a role holds, so granting an
+/// extra user's schema access before that step would just have it stripped
+/// again immediately afterwards. The schema grants must come last.
+#[test]
+fn schema_grants_run_after_ownership_is_stripped() {
+	let setup_auth = setup_auth_with_extra_user_specs(vec![ExtraUserSpec {
+		name: "reporting".to_string(),
+		schemas: vec!["dbt".to_string()],
+	}]);
+	let script = setup_auth.args.unwrap().remove(0);
+
+	let drop_owned_line = script
+		.lines()
+		.position(|l| l.contains("DROP OWNED BY %I', :'pgro_extra_user_0'"))
+		.expect("the extra user's DROP OWNED BY runs somewhere");
+	let grant_line = script
+		.lines()
+		.position(|l| {
+			l.contains("GRANT USAGE ON SCHEMA %I TO %I', n.nspname, :'pgro_extra_user_0'")
+		})
+		.expect("the schema grant runs somewhere");
+	assert!(
+		drop_owned_line < grant_line,
+		"the schema grant must run after DROP OWNED BY, or it would be revoked again immediately"
+	);
+}
+
+/// One extra user's schemas must not leak into another's grant statements —
+/// each index only ever references its own `pgro_extra_user_schemas_<i>`
+/// variable.
+#[test]
+fn each_extra_users_schemas_are_independent() {
+	let setup_auth = setup_auth_with_extra_user_specs(vec![
+		ExtraUserSpec {
+			name: "reporting".to_string(),
+			schemas: vec!["public".to_string()],
+		},
+		ExtraUserSpec {
+			name: "dbt_reader".to_string(),
+			schemas: vec!["dbt".to_string(), "staging".to_string()],
+		},
+	]);
+	let script = setup_auth.args.unwrap().remove(0);
+
+	assert!(script.contains(
+		"SELECT format('GRANT USAGE ON SCHEMA %I TO %I', n.nspname, :'pgro_extra_user_0') FROM unnest(string_to_array(:'pgro_extra_user_schemas_0', ','))"
+	));
+	assert!(script.contains(
+		"SELECT format('GRANT USAGE ON SCHEMA %I TO %I', n.nspname, :'pgro_extra_user_1') FROM unnest(string_to_array(:'pgro_extra_user_schemas_1', ','))"
+	));
+}
+
+/// A foreign key check runs as the referenced table's owner whether or not that
+/// role can log in, so revoking `PUBLIC`'s schema `USAGE` on its own would fail
+/// every foreign key check into a table that owner holds.
+#[test]
+fn lockdown_grants_schema_usage_back_to_relation_owners() {
+	let setup_auth = setup_auth_with_extra_users(vec![]);
+	let script = setup_auth.args.unwrap().remove(0);
+
+	let revoke_schema = script
+		.lines()
+		.position(|l| l.contains("SELECT format('REVOKE ALL ON SCHEMA %I FROM PUBLIC', nspname)"))
+		.expect("the schema revoke is present");
+	let reassign = script
+		.lines()
+		.position(|l| {
+			l.contains("SELECT format('REASSIGN OWNED BY %I TO postgres', :'analytics_username')")
+		})
+		.expect("the reassign step is present");
+	let owner_grant = script
+		.lines()
+		.position(|l| {
+			l.contains(
+				"SELECT format('GRANT USAGE ON SCHEMA %I TO %I', n.nspname, pg_get_userbyid(c.relowner))",
+			)
+		})
+		.expect("owners are granted schema usage back");
+	assert!(
+		revoke_schema < reassign && reassign < owner_grant,
+		"the owner grant must follow both the PUBLIC revoke and the ownership reassign"
+	);
+	assert!(
+		script.contains(" GROUP BY n.nspname, c.relowner \\gexec"),
+		"one grant per schema and owner"
+	);
+}
+
+#[test]
+fn restores_of_replica_matches_name_and_namespace() {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	replica.metadata.namespace = Some("site-a".to_string());
+	restore.metadata.namespace = Some("site-a".to_string());
+
+	let mut other_ns = restore.clone();
+	other_ns.metadata.name = Some("other-ns".to_string());
+	other_ns.metadata.namespace = Some("site-b".to_string());
+
+	let mut other_replica = restore.clone();
+	other_replica.metadata.name = Some("other-replica".to_string());
+	other_replica.spec.replica.name = "another-replica".to_string();
+
+	let refs = super::restores_of_replica([&restore, &other_ns, &other_replica], &replica);
+	assert_eq!(refs, vec![ObjectRef::from_obj(&restore)]);
+}
+
+/// Status writes don't bump the generation, so only a spec change (or a
+/// replica not seen before) passes; a deleted replica is forgotten.
+#[test]
+fn generation_gate_passes_spec_changes_only() {
+	let (_, mut replica) = test_restore_and_replica();
+	replica.metadata.namespace = Some("site-a".to_string());
+	replica.metadata.generation = Some(3);
+	let gate = super::GenerationGate::default();
+
+	assert!(gate.changed(&replica), "first sighting");
+	assert!(
+		!gate.changed(&replica),
+		"same generation, e.g. a status write"
+	);
+	replica.metadata.generation = Some(4);
+	assert!(gate.changed(&replica), "spec change");
+
+	replica.metadata.deletion_timestamp = Some(
+		k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(jiff::Timestamp::now()),
+	);
+	assert!(!gate.changed(&replica), "deleting");
+	replica.metadata.deletion_timestamp = None;
+	assert!(gate.changed(&replica), "forgotten after deletion");
+}
+
+/// Readiness waits on the locale flag, so a restore that also needs the full
+/// post-pg_resetwal rebuild must clear that flag before starting it, or
+/// readiness waits on REINDEX DATABASE over every index in every database.
+#[test]
+fn locale_reindex_clears_its_flag_before_the_full_rebuild() {
+	let script = postgres_container_script();
+
+	let locale_done = script
+		.find("rm -f /pgdata/needs-reindex\n")
+		.expect("locale branch clears its flag");
+	let full_rebuild = script
+		.find(r#"-c "REINDEX DATABASE CONCURRENTLY"#)
+		.expect("full rebuild command present");
+	assert!(
+		locale_done < full_rebuild,
+		"needs-reindex must be cleared before REINDEX DATABASE starts"
+	);
+	assert_eq!(
+		script.matches("rm -f /pgdata/needs-reindex\n").count(),
+		1,
+		"only the locale branch may clear the readiness flag"
+	);
+}
+
+/// The operator waits on the locale reindex as the analytics user, which on a
+/// read-only replica cannot see other roles' rows in
+/// pg_stat_progress_create_index. The function hands it the counters, only to
+/// it, and only while the flag the readiness probe checks is still there.
+#[test]
+fn setup_auth_exposes_locale_reindex_progress_to_the_analytics_user() {
+	let script = setup_auth_script();
+
+	let function = script
+		.find("CREATE OR REPLACE FUNCTION _pgro.locale_reindex_progress() RETURNS text")
+		.expect("progress function is created");
+	let body = &script[function..];
+	assert!(body.contains("SECURITY DEFINER"));
+	assert!(body.contains("SET search_path = pg_catalog"));
+	assert!(
+		body.contains("pg_stat_file('/pgdata/needs-reindex', true)"),
+		"the answer must follow the readiness probe's flag, not the broader stage"
+	);
+	assert!(script.contains("REVOKE ALL ON FUNCTION _pgro.locale_reindex_progress() FROM PUBLIC;"));
+	assert!(script.contains(
+		"GRANT EXECUTE ON FUNCTION _pgro.locale_reindex_progress() TO ${ANALYTICS_USERNAME};"
+	));
+	// The heredoc is unquoted, so a bare `$pgro$` would be expanded by the
+	// shell and leave postgres an unterminated body.
+	assert!(script.contains(r"AS \$pgro\$"));
+	assert!(!script.contains(" $pgro$"));
+	let gate = script[..function]
+		.rfind(r#"if [ "$PG_MAJOR" -ge 12 ]; then"#)
+		.expect("pg_stat_progress_create_index needs PG 12");
+	assert!(gate < function);
+}
+
+mod reindex_watch {
+	use jiff::{SignedDuration, Timestamp};
+
+	use super::super::reindex_watch::{
+		OBSERVE_INTERVAL, STALL_TIMEOUT, Verdict, Watch, past_budget,
+	};
+
+	fn progress(value: &str) -> Option<String> {
+		Some(value.to_string())
+	}
+
+	fn at(minutes: i64) -> Timestamp {
+		Timestamp::UNIX_EPOCH + SignedDuration::from_mins(minutes)
+	}
+
+	fn past_stall() -> Timestamp {
+		at(0) + STALL_TIMEOUT + SignedDuration::from_secs(1)
+	}
+
+	/// A large reindex outlasts any fixed budget; as long as its counters
+	/// keep moving it is waited on, however long that takes.
+	#[test]
+	fn moving_progress_never_stalls() {
+		let mut watch = Watch::record(None, progress("1:16384:building:0:0"), at(0));
+		for minute in 1..=600 {
+			watch = Watch::record(
+				Some(&watch),
+				progress(&format!("1:16384:building:{minute}:0")),
+				at(minute),
+			);
+			assert_eq!(watch.verdict(at(minute)), Verdict::Wait);
+		}
+	}
+
+	#[test]
+	fn unchanged_progress_fails_after_the_stall_timeout() {
+		let first = Watch::record(None, progress("1:16384:sorting:5:0"), at(0));
+		let same = Watch::record(Some(&first), progress("1:16384:sorting:5:0"), at(29));
+		assert_eq!(same.verdict(at(29)), Verdict::Wait);
+
+		let still = Watch::record(Some(&same), progress("1:16384:sorting:5:0"), past_stall());
+		assert_eq!(still.verdict(past_stall()), Verdict::Stalled);
+	}
+
+	/// One failed look mid-wait must not throw away hours of a reindex that
+	/// was moving; it reads as no change and the stall clock decides.
+	#[test]
+	fn a_failed_observation_reads_as_no_change() {
+		let moving = Watch::record(None, progress("1:16384:building:9:0"), at(0));
+		let blip = Watch::unobserved(&moving, at(5));
+		assert_eq!(blip.verdict(at(5)), Verdict::Wait);
+		assert!(!blip.needs_observation(at(5)));
+
+		let still_failing = Watch::unobserved(&blip, past_stall());
+		assert_eq!(still_failing.verdict(past_stall()), Verdict::Stalled);
+	}
+
+	#[test]
+	fn no_pending_locale_reindex_is_not_waited_on() {
+		let watch = Watch::record(None, None, at(0));
+		assert_eq!(watch.verdict(at(0)), Verdict::NotReindexing);
+	}
+
+	#[test]
+	fn postgres_is_asked_at_most_once_per_interval() {
+		let watch = Watch::record(None, progress("x"), at(0));
+		assert!(!watch.needs_observation(at(0) + OBSERVE_INTERVAL - SignedDuration::from_secs(1)));
+		assert!(watch.needs_observation(at(0) + OBSERVE_INTERVAL));
+	}
+
+	/// A restore deleted mid-wait never reaches Ready or Failed, so its entry
+	/// has to age out; a live wait refreshes far more often than that.
+	#[test]
+	fn unvisited_watches_are_abandoned() {
+		let watch = Watch::record(None, progress("x"), at(0));
+		assert!(!watch.is_abandoned(at(0) + OBSERVE_INTERVAL * 2));
+		assert!(watch.is_abandoned(at(11)));
+	}
+
+	#[test]
+	fn past_budget_waits_only_on_a_moving_reindex() {
+		let elapsed = SignedDuration::from_secs(9000);
+		let budget = SignedDuration::from_secs(3000);
+		assert_eq!(past_budget(elapsed, budget, Some(Verdict::Wait)), None);
+		assert!(past_budget(elapsed, budget, Some(Verdict::NotReindexing)).is_some());
+		assert!(
+			past_budget(elapsed, budget, None).is_some(),
+			"an explicit timeout is not extended"
+		);
+	}
+
+	/// After a long wait the budget is the wrong number to report; the
+	/// message has to say how long it actually waited and why it gave up.
+	#[test]
+	fn past_budget_reports_the_actual_wait() {
+		let message = past_budget(
+			SignedDuration::from_secs(9000),
+			SignedDuration::from_secs(3000),
+			Some(Verdict::Stalled),
+		)
+		.unwrap();
+		assert!(
+			message.contains("9000s after restore completion"),
+			"{message}"
+		);
+		assert!(message.contains("budget 3000s"), "{message}");
+		assert!(
+			message.contains(&format!("no progress for {}s", STALL_TIMEOUT.as_secs())),
+			"{message}"
+		);
+	}
+}
