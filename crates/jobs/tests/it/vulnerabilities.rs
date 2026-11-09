@@ -486,6 +486,49 @@ async fn a_scan_asks_about_each_package_version_once_and_each_advisory_until_it_
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_match_the_advisorys_own_ranges_rule_out_is_not_filed() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let fake: Shared = Arc::default();
+		{
+			let mut f = fake.lock().unwrap();
+			f.advisories.insert(
+				"GHSA-1".into(),
+				advisory("GHSA-1", "2026-10-01T00:00:00Z", "HIGH", "2.0.0"),
+			);
+			// Introduced above left-pad's 1.0.0.
+			let mut above = advisory("GHSA-2", "2026-10-02T00:00:00Z", "HIGH", "3.0.0");
+			above["affected"][0]["ranges"][0]["events"][0] = json!({ "introduced": "2.0.0" });
+			f.advisories.insert("GHSA-2".into(), above);
+			// Fixed, by a version short of three numbers, below it.
+			f.advisories.insert(
+				"GHSA-3".into(),
+				advisory("GHSA-3", "2026-10-03T00:00:00Z", "HIGH", "0.5"),
+			);
+			f.answers.insert(
+				"left-pad".into(),
+				vec![vec![
+					("GHSA-1".into(), "2026-10-01T00:00:00Z".into()),
+					("GHSA-2".into(), "2026-10-02T00:00:00Z".into()),
+					("GHSA-3".into(), "2026-10-03T00:00:00Z".into()),
+				]],
+			);
+		}
+		publish(&fake, "aaaa", &[("package-lock.json", LOCKFILE)]);
+		let base = serve(fake.clone()).await;
+		let scanner = scanner(&base);
+		scanner.read_repositories(&mut conn).await.unwrap();
+		scanner.scan(&mut conn).await.unwrap();
+
+		let listing = ItemSummary::list(&mut conn, &ListQuery::default())
+			.await
+			.unwrap();
+		let ids: Vec<&str> = listing.items.iter().map(|i| i.id.as_str()).collect();
+		assert_eq!(ids, ["GHSA-1"]);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_scan_lapses_a_decided_item_when_severity_rises_and_audits_it_as_canopys() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let (fake, base) = scanned(&mut conn).await;

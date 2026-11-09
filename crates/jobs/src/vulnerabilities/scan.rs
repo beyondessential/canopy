@@ -263,6 +263,15 @@ impl Scanner {
 				for record in &fetched {
 					Advisory::upsert(conn, record).await?;
 				}
+				let found_ids: Vec<String> = answers
+					.iter()
+					.flatten()
+					.map(|v| v.id.clone())
+					.filter(|id| !unavailable.contains(id.as_str()))
+					.collect::<HashSet<_>>()
+					.into_iter()
+					.collect();
+				let ranges = Advisory::rated(conn, &found_ids).await?;
 				let matched: Vec<(Counted, Vec<String>)> = counted
 					.iter()
 					.zip(&answers)
@@ -271,6 +280,16 @@ impl Scanner {
 							.iter()
 							.map(|v| v.id.clone())
 							.filter(|id| !unavailable.contains(id.as_str()))
+							.filter(|id| {
+								ranges.get(id).is_none_or(|(_, affected)| {
+									!osv::rules_out(
+										affected,
+										&query.ecosystem,
+										&query.name,
+										&query.version,
+									)
+								})
+							})
 							.collect();
 						(query.clone(), found.into_iter().collect())
 					})

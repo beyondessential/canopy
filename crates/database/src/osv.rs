@@ -307,6 +307,48 @@ pub fn reaches(affected: &[Affected], ecosystem: &str, name: &str, version: &str
 		})
 }
 
+/// Whether the advisory's own ranges and listed versions say `name` at
+/// `version` is not affected. OSV does the matching, so this only withholds a
+/// match the record contradicts; it says nothing where it cannot tell: no
+/// entry names the package, an entry has no range or list to read, a range is
+/// of a kind or holds an event this does not evaluate, or the version does
+/// not parse.
+pub fn rules_out(affected: &[Affected], ecosystem: &str, name: &str, version: &str) -> bool {
+	let kind = VersionKind::of(ecosystem);
+	if !kind.parses(version) {
+		return false;
+	}
+	let mut named = affected
+		.iter()
+		.filter(|affected| names(affected, ecosystem, name))
+		.peekable();
+	if named.peek().is_none() {
+		return false;
+	}
+	let readable = named.all(|affected| {
+		(!affected.ranges.is_empty() || !affected.versions.is_empty())
+			&& affected.ranges.iter().all(|range| {
+				let kind = match range.r#type.as_str() {
+					"SEMVER" => VersionKind::Semver,
+					"ECOSYSTEM" => kind,
+					_ => return false,
+				};
+				range.events.iter().all(|event| {
+					let at = event
+						.introduced
+						.as_deref()
+						.or(event.fixed.as_deref())
+						.or(event.last_affected.as_deref())
+						.or(event.limit.as_deref());
+					at.is_some_and(|at| {
+						(event.introduced.is_some() && at == "0") || kind.parses(at)
+					})
+				})
+			})
+	});
+	readable && !reaches(affected, ecosystem, name, version)
+}
+
 /// How versions of an ecosystem order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum VersionKind {
@@ -329,7 +371,7 @@ impl VersionKind {
 	fn parses(self, version: &str) -> bool {
 		match self {
 			Self::Dpkg => true,
-			Self::Semver => node_semver::Version::parse(version).is_ok(),
+			Self::Semver => semver(version).is_some(),
 			Self::Pep440 => version.parse::<pep440_rs::Version>().is_ok(),
 		}
 	}
@@ -337,11 +379,7 @@ impl VersionKind {
 	fn compare(self, a: &str, b: &str) -> Option<Ordering> {
 		match self {
 			Self::Dpkg => Some(dpkg_compare(a, b)),
-			Self::Semver => {
-				let a = node_semver::Version::parse(a).ok()?;
-				let b = node_semver::Version::parse(b).ok()?;
-				Some(a.cmp(&b))
-			}
+			Self::Semver => Some(semver(a)?.cmp(&semver(b)?)),
 			Self::Pep440 => {
 				let a = a.parse::<pep440_rs::Version>().ok()?;
 				let b = b.parse::<pep440_rs::Version>().ok()?;
@@ -349,6 +387,26 @@ impl VersionKind {
 			}
 		}
 	}
+}
+
+/// A semantic version, reading one of fewer than three numbers as the rest
+/// being zero: advisories name `0.65` for `0.65.0`, and a version that did not
+/// parse would never close the range it ends.
+fn semver(version: &str) -> Option<node_semver::Version> {
+	if let Ok(parsed) = node_semver::Version::parse(version) {
+		return Some(parsed);
+	}
+	let (core, rest) = version.split_at(version.find(['-', '+']).unwrap_or(version.len()));
+	let numbers = core.split('.').count();
+	if numbers >= 3
+		|| core
+			.split('.')
+			.any(|n| n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()))
+	{
+		return None;
+	}
+	let padded = format!("{core}{}{rest}", ".0".repeat(3 - numbers));
+	node_semver::Version::parse(padded).ok()
 }
 
 /// OSV's range evaluation: events in version order, `introduced: "0"` first,
@@ -652,6 +710,45 @@ mod tests {
 			..Default::default()
 		};
 		assert_eq!(record.fixed_in("npm", "left-pad"), ["1.9.0", "1.10.0"]);
+	}
+
+	#[test]
+	fn a_version_short_of_three_numbers_is_read_with_zeros() {
+		let affected = semver_range(&[("introduced", "0"), ("fixed", "0.65")]);
+		assert!(hits(&affected, "0.43.0"));
+		assert!(hits(&affected, "0.64.1"));
+		assert!(!hits(&affected, "0.65.0"));
+		assert!(!hits(&affected, "0.70.0"));
+		assert_eq!(
+			min_fix_version(&affected, "npm", "left-pad", "0.43.0").as_deref(),
+			Some("0.65")
+		);
+	}
+
+	#[test]
+	fn a_match_is_ruled_out_only_where_the_ranges_say_so() {
+		let affected = semver_range(&[("introduced", "1.2.0"), ("fixed", "1.2.5")]);
+		let rules_out = |version| super::rules_out(&affected, "npm", "left-pad", version);
+		assert!(rules_out("1.1.9"));
+		assert!(rules_out("1.2.5"));
+		assert!(rules_out("2.0.0"));
+		assert!(!rules_out("1.2.4"));
+		assert!(!rules_out("not-a-version"));
+		assert!(!super::rules_out(&affected, "npm", "right-pad", "9.9.9"));
+	}
+
+	#[test]
+	fn a_match_is_never_ruled_out_on_ranges_that_are_not_read() {
+		let mut affected = semver_range(&[("introduced", "1.2.0"), ("fixed", "1.2.5")]);
+		affected[0].ranges[0].r#type = "GIT".into();
+		assert!(!super::rules_out(&affected, "npm", "left-pad", "9.9.9"));
+
+		let affected = semver_range(&[("introduced", "0"), ("fixed", "not-a-version")]);
+		assert!(!super::rules_out(&affected, "npm", "left-pad", "9.9.9"));
+
+		let mut bare = semver_range(&[]);
+		bare[0].ranges.clear();
+		assert!(!super::rules_out(&bare, "npm", "left-pad", "9.9.9"));
 	}
 
 	#[test]
