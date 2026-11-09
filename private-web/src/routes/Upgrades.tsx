@@ -164,11 +164,7 @@ export default function Upgrades() {
 										<TableCell>{row.current_version ?? "unknown"}</TableCell>
 										<TableCell>{row.target_version}</TableCell>
 										<TableCell>
-											<Stack
-												direction="row"
-												spacing={0.5}
-												sx={{ alignItems: "center" }}
-											>
+											<Stack spacing={0.5} sx={{ alignItems: "flex-start" }}>
 												<VerdictChip
 													verdict={row.verdict}
 													testable={row.testable}
@@ -181,9 +177,9 @@ export default function Upgrades() {
 										</TableCell>
 										<TableCell>
 											<Stack
-												direction="row"
+												direction={row.test_request ? "column" : "row"}
 												spacing={0.5}
-												sx={{ alignItems: "center" }}
+												sx={{ alignItems: row.test_request ? "flex-start" : "center" }}
 											>
 												<TestingChip testing={row.testing} />
 												<RequestTest
@@ -212,7 +208,7 @@ export default function Upgrades() {
 												<UnderMaintenance held={row.maintenance_window} />
 											</Stack>
 										</TableCell>
-										<TableCell>
+										<TableCell sx={NOTE_CELL}>
 											<PlanNote
 												note={row.plan.note ?? null}
 												testId="planned-upgrade-note"
@@ -1540,7 +1536,7 @@ function VerdictChip({
 	);
 }
 
-/// An attempt under way, beside the verdict rather than replacing it: a row can
+/// An attempt under way, shown with the verdict rather than replacing it: a row can
 /// read as failed with a fresh attempt already running.
 function AttemptChip({
 	attempt,
@@ -1926,6 +1922,10 @@ const WHEN_FIELDS = {
 };
 
 const NOTE_TEXT = { maxWidth: 240 };
+
+/// A zero max width makes the cell take what the other columns leave and
+/// truncate the note, where a nowrap table would otherwise scroll sideways.
+const NOTE_CELL = { width: "100%", maxWidth: 0 };
 
 const TIGHT_TABLE = {
 	"& td, & th": { width: "1%", whiteSpace: "nowrap" },
