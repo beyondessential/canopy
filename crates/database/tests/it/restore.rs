@@ -1987,6 +1987,7 @@ async fn one_check_of_each_kind_per_machine_with_the_replicas_as_instances() {
 				data_bytes_before: 10,
 				data_bytes_after: 10,
 				timings: vec![],
+				post_migration: None,
 			},
 		)
 		.await
@@ -2163,6 +2164,7 @@ async fn the_three_checks_file_at_the_grain_they_are_about() {
 				data_bytes_before: 10,
 				data_bytes_after: 10,
 				timings: vec![],
+				post_migration: None,
 			},
 		)
 		.await

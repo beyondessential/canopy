@@ -31,7 +31,7 @@ use commons_types::server::rank::ServerRank;
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
-	migration_tests::{self, MigrationTest, NewMigrationTest},
+	migration_tests::{self, MigrationTest, NewMigrationTest, NewPostMigration},
 	pg_duration::PgDuration,
 	reporting_schemas::{NewReportingSchemaBuild, ReportingSchemaBuild},
 	restore::{
@@ -1035,6 +1035,16 @@ pub struct MigrationArgs {
 	pub data_bytes_after: i64,
 	/// One entry per migration that ran, in the order they ran.
 	pub timings: Vec<MigrationTimingArgs>,
+	/// Whole seconds the work the application does after its migrations took,
+	/// such as rebuilding derived data. Omit it where the version does not
+	/// record it.
+	#[serde(default)]
+	pub post_migration_elapsed_seconds: Option<i64>,
+	/// Each step of that work which did something, in the order they ran. Empty
+	/// where the version records only the total; a report with steps and no
+	/// `post_migration_elapsed_seconds` is refused.
+	#[serde(default)]
+	pub post_migration_timings: Vec<PostMigrationTimingArgs>,
 }
 
 /// What a reporting-schema build reports beyond its replica's restore health.
@@ -1062,6 +1072,17 @@ pub struct ReportingSchemaArgs {
 pub struct MigrationTimingArgs {
 	/// The migration's name, as the migration runner reports it.
 	pub name: String,
+	/// Whole seconds it took.
+	pub elapsed_seconds: i64,
+}
+
+/// How long one step of the work after the migrations took.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct PostMigrationTimingArgs {
+	/// The step, as the application names it.
+	pub name: String,
+	/// Rows the step wrote, where the application counts them.
+	pub rows: Option<i64>,
 	/// Whole seconds it took.
 	pub elapsed_seconds: i64,
 }
@@ -1297,6 +1318,13 @@ async fn verification(
 			let application_id =
 				resolve_migration_application(&mut conn, &migration, machine_id, target_version_id)
 					.await?;
+			if migration.post_migration_elapsed_seconds.is_none()
+				&& !migration.post_migration_timings.is_empty()
+			{
+				return Err(AppError::BadRequest(
+					"post_migration_timings sent without post_migration_elapsed_seconds".into(),
+				));
+			}
 			MigrationTest::record(
 				&mut conn,
 				report,
@@ -1414,6 +1442,22 @@ impl MigrationArgs {
 					)
 				})
 				.collect(),
+			post_migration: self
+				.post_migration_elapsed_seconds
+				.map(|seconds| NewPostMigration {
+					elapsed: PgDuration(SignedDuration::from_secs(seconds)),
+					steps: self
+						.post_migration_timings
+						.into_iter()
+						.map(|timing| {
+							(
+								timing.name,
+								timing.rows,
+								PgDuration(SignedDuration::from_secs(timing.elapsed_seconds)),
+							)
+						})
+						.collect(),
+				}),
 		}
 	}
 }

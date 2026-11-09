@@ -50,6 +50,9 @@ export default function MigrationRunDialog({
 	const timings = [...latest.timings].sort((a, b) => a.ordinal - b.ordinal);
 	const longest = timings.reduce((max, t) => Math.max(max, t.elapsed), 0);
 	const slowest = longest > 0 ? timings.find((t) => t.elapsed === longest) : undefined;
+	const postSteps = [...latest.post_migration_timings].sort(
+		(a, b) => a.ordinal - b.ordinal,
+	);
 
 	return (
 		<Dialog
@@ -104,6 +107,20 @@ export default function MigrationRunDialog({
 						value={slowest ? formatDuration(slowest.elapsed) : "—"}
 					>
 						{slowest?.name ?? "all under a second"}
+					</Stat>
+					<Stat
+						label="After migrations took"
+						value={
+							latest.post_migration_elapsed == null
+								? "—"
+								: formatDuration(latest.post_migration_elapsed)
+						}
+					>
+						{latest.post_migration_elapsed == null
+							? "not recorded by this version"
+							: postSteps.length === 0
+								? "steps not recorded by this version"
+								: `${postSteps.length} step${postSteps.length === 1 ? "" : "s"} did work`}
 					</Stat>
 					<Stat label="Tested" value={<TimeAgo timestamp={latest.reported_at} />}>
 						<Box component="span" sx={{ fontFamily: "monospace" }}>
@@ -179,6 +196,46 @@ export default function MigrationRunDialog({
 						</TableBody>
 					</Table>
 				</TableContainer>
+
+				{postSteps.length > 0 && (
+					<>
+						<Typography variant="subtitle2" component="h3" sx={{ mt: 3, mb: 1 }}>
+							After migrations
+						</Typography>
+						<TableContainer sx={{ maxHeight: "40vh" }}>
+							<Table size="small" stickyHeader sx={{ tableLayout: "fixed" }}>
+								<TableHead>
+									<TableRow>
+										<TableCell>Step</TableCell>
+										<TableCell align="right" sx={{ width: 120 }}>
+											Rows
+										</TableCell>
+										<TableCell align="right" sx={{ width: 90 }}>
+											Took
+										</TableCell>
+									</TableRow>
+								</TableHead>
+								<TableBody>
+									{postSteps.map((step) => (
+										<TableRow key={step.ordinal} data-testid="post-migration-timing">
+											<TableCell
+												sx={{ fontFamily: "monospace", overflowWrap: "anywhere" }}
+											>
+												{step.name}
+											</TableCell>
+											<TableCell align="right">
+												{step.rows == null ? "—" : step.rows.toLocaleString()}
+											</TableCell>
+											<TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+												{formatDuration(step.elapsed)}
+											</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
+							</Table>
+						</TableContainer>
+					</>
+				)}
 			</DialogContent>
 		</Dialog>
 	);

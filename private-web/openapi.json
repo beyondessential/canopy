@@ -6633,6 +6633,21 @@
               "null"
             ]
           },
+          "post_migration_elapsed": {
+            "description": "Whole seconds the work after the migrations took, where it was\nreported.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "post_migration_timings": {
+            "description": "Each step of that work which did something, in the order they ran.",
+            "items": {
+              "$ref": "#/components/schemas/PostMigrationTiming"
+            },
+            "type": "array"
+          },
           "reported_at": {
             "description": "When the consumer reported it.",
             "type": "string"
@@ -6667,7 +6682,8 @@
           "total_elapsed",
           "data_bytes_before",
           "data_bytes_after",
-          "timings"
+          "timings",
+          "post_migration_timings"
         ],
         "type": "object"
       },
@@ -9708,6 +9724,39 @@
         },
         "required": [
           "group_id"
+        ],
+        "type": "object"
+      },
+      "PostMigrationTiming": {
+        "description": "One step of the work an application does after its migrations, such as\nrebuilding derived data, in the order it ran.",
+        "properties": {
+          "elapsed": {
+            "description": "Whole seconds the step took.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "description": "The step, as the application names it.",
+            "type": "string"
+          },
+          "ordinal": {
+            "description": "Where it fell among the steps, counting from zero.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rows": {
+            "description": "Rows the step wrote, where the application counts them.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "ordinal",
+          "name",
+          "elapsed"
         ],
         "type": "object"
       },

@@ -9824,6 +9824,14 @@ export interface components {
             error?: string | null;
             /** @description The migration that failed, when one did. */
             failed_migration?: string | null;
+            /**
+             * Format: int64
+             * @description Whole seconds the work after the migrations took, where it was
+             *     reported.
+             */
+            post_migration_elapsed?: number | null;
+            /** @description Each step of that work which did something, in the order they ran. */
+            post_migration_timings: components["schemas"]["PostMigrationTiming"][];
             /** @description When the consumer reported it. */
             reported_at: string;
             /** @description The snapshot the verdict was reached against. */
@@ -11528,6 +11536,29 @@ export interface components {
              * @description The group to read.
              */
             group_id: string;
+        };
+        /**
+         * @description One step of the work an application does after its migrations, such as
+         *     rebuilding derived data, in the order it ran.
+         */
+        PostMigrationTiming: {
+            /**
+             * Format: int64
+             * @description Whole seconds the step took.
+             */
+            elapsed: number;
+            /** @description The step, as the application names it. */
+            name: string;
+            /**
+             * Format: int32
+             * @description Where it fell among the steps, counting from zero.
+             */
+            ordinal: number;
+            /**
+             * Format: int64
+             * @description Rows the step wrote, where the application counts them.
+             */
+            rows?: number | null;
         };
         /**
          * @description A key as an operator sees it.
