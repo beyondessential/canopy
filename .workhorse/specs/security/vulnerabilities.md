@@ -109,7 +109,7 @@ Each filter's choices show how many items they would give with the other filters
 The filter bar shows how many items are in the result as it stands, with every filter and the search applied.
 
 A search box matches partially and tolerates small typos, across an advisory's identifier and aliases, summary, affected package names, the workspace packages that reach them, and source name.
-It also searches the advisory's full details, where a match counts for less than one in the fields above.
+It also searches the advisory's full details by whole words and the beginnings of words, where a match counts for less than any match in the fields above.
 While a search is entered, rows are ordered by how well they match until a column is chosen to sort by.
 
 An item's page shows the advisory's summary, details and affected ranges with the versions that fix it.

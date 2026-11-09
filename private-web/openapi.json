@@ -16082,7 +16082,7 @@
             ]
           },
           "search": {
-            "description": "Partial words, tolerating small typos, over the identifier and aliases,\nsummary, package names, workspace packages, source, and the advisory's\ndetails.",
+            "description": "Partial words, tolerating small typos, over the identifier and aliases,\nsummary, package names, workspace packages and source; and whole words\nand word beginnings over the advisory's details.",
             "type": [
               "string",
               "null"

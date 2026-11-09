@@ -1747,6 +1747,19 @@ async fn a_search_ranks_a_summary_hit_above_a_details_only_hit_and_tolerates_a_t
 		let partial = list(&mut conn, &search("prototy")).await;
 		assert_eq!(ids(&partial), [("GHSA-lodash", "tamanu")]);
 
+		let details_words = list(&mut conn, &search("respon crafted")).await;
+		assert_eq!(
+			ids(&details_words),
+			[("GHSA-undici", "canopy"), ("GHSA-undici", "tamanu")],
+			"details match every word by its beginning, in any order"
+		);
+		let query_syntax = list(&mut conn, &search("exhausts & | ! (:*")).await;
+		assert_eq!(
+			query_syntax.len(),
+			2,
+			"the search's own symbols are not query syntax"
+		);
+
 		let by_alias = list(&mut conn, &search("tupaia")).await;
 		assert!(by_alias.is_empty());
 		let by_source = list(&mut conn, &search("canopy")).await;
