@@ -20,6 +20,7 @@ Canopy is its only driver in practice, and the restore contract between them is 
   The hand-written, Secret-based path (`kopiaSecretRef`, `snapshotFilter`, running with no Canopy configured) goes; the replica and restore CRDs stay, because Canopy-managed replicas are materialised through the same controllers.
 - **Canopy client:** pgro does not carry `bestool-canopy` into the repo.
   It gets a small client of its own, narrowed to what it uses.
+- **History:** pgro's commit history is kept, imported into the Canopy repo so blame and old references keep resolving.
 - **Transport:** tailnet only.
   The mTLS fallback, the device-key secret and the `canopyBaseUrl` setting are dropped.
   An operator whose Tailscale sidecar is down loses its link to Canopy until the sidecar returns; sidecar downtime has been rare enough in practice to accept.
@@ -45,6 +46,45 @@ Against:
 - The tailnet probe and the hardcoded-address fallback disappear; with the SOCKS5 proxy resolving names this should not matter, but it is untested.
 - The transport is a second implementation of something bestool already has.
 
+## Alternatives to the narrow tailnet client
+
+The tailnet sidecar stays whichever of these is chosen: pgro reads the tailnet's MagicDNS suffix from it to build the URL of a replica exposed on the tailnet.
+None of the alternatives removes it, so none gains from that.
+
+### Kubernetes OIDC
+
+pgro presents its projected service-account token, and Canopy verifies it against the cluster's issuer.
+Canopy's identity provider (IDP, IDT) runs the other way: it issues tokens for external services to verify, and verifies none.
+This would be a third kind of device identity beside a key and a tailnet node, with per-cluster trust (issuer, keys, audience) and a mapping from a service-account subject to a device.
+
+- For: no long-lived secret and no tailnet identity to attach; the relay and anything else in a cluster could use it too.
+- Against: a new authentication path in the device-auth extractor, with its own spec and security review, to build before the move could use it.
+- It is independent of where pgro's source lives.
+  The transport is one file behind `CanopyTransport`, so it can be swapped later without redoing the move.
+
+### What the relay does
+
+The relay authenticates with a device key in a QUIC client certificate, with proof of possession and Canopy's key pinned by the relay.
+That is the same key-based identity pgro already holds for its mTLS fallback, over a stronger channel than the HTTP path, where TLS ends at an ingress and authentication rests on a header.
+The relay's protocol carries filings and named requests, never Kubernetes objects, so pgro's worklist and credential calls do not fit it without widening it.
+Using the key over the public HTTP path would keep the secret and the certificate minting that tailnet-only removes.
+
+### Moving `bestool-canopy` here, with bestool depending on it
+
+`bestool-canopy` is the device-side half of Canopy's contract: registration, the encrypted machine store, DNS names, backup helpers, certificates and the transport.
+Its three dependents in bestool are `alertd`, `bestool` and `tamanu`.
+It has had 123 commits, 47 of them since August, and its recent history is full of Canopy-driven changes (a new API version, names, backup, tailnet-only default).
+bestool also keeps `canopy/*` specs describing Canopy behaviour from the device side.
+
+- For: one client for every consumer, and every contract change lands atomically for pgro, bestool and the device agent; the device-side specs sit beside the server's.
+- Against: it is a much wider move than pgro's.
+  It carries Windows paths, `algae-cli`, `sysinfo`, `machine-uid` and `miette` into the server's workspace, and bestool's field tooling would wait on Canopy's pipeline to change its own client.
+  Canopy's workspace is all `publish = false`, so it would have to be a second standalone published project like `bes-canopy-api`, or be folded into it, and bestool's release train would need re-pointing.
+  Canopy already depends on `bestool-kopia`, so each repo would depend on the other.
+- Staging loses little: pgro's narrow transport implements the same `CanopyTransport` trait, so if the client moves later pgro swaps it for the shared one.
+  The cost is a small duplicate in the meantime.
+- What decides it is how much of `bestool-canopy`'s churn follows Canopy's contract and how much is device-local; that split has not been measured.
+
 ## Frictions to resolve when moving
 
 - `k8s-openapi`: pgro enables `latest`, Canopy pins `v1_32`, and only one version feature may be enabled.
@@ -63,4 +103,6 @@ Against:
 
 ## Open
 
-- Keep pgro's commit history in the merge, or import fresh and link back.
+- Whether `bestool-canopy` relocation and Kubernetes OIDC are follow-up decisions that leave this move as it is, or change its shape.
+
+The card ends at this evaluation plus an ordered build plan for the move itself; specs wait for the card that does the move.
