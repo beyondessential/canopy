@@ -737,6 +737,35 @@ async fn a_rescan_reads_the_repository_again_where_it_stands() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_rescan_does_not_wait_out_the_backoff_of_a_failed_read() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let (fake, base) = scanned(&mut conn).await;
+		let scanner = scanner(&base);
+
+		publish(&fake, "bbbb", &[("package-lock.json", "{ not json")]);
+		let failed = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!(failed.failed, 1);
+		let waiting = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!(waiting.waiting, 1, "a failed read is waited out");
+
+		// An operator's ask is made on knowing better, so it does not wait.
+		database::vulnerabilities::rescan(&mut conn, &tamanu())
+			.await
+			.unwrap();
+		publish(&fake, "bbbb", &[("package-lock.json", TWO_WORKSPACES)]);
+		let asked = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!((asked.read, asked.waiting), (1, 0));
+		let read = RepositoryRead::get(&mut conn, "tamanu")
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(read.commit_sha.as_deref(), Some("bbbb"));
+		assert_eq!(read.failure, None);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn linux_cannot_be_rescanned_since_machines_report_it() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let refused = database::vulnerabilities::rescan(&mut conn, &Source::Linux)

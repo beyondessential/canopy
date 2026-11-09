@@ -238,6 +238,23 @@ impl RepositoryRead {
 		Ok(())
 	}
 
+	/// Read the repository again on the next pass, whatever its default branch
+	/// is at, because an operator has asked for it. The failure of the last
+	/// attempt goes with the commit: the ask is made on knowing better, so it
+	/// does not wait out the backoff an automatic retry does. What is held
+	/// stays until the read that replaces it lands.
+	// spec: VUL#where-a-package-sits
+	pub async fn mark_due(conn: &mut AsyncPgConnection, repository: &str) -> Result<()> {
+		diesel::sql_query(
+			"UPDATE repository_reads SET commit_sha = NULL, failure = NULL \
+			 WHERE repository = $1",
+		)
+		.bind::<sql_types::Text, _>(repository)
+		.execute(conn)
+		.await?;
+		Ok(())
+	}
+
 	/// An attempt to read a repository failed. What is held stays as it was.
 	pub async fn note_failure(
 		conn: &mut AsyncPgConnection,

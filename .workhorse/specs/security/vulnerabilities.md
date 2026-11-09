@@ -42,6 +42,7 @@ Development and build paths count like any other: a flaw in a build tool can cor
 
 A repository's lockfiles are read again whenever its default branch moves, and whenever an operator asks for the repository to be read again.
 Asking for it is an administrator's action, recorded in the audit log, and what Canopy holds for the repository stays in place until the read that replaces it lands.
+A repository asked for is read on the next pass, including one whose last read failed.
 Linux is reported by machines rather than read, so it cannot be asked for.
 
 > [!NOTE]

@@ -115,9 +115,7 @@ pub async fn list(conn: &mut AsyncPgConnection) -> Result<Vec<SourceState>> {
 	Ok(sources)
 }
 
-/// Ask for a repository to be read again, whatever its default branch is at, by
-/// forgetting the commit the read it holds was made at. The packages stay until
-/// the read that replaces them lands, so nothing goes missing in between, and a
+/// Ask for a repository to be read again, whatever its default branch is at. A
 /// repository nothing has read yet is already due.
 // spec: VUL#where-a-package-sits
 pub async fn rescan(conn: &mut AsyncPgConnection, source: &Source) -> Result<()> {
@@ -126,9 +124,5 @@ pub async fn rescan(conn: &mut AsyncPgConnection, source: &Source) -> Result<()>
 			"{LINUX} is reported by machines, not read from a repository"
 		)));
 	};
-	diesel::sql_query("UPDATE repository_reads SET commit_sha = NULL WHERE repository = $1")
-		.bind::<sql_types::Text, _>(repository)
-		.execute(conn)
-		.await?;
-	Ok(())
+	RepositoryRead::mark_due(conn, repository).await
 }
