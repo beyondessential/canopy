@@ -94,6 +94,8 @@ pub struct Report {
 	pub package_versions_queried: usize,
 	pub advisories_fetched: usize,
 	pub lapsed: usize,
+	/// Matches OSV reported that the advisory's own ranges ruled out.
+	pub matches_withheld: usize,
 }
 
 #[derive(Clone)]
@@ -277,6 +279,7 @@ impl Scanner {
 					.into_iter()
 					.collect();
 				let ranges = Advisory::rated(conn, &found_ids).await?;
+				let mut withheld = 0;
 				let matched: Vec<(Counted, Vec<String>)> = counted
 					.iter()
 					.zip(&answers)
@@ -288,7 +291,7 @@ impl Scanner {
 							.filter(|id| {
 								// Only a record as current as the answer can
 								// withhold what the answer reported.
-								stale.contains(id.as_str())
+								let keep = stale.contains(id.as_str())
 									|| ranges.get(id).is_none_or(|(_, affected)| {
 										!osv::rules_out(
 											affected,
@@ -296,7 +299,16 @@ impl Scanner {
 											&query.name,
 											&query.version,
 										)
-									})
+									});
+								if !keep {
+									withheld += 1;
+									debug!(
+										"vulnerability scan: {id} is not filed for {} {} {}: \
+										 its ranges rule the version out",
+										query.ecosystem, query.name, query.version
+									);
+								}
+								keep
 							})
 							.collect();
 						(query.clone(), found.into_iter().collect())
@@ -310,10 +322,12 @@ impl Scanner {
 				for done in &lapsed {
 					audit::record(conn, &Actor::canopy(JOB), &done.audited()).await?;
 				}
-				Ok(lapsed)
+				Ok((lapsed, withheld))
 			})
 			.await?;
+		let (lapsed, withheld) = lapsed;
 		report.lapsed = lapsed.len();
+		report.matches_withheld = withheld;
 		Ok(report)
 	}
 
@@ -390,10 +404,12 @@ pub fn spawn() -> JoinHandle<()> {
 					Ok(report) => {
 						info!(
 							"vulnerability scan: {} package version(s) queried, \
-							 {} advisory record(s) fetched, {} lapsed",
+							 {} advisory record(s) fetched, {} lapsed, \
+							 {} match(es) withheld",
 							report.package_versions_queried,
 							report.advisories_fetched,
-							report.lapsed
+							report.lapsed,
+							report.matches_withheld
 						);
 						// What was seen before the scan, so a change that landed
 						// during it still makes the next look due.

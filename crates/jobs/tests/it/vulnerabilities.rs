@@ -517,13 +517,17 @@ async fn a_match_the_advisorys_own_ranges_rule_out_is_not_filed() {
 		let base = serve(fake.clone()).await;
 		let scanner = scanner(&base);
 		scanner.read_repositories(&mut conn).await.unwrap();
-		scanner.scan(&mut conn).await.unwrap();
+		let report = scanner.scan(&mut conn).await.unwrap();
 
 		let listing = ItemSummary::list(&mut conn, &ListQuery::default())
 			.await
 			.unwrap();
 		let ids: Vec<&str> = listing.items.iter().map(|i| i.id.as_str()).collect();
 		assert_eq!(ids, ["GHSA-1"]);
+		assert_eq!(
+			report.matches_withheld, 2,
+			"the scan reports what it withheld"
+		);
 	})
 	.await;
 }
