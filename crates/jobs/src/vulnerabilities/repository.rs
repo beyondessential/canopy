@@ -17,8 +17,8 @@
 //!
 //! Every `package-lock.json`, `yarn.lock`, `Cargo.lock` and `uv.lock` in the
 //! tree counts, apart from those inside `node_modules`. A repository that cannot
-//! be reached, or has a lockfile that does not parse, is not read at all: what
-//! is held for it stays as it was.
+//! be reached, has a lockfile that does not parse, or has none Canopy can read,
+//! is not read at all: what is held for it stays as it was.
 
 use std::{
 	collections::{BTreeMap, BTreeSet},
@@ -61,6 +61,12 @@ pub enum Failure {
 	Unreachable(String),
 	/// A lockfile, or a manifest it needs, does not parse.
 	Unparseable { lockfile: String, reason: String },
+	/// There is nothing in the repository Canopy knows how to read. A read
+	/// that found none once passed for a read of a repository with no
+	/// dependencies, which is how Tupaia carried nothing at all for days after
+	/// its Yarn lockfile came to count: the commit was recorded as read, so
+	/// nothing read it again.
+	NoLockfile,
 }
 
 impl fmt::Display for Failure {
@@ -70,6 +76,7 @@ impl fmt::Display for Failure {
 			Self::Unparseable { lockfile, reason } => {
 				write!(f, "{lockfile} does not parse: {reason}")
 			}
+			Self::NoLockfile => f.write_str("it has no lockfile Canopy can read"),
 		}
 	}
 }
@@ -386,6 +393,9 @@ impl GitHub {
 			.iter()
 			.filter_map(|path| Some((path.clone(), Kind::of(path)?)))
 			.collect();
+		if lockfiles.is_empty() {
+			return Err(Failure::NoLockfile);
+		}
 
 		// The lockfiles, and the root manifest beside each Cargo.lock, which
 		// says where the members are.

@@ -658,6 +658,124 @@ async fn a_yarn_lockfile_that_cannot_be_read_is_a_failure_not_a_skip() {
 	assert!(failure.to_string().contains("classic"), "{failure}");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repository_with_no_lockfile_canopy_can_read_is_a_failure_not_an_empty_read() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let (fake, base) = scanned(&mut conn).await;
+		let scanner = scanner(&base);
+		assert_eq!(held(&mut conn).await, 2);
+
+		// Nothing Canopy reads: as a repository in an ecosystem it does not
+		// read yet looks, and as Tupaia looked to a build that did not read
+		// Yarn lockfiles.
+		publish(&fake, "bbbb", &[("Gemfile.lock", "GEM\n  specs:\n")]);
+		let report = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!((report.read, report.failed), (0, 1));
+
+		let read = RepositoryRead::get(&mut conn, "tamanu")
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(
+			read.commit_sha.as_deref(),
+			Some("aaaa"),
+			"the commit that could not be read is not recorded as read"
+		);
+		assert!(
+			read.failure.as_deref().unwrap().contains("no lockfile"),
+			"{:?}",
+			read.failure
+		);
+		assert_eq!(
+			held(&mut conn).await,
+			2,
+			"what was held is kept, not emptied"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rescan_reads_the_repository_again_where_it_stands() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let (_fake, base) = scanned(&mut conn).await;
+		let scanner = scanner(&base);
+
+		let unmoved = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!((unmoved.read, unmoved.unchanged), (0, 1));
+
+		database::vulnerabilities::rescan(&mut conn, &tamanu())
+			.await
+			.unwrap();
+		let read = RepositoryRead::get(&mut conn, "tamanu")
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(read.commit_sha, None, "it reads as due");
+		assert!(read.read_at.is_some(), "without going stale meanwhile");
+
+		let asked = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!(
+			(asked.read, asked.unchanged),
+			(1, 0),
+			"the head has not moved, but the read was asked for"
+		);
+		let read = RepositoryRead::get(&mut conn, "tamanu")
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(read.commit_sha.as_deref(), Some("aaaa"));
+
+		let settled = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!(
+			(settled.read, settled.unchanged),
+			(0, 1),
+			"and once read it is left alone again"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rescan_does_not_wait_out_the_backoff_of_a_failed_read() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let (fake, base) = scanned(&mut conn).await;
+		let scanner = scanner(&base);
+
+		publish(&fake, "bbbb", &[("package-lock.json", "{ not json")]);
+		let failed = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!(failed.failed, 1);
+		let waiting = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!(waiting.waiting, 1, "a failed read is waited out");
+
+		// An operator's ask is made on knowing better, so it does not wait.
+		database::vulnerabilities::rescan(&mut conn, &tamanu())
+			.await
+			.unwrap();
+		publish(&fake, "bbbb", &[("package-lock.json", TWO_WORKSPACES)]);
+		let asked = scanner.read_repositories(&mut conn).await.unwrap();
+		assert_eq!((asked.read, asked.waiting), (1, 0));
+		let read = RepositoryRead::get(&mut conn, "tamanu")
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(read.commit_sha.as_deref(), Some("bbbb"));
+		assert_eq!(read.failure, None);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn linux_cannot_be_rescanned_since_machines_report_it() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let refused = database::vulnerabilities::rescan(&mut conn, &Source::Linux)
+			.await
+			.unwrap_err();
+		assert!(refused.to_string().contains("machines"), "{refused}");
+	})
+	.await;
+}
+
 async fn held(conn: &mut AsyncPgConnection) -> usize {
 	database::vulnerabilities::counted_packages(conn)
 		.await

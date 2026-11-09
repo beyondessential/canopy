@@ -5814,6 +5814,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vulnerabilities/rescan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read a repository again.
+         * @description The next pass reads its default branch whether or not it has moved. What is
+         *     held for it stays until that read lands.
+         */
+        post: operations["vulnerabilities_rescan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vulnerabilities/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Where the items come from.
+         * @description Every tracked repository with the state of its last read and how much it
+         *     carries, and Linux with what the production fleet has reported.
+         */
+        post: operations["vulnerabilities_sources"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vulnerabilities/withdraw": {
         parameters: {
             query?: never;
@@ -11823,7 +11865,7 @@ export interface components {
          * @description The kinds of record an action can act on.
          * @enum {string}
          */
-        RecordKind: "machine" | "group" | "application" | "device" | "maintenance_window" | "upgrade_plan" | "restore_replica" | "reporting_schema" | "check" | "cluster" | "credential" | "variable" | "lease" | "version" | "artifact" | "name" | "certificate" | "relying_party" | "advisory";
+        RecordKind: "machine" | "group" | "application" | "device" | "maintenance_window" | "upgrade_plan" | "restore_replica" | "reporting_schema" | "check" | "cluster" | "credential" | "variable" | "lease" | "version" | "artifact" | "name" | "certificate" | "relying_party" | "advisory" | "source";
         /** @description A freshly issued recovery-verification challenge. */
         RecoveryChallengeResponse: {
             /**
@@ -15258,6 +15300,11 @@ export interface components {
             /** @description The workspace package that reaches it. */
             workspace_package: string;
         };
+        /** @description Which source to read again. */
+        VulnerabilityRescanArgs: {
+            /** @description The source, which must be a repository. */
+            source: components["schemas"]["VulnerabilitySource"];
+        };
         /**
          * @description When a package is used, in the terms SPDX gives a dependency's lifecycle.
          * @enum {string}
@@ -15285,6 +15332,40 @@ export interface components {
          * @example tamanu
          */
         VulnerabilitySource: string;
+        /** @description One source, with what Canopy holds for it and how it came to hold it. */
+        VulnerabilitySourceState: {
+            /**
+             * @description The commit it was last read at, absent before it has been read and once
+             *     a rescan has been asked for.
+             */
+            commit_sha?: string | null;
+            /** @description Why the last attempt failed, absent when it did not. */
+            failure?: string | null;
+            /**
+             * Format: date-time
+             * @description When reading it was last attempted.
+             */
+            last_attempt_at?: string | null;
+            /**
+             * Format: int64
+             * @description How many live production machines have reported packages, for Linux.
+             */
+            machines?: number | null;
+            /**
+             * Format: int64
+             * @description How many package versions it carries.
+             */
+            packages: number;
+            /**
+             * Format: date-time
+             * @description When it was last read, or its head last found unchanged.
+             */
+            read_at?: string | null;
+            /** @description The GitHub repository it is read from, absent for Linux. */
+            slug?: string | null;
+            /** @description The source: a tracked repository by name, or Linux. */
+            source: components["schemas"]["VulnerabilitySource"];
+        };
         /**
          * @description An item's triage status.
          * @enum {string}
@@ -23635,6 +23716,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": null | components["schemas"]["MachinePackageReport"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    vulnerabilities_rescan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VulnerabilityRescanArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    vulnerabilities_sources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VulnerabilitySourceState"][];
                 };
             };
             401: {

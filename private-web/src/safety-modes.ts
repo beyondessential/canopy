@@ -264,6 +264,8 @@ export const SAFETY_MODES = {
 	"vulnerabilities/get": "read-only",
 	"vulnerabilities/list": "read-only",
 	"vulnerabilities/machine_packages": "read-only",
+	"vulnerabilities/rescan": "write",
+	"vulnerabilities/sources": "read-only",
 	"vulnerabilities/withdraw": "write",
 } as const satisfies Record<string, SafetyMode>;
 

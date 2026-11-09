@@ -1,6 +1,7 @@
 //! Triaging vulnerabilities in the operator interface (specs `VUL`, `VTR`,
 //! `SAFE`): deciding, splitting, withdrawing and editing are admin actions,
-//! graded write, audited as the operator's; the list pages, searches and counts.
+//! graded write, audited as the operator's; the sources page and the rescan it
+//! offers; the list pages, searches and counts.
 
 use commons_tests::axum_test::TestServer;
 use database::diesel_async::AsyncPgConnection;
@@ -250,6 +251,85 @@ async fn withdrawing_and_editing_are_audited_and_show_in_the_history() {
 			assert!(matches!(&log[0].actor, Actor::Operator { login, .. } if login == ADMIN));
 			assert!(!log[0].detail[detail_key].is_null());
 		}
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_sources_page_shows_what_each_carries_and_an_admin_rescans_one() {
+	trust_headers();
+
+	commons_tests::server::run(async |mut conn, _public, private| {
+		an_item(&mut conn).await;
+		Admin::add(&mut conn, ADMIN).await.expect("add admin");
+
+		let sources = read(&private, "/api/vulnerabilities/sources", &json!({})).await;
+		let sources = sources.as_array().expect("an array of sources");
+		let tamanu = sources
+			.iter()
+			.find(|source| source["source"] == "tamanu")
+			.expect("tamanu is tracked");
+		assert_eq!(tamanu["slug"], "beyondessential/tamanu");
+		assert_eq!(tamanu["commit_sha"], "abc");
+		assert_eq!(tamanu["packages"], 1);
+		assert_eq!(tamanu["failure"], Value::Null);
+		let linux = sources
+			.iter()
+			.find(|source| source["source"] == "linux")
+			.expect("linux is a source");
+		assert_eq!(linux["slug"], Value::Null);
+		assert_eq!(linux["machines"], 0);
+		let untried = sources
+			.iter()
+			.find(|source| source["source"] == "bliti")
+			.expect("a repository nothing has read is listed all the same");
+		assert_eq!(untried["commit_sha"], Value::Null);
+		assert_eq!(untried["packages"], 0);
+
+		// A reader cannot ask for one.
+		private
+			.post("/api/vulnerabilities/rescan")
+			.add_header("Tailscale-User-Login", NOT_ADMIN)
+			.add_header("Tailscale-User-Name", "Someone")
+			.json(&json!({"source": "tamanu"}))
+			.await
+			.assert_status_forbidden();
+
+		let session = writing(&private).await;
+		admin_post(
+			&private,
+			&session,
+			"/api/vulnerabilities/rescan",
+			&json!({"source": "tamanu"}),
+		)
+		.await;
+
+		let sources = read(&private, "/api/vulnerabilities/sources", &json!({})).await;
+		let tamanu = sources
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|source| source["source"] == "tamanu")
+			.unwrap();
+		assert_eq!(tamanu["commit_sha"], Value::Null, "it reads as due");
+		assert_eq!(
+			tamanu["packages"], 1,
+			"and keeps what it holds until the read lands"
+		);
+
+		let logged = logged(&mut conn, "vulnerability_source_rescanned").await;
+		assert_eq!(logged.len(), 1);
+		assert_eq!(logged[0].records[0].name, "tamanu");
+
+		// Linux is reported by machines, so there is nothing to read again.
+		private
+			.post("/api/vulnerabilities/rescan")
+			.add_header("Tailscale-User-Login", ADMIN)
+			.add_header("Tailscale-User-Name", "Admin")
+			.add_header(SESSION_HEADER, &session)
+			.json(&json!({"source": "linux"}))
+			.await
+			.assert_status_bad_request();
 	})
 	.await;
 }

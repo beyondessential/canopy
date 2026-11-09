@@ -71,6 +71,7 @@ import Upgrades from "./routes/Upgrades";
 import Versions from "./routes/Versions";
 import VulnerabilityDetail from "./routes/VulnerabilityDetail";
 import Vulnerabilities from "./routes/Vulnerabilities";
+import VulnerabilitySources from "./routes/VulnerabilitySources";
 
 /// Send an address from before the fleet was namespaced to where it lives now.
 ///
@@ -236,6 +237,10 @@ export default function App() {
 					/>
 					<Route path="/upgrades" element={<Upgrades />} />
 					<Route path="/vulnerabilities" element={<Vulnerabilities />} />
+					<Route
+						path="/vulnerabilities/sources"
+						element={<VulnerabilitySources />}
+					/>
 					<Route
 						path="/vulnerabilities/:source/:id"
 						element={<VulnerabilityDetail />}

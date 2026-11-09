@@ -41,7 +41,13 @@ Each ecosystem supplies the scopes it distinguishes, and a path never takes one 
 A package reached through paths of different scopes carries each of them.
 Development and build paths count like any other: a flaw in a build tool can corrupt what it builds, so the scope is something to weigh in triage.
 
-A repository's lockfiles are read again whenever its default branch moves.
+A repository's lockfiles are read again whenever its default branch moves, and whenever an operator asks for the repository to be read again.
+Asking for it is an administrator's action, recorded in the audit log, and what Canopy holds for the repository stays in place until the read that replaces it lands.
+A repository asked for is read on the next pass, including one whose last read failed.
+Linux is reported by machines rather than read, so it cannot be asked for.
+
+> [!NOTE]
+> The head of a default branch says what is there, not what Canopy made of it, so a repository whose branch is still keeps whatever an older reading understood. Asking for one is how an operator acts on knowing better: that Canopy has learnt to read an ecosystem it could not before, or that what is held for a repository is not what is in it.
 
 ## Matching
 
@@ -69,12 +75,16 @@ Nothing about closing needs a decision: when a fix lands on the default branch, 
 Being closed is apart from triage status: a closed item keeps its status, decisions and history, and is listed only when asked for.
 If something comes to count for it again, it is no longer closed, and its decision stands unless it lapses (see [VTR](vulnerability-triage.md), "When a decision lapses").
 
-A repository that cannot be fetched, or that has a lockfile that cannot be parsed, leaves its items as they were, and does not close them.
+A repository that cannot be fetched, that has a lockfile that cannot be parsed, or that has no lockfile Canopy can read, is not read: it leaves its items as they were, and does not close them.
 A repository not read for a day raises a self-alert naming it and why (see [SELF](../private-server/self-alerts.md)).
+
+> [!NOTE]
+> A repository with nothing Canopy can read is a failed read rather than a read of a repository with no dependencies, because the two are indistinguishable from the outside and only one of them is ever true of a repository worth tracking. Taken as an empty read it is silent twice over: the commit is recorded as read, so nothing reads it again, and the repository stays fresh, so no alert names it. That is how Tupaia carried nothing at all for days after its Yarn lockfile came to count.
 
 ## Presentation
 
 Vulnerabilities are a top-level section of the operator interface, and the sidebar entry carries how many items need triage, leaving out closed ones.
+The section has a page of its own for the sources, reached from the list.
 
 The list is one row per item, showing its severity, its summary and identifier, its affected packages with the source and their scopes, and its triage status (see [VTR](vulnerability-triage.md)).
 A Linux item also shows how many machines it exposes.
@@ -98,3 +108,11 @@ An item's page shows the advisory's summary, details and affected ranges with th
 A repository item lists the affected packages on the default branch, each with its version, its minimum fix version, and the workspace packages that reach it with the scope and shortest chain of each path and whether directly, and the commit of the default branch they were read at.
 A Linux item lists the exposed machines, each with its group, the version of the package installed and its minimum fix version.
 Below that is the item's triage history, and beside it the decision panel (see [VTR](vulnerability-triage.md), "Presentation").
+
+### The sources page
+
+The sources page lists every source.
+A repository shows the GitHub repository it is read from, when it was last read, the commit it was read at, how many package versions it carries, and why the last read failed where it did.
+Linux shows how many package versions the production fleet carries and across how many machines.
+A repository that has been asked for, and one Canopy has not read yet, is marked due until the read lands.
+An administrator asks for a repository to be read again from its row.
