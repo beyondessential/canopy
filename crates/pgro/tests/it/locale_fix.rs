@@ -2,9 +2,7 @@ use kube::Api;
 use kube::api::PostParams;
 use pgro::types::{PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase};
 
-use helpers::*;
-
-mod helpers;
+use crate::helpers::*;
 
 /// Restoring a source whose databases carry a non-C locale must rewrite them,
 /// record that it did so in `_pgro.restore_info.fixes`, and reindex before the

@@ -6,9 +6,7 @@ use pgro::types::{
 };
 use tokio::time::{sleep, timeout};
 
-use helpers::*;
-
-mod helpers;
+use crate::helpers::*;
 
 /// An extra user scoped to a `persistent_schemas` schema keeps its grants
 /// across a switchover. The init script can't grant a schema that isn't in

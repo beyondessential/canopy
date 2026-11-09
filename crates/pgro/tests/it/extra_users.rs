@@ -4,9 +4,7 @@ use pgro::types::{
 	ExtraUserSpec, PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase,
 };
 
-use helpers::*;
-
-mod helpers;
+use crate::helpers::*;
 
 /// An extra user is provisioned as an unprivileged LOGIN role with its own
 /// password Secret: it can connect, its sessions are read-only, and it holds

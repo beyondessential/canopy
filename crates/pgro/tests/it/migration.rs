@@ -6,9 +6,7 @@ use pgro::{
 };
 use tokio::time::{sleep, timeout};
 
-use helpers::*;
-
-mod helpers;
+use crate::helpers::*;
 
 /// The version the Job aims at. No such tamanu release exists, so the pull never
 /// resolves and the Job stays pending: this test is about the Job the operator

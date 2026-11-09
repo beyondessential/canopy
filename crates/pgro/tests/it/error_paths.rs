@@ -8,9 +8,7 @@ use kube::{
 use pgro::types::{PostgresPhysicalReplica, PostgresPhysicalRestore, ReplicaPhase, RestorePhase};
 use tokio::time::{sleep, timeout};
 
-use helpers::*;
-
-mod helpers;
+use crate::helpers::*;
 
 #[tokio::test]
 #[ignore = "requires a running Kubernetes cluster with MinIO and kopia"]

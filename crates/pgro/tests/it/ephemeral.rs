@@ -4,9 +4,7 @@ use kube::Api;
 use kube::api::PostParams;
 use pgro::types::PostgresPhysicalReplica;
 
-use helpers::*;
-
-mod helpers;
+use crate::helpers::*;
 
 /// An `ephemeral` replica should restore, come up healthy, then tear the
 /// restore down — leaving no running database — and record the verified

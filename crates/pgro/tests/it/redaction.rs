@@ -20,9 +20,7 @@ use pgro::types::{
 	RestorePhase,
 };
 
-use helpers::*;
-
-mod helpers;
+use crate::helpers::*;
 
 const NS: &str = "test-redaction";
 const REPLICA_NAME: &str = "redaction-replica";

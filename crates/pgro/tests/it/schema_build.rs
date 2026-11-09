@@ -5,9 +5,7 @@ use pgro::types::{
 };
 use tokio::time::{sleep, timeout};
 
-use helpers::*;
-
-mod helpers;
+use crate::helpers::*;
 
 /// The version the restore migrates to. No such tamanu release exists, so the
 /// migration Job's pull never resolves and the restore sits in `Migrating`. That

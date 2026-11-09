@@ -9,9 +9,7 @@ use pgro::{
 };
 use tokio::time::sleep;
 
-use helpers::*;
-
-mod helpers;
+use crate::helpers::*;
 
 #[tokio::test]
 #[ignore = "requires a running Kubernetes cluster with MinIO and kopia"]
