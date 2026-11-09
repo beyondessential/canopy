@@ -1,5 +1,11 @@
 // @generated automatically by Diesel CLI.
 
+pub mod sql_types {
+	#[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+	#[diesel(postgres_type(name = "tsvector", schema = "pg_catalog"))]
+	pub struct Tsvector;
+}
+
 diesel::table! {
 	admins (email) {
 		email -> Text,
@@ -637,16 +643,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	post_migration_timings (check_id, ordinal) {
-		check_id -> Int8,
-		ordinal -> Int4,
-		name -> Text,
-		rows -> Nullable<Int8>,
-		elapsed -> Interval,
-	}
-}
-
-diesel::table! {
 	machine_backup_capabilities (machine_id, type_) {
 		machine_id -> Uuid,
 		#[sql_name = "type"]
@@ -846,6 +842,16 @@ diesel::table! {
 		raise_expires_at -> Nullable<Timestamptz>,
 		last_seen_at -> Timestamptz,
 		created_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	post_migration_timings (check_id, ordinal) {
+		check_id -> Int8,
+		ordinal -> Int4,
+		name -> Text,
+		rows -> Nullable<Int8>,
+		elapsed -> Interval,
 	}
 }
 
@@ -1173,6 +1179,9 @@ diesel::table! {
 }
 
 diesel::table! {
+	use diesel::sql_types::*;
+	use super::sql_types::Tsvector;
+
 	vulnerabilities (id) {
 		id -> Text,
 		aliases -> Array<Nullable<Text>>,
@@ -1184,6 +1193,7 @@ diesel::table! {
 		published_at -> Nullable<Timestamptz>,
 		modified_at -> Timestamptz,
 		fetched_at -> Timestamptz,
+		details_search -> Nullable<Tsvector>,
 	}
 }
 
@@ -1331,7 +1341,6 @@ diesel::joinable!(issues -> kubernetes_clusters (kubernetes_cluster_id));
 diesel::joinable!(issues -> machines (machine_id));
 diesel::joinable!(issues -> server_groups (server_group_id));
 diesel::joinable!(kubernetes_clusters -> devices (relay_identity_id));
-diesel::joinable!(post_migration_timings -> migration_tests (check_id));
 diesel::joinable!(machine_backup_capabilities -> machines (machine_id));
 diesel::joinable!(machine_backup_schedule -> machines (machine_id));
 diesel::joinable!(machine_enrollment_challenges -> machines (machine_id));
@@ -1357,6 +1366,7 @@ diesel::joinable!(migration_tests -> applications (application_id));
 diesel::joinable!(migration_tests -> backup_restore_checks (check_id));
 diesel::joinable!(migration_tests -> versions (target_version_id));
 diesel::joinable!(migration_timings -> migration_tests (check_id));
+diesel::joinable!(post_migration_timings -> migration_tests (check_id));
 diesel::joinable!(reporting_schema_builds -> applications (application_id));
 diesel::joinable!(reporting_schema_builds -> backup_restore_checks (check_id));
 diesel::joinable!(reporting_schema_builds -> server_groups (group_id));
@@ -1435,7 +1445,6 @@ diesel::allow_tables_to_appear_in_same_query!(
 	issue_notes,
 	issues,
 	kubernetes_clusters,
-	post_migration_timings,
 	machine_backup_capabilities,
 	machine_backup_schedule,
 	machine_enrollment_challenges,
@@ -1452,6 +1461,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	migration_tests,
 	migration_timings,
 	operator_sessions,
+	post_migration_timings,
 	recovery_vault_writes,
 	relying_parties,
 	reporting_schema_builds,

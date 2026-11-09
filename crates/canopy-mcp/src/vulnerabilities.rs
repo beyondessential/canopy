@@ -99,9 +99,9 @@ pub struct FindVulnerabilitiesArgs {
 	/// false.
 	pub include_closed: Option<bool>,
 	/// Free text matched, tolerating partial words and small typos, against the
-	/// identifier and aliases, summary, package names, workspace packages,
-	/// source and the advisory's details. A search is ordered by relevance
-	/// unless `sort` is given.
+	/// identifier and aliases, summary, package names, workspace packages and
+	/// source, and by whole words and word beginnings against the advisory's
+	/// details. A search is ordered by relevance unless `sort` is given.
 	pub search: Option<String>,
 	/// The order. Omitted, by severity and then publication date.
 	pub sort: Option<SortArg>,

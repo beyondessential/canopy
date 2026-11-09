@@ -86,7 +86,7 @@ const ITEM_CTES: &str = "agg AS MATERIALIZED ( \
 	  WHERE EXISTS (SELECT 1 FROM vulnerability_decision_entries en WHERE en.decision_id = n.id)), \
 	base AS ( \
 	  SELECT i.vulnerability_id AS id, i.source, i.first_seen_at, i.search_text, \
-	    v.summary, v.aliases, v.severity, v.published_at, v.details, \
+	    v.summary, v.aliases, v.severity, v.published_at, v.details_search, \
 	    CASE v.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 \
 	                    WHEN 'low' THEN 1 ELSE 0 END AS sev, \
 	    coalesce(a.packages, '{}') AS packages, \
@@ -118,7 +118,8 @@ macro_rules! f_common {
 			"AND ($9::bool OR NOT base.closed) ",
 			"AND ($10::text IS NULL OR $10 = ANY(base.packages)) ",
 			"AND ($11::text IS NULL OR $11 = ANY(base.workspace_packages)) ",
-			"AND ($12::text IS NULL OR $12 <% base.search_text OR $12 <% base.details)"
+			"AND ($12::text IS NULL OR $12 <% base.search_text ",
+			"OR ($13::text IS NOT NULL AND base.details_search @@ to_tsquery('english', $13)))"
 		)
 	};
 }
@@ -163,9 +164,12 @@ const FILTERS: &str = concat!(
 );
 
 /// How closely an item matches the search, the main fields counting in full
-/// and the advisory's details for half.
+/// and a match in the advisory's details for less than the weakest match in a
+/// main field: a normalised rank is below 1, and a main field matches from
+/// [`SEARCH_THRESHOLD`].
 const RANK: &str = "CASE WHEN $12::text IS NULL THEN 0::float8 \
-	ELSE word_similarity($12, base.search_text) + 0.5 * word_similarity($12, base.details) END";
+	ELSE word_similarity($12, base.search_text) + CASE WHEN $13::text IS NULL THEN 0::float8 \
+	ELSE 0.4 * ts_rank(base.details_search, to_tsquery('english', $13), 32) END END";
 
 /// The word similarity a search must reach to match.
 const SEARCH_THRESHOLD: &str = "0.4";
@@ -214,6 +218,7 @@ macro_rules! bind_list {
 			.bind::<sql_types::Nullable<sql_types::Text>, _>(query.package.as_deref())
 			.bind::<sql_types::Nullable<sql_types::Text>, _>(query.workspace_package.as_deref())
 			.bind::<sql_types::Nullable<sql_types::Text>, _>(query.search_term())
+			.bind::<sql_types::Nullable<sql_types::Text>, _>(query.details_query())
 	}};
 }
 
@@ -294,8 +299,8 @@ pub struct ListQuery {
 	#[serde(default)]
 	pub workspace_package: Option<String>,
 	/// Partial words, tolerating small typos, over the identifier and aliases,
-	/// summary, package names, workspace packages, source, and the advisory's
-	/// details.
+	/// summary, package names, workspace packages and source; and whole words
+	/// and word beginnings over the advisory's details.
 	#[serde(default)]
 	pub search: Option<String>,
 	/// The order. Without one, the order is by severity, then publication date,
@@ -319,6 +324,19 @@ impl ListQuery {
 			.as_deref()
 			.map(str::trim)
 			.filter(|term| !term.is_empty())
+	}
+
+	/// The search as a full-text query over an advisory's details: every word
+	/// of it, each matching words it begins. Absent when the search has no
+	/// words, which is also what keeps the query's own syntax out of it.
+	fn details_query(&self) -> Option<String> {
+		let words: Vec<String> = self
+			.search_term()?
+			.split(|c: char| !c.is_alphanumeric())
+			.filter(|word| !word.is_empty())
+			.map(|word| format!("{word}:*"))
+			.collect();
+		(!words.is_empty()).then(|| words.join(" & "))
 	}
 
 	fn page_size(&self) -> i64 {
