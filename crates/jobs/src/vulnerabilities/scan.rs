@@ -94,6 +94,8 @@ pub struct Report {
 	pub package_versions_queried: usize,
 	pub advisories_fetched: usize,
 	pub lapsed: usize,
+	/// Matches OSV reported that the advisory's own ranges ruled out.
+	pub matches_withheld: usize,
 }
 
 #[derive(Clone)]
@@ -222,10 +224,14 @@ impl Scanner {
 		let answers = self.osv.query(&counted).await?;
 
 		let mut revisions: HashMap<&str, Timestamp> = HashMap::new();
+		// Answers whose `modified` does not read, so there is no telling
+		// whether what is held for them is current.
+		let mut undated: HashSet<&str> = HashSet::new();
 		for VulnRef { id, modified } in answers.iter().flatten() {
-			let modified = modified
-				.parse::<Timestamp>()
-				.unwrap_or(Timestamp::UNIX_EPOCH);
+			let modified = modified.parse::<Timestamp>().unwrap_or_else(|_| {
+				undated.insert(id);
+				Timestamp::UNIX_EPOCH
+			});
 			let latest = revisions.entry(id).or_insert(modified);
 			*latest = (*latest).max(modified);
 		}
@@ -233,9 +239,14 @@ impl Scanner {
 		let held = Advisory::modified_ats(conn, &ids).await?;
 		let mut fetched = Vec::new();
 		let mut unavailable: HashSet<&str> = HashSet::new();
+		// Revised advisories this pass could not fetch, so what is held for
+		// them is behind what OSV answered with.
+		let mut stale: HashSet<&str> = HashSet::new();
 		let wanted: Vec<&str> = revisions
 			.iter()
-			.filter(|(id, modified)| held.get(**id).is_none_or(|held| *modified > held))
+			.filter(|(id, modified)| {
+				undated.contains(**id) || held.get(**id).is_none_or(|held| *modified > held)
+			})
 			.map(|(id, _)| *id)
 			.collect();
 		let osv = &self.osv;
@@ -249,7 +260,9 @@ impl Scanner {
 				Ok(record) => fetched.push(record),
 				Err(e) => {
 					warn!("vulnerability scan: fetching {id}: {e}");
-					if !held.contains_key(id) {
+					if held.contains_key(id) {
+						stale.insert(id);
+					} else {
 						unavailable.insert(id);
 					}
 				}
@@ -263,6 +276,16 @@ impl Scanner {
 				for record in &fetched {
 					Advisory::upsert(conn, record).await?;
 				}
+				let found_ids: Vec<String> = answers
+					.iter()
+					.flatten()
+					.map(|v| v.id.clone())
+					.filter(|id| !unavailable.contains(id.as_str()) && !stale.contains(id.as_str()))
+					.collect::<HashSet<_>>()
+					.into_iter()
+					.collect();
+				let ranges = Advisory::rated(conn, &found_ids).await?;
+				let mut withheld = 0;
 				let matched: Vec<(Counted, Vec<String>)> = counted
 					.iter()
 					.zip(&answers)
@@ -271,6 +294,28 @@ impl Scanner {
 							.iter()
 							.map(|v| v.id.clone())
 							.filter(|id| !unavailable.contains(id.as_str()))
+							.filter(|id| {
+								// Only a record as current as the answer can
+								// withhold what the answer reported.
+								let keep = stale.contains(id.as_str())
+									|| ranges.get(id).is_none_or(|(_, affected)| {
+										!osv::rules_out(
+											affected,
+											&query.ecosystem,
+											&query.name,
+											&query.version,
+										)
+									});
+								if !keep {
+									withheld += 1;
+									debug!(
+										"vulnerability scan: {id} is not filed for {} {} {}: \
+										 its ranges rule the version out",
+										query.ecosystem, query.name, query.version
+									);
+								}
+								keep
+							})
 							.collect();
 						(query.clone(), found.into_iter().collect())
 					})
@@ -283,10 +328,12 @@ impl Scanner {
 				for done in &lapsed {
 					audit::record(conn, &Actor::canopy(JOB), &done.audited()).await?;
 				}
-				Ok(lapsed)
+				Ok((lapsed, withheld))
 			})
 			.await?;
+		let (lapsed, withheld) = lapsed;
 		report.lapsed = lapsed.len();
+		report.matches_withheld = withheld;
 		Ok(report)
 	}
 
@@ -363,10 +410,12 @@ pub fn spawn() -> JoinHandle<()> {
 					Ok(report) => {
 						info!(
 							"vulnerability scan: {} package version(s) queried, \
-							 {} advisory record(s) fetched, {} lapsed",
+							 {} advisory record(s) fetched, {} lapsed, \
+							 {} match(es) withheld",
 							report.package_versions_queried,
 							report.advisories_fetched,
-							report.lapsed
+							report.lapsed,
+							report.matches_withheld
 						);
 						// What was seen before the scan, so a change that landed
 						// during it still makes the next look due.
