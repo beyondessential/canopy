@@ -1,7 +1,4 @@
-use k8s_openapi::{
-	api::core::v1::SecretReference,
-	apimachinery::pkg::{api::resource::Quantity, apis::meta::v1::Time},
-};
+use k8s_openapi::apimachinery::pkg::{api::resource::Quantity, apis::meta::v1::Time};
 use kube::api::ObjectMeta;
 use kube_quantity::ParsedQuantity;
 use rust_decimal::Decimal;
@@ -9,6 +6,8 @@ use rust_decimal::Decimal;
 use crate::{kopia::Snapshot, placement::PodPlacement, types::*, util::TimeSpan};
 
 use jiff::{SignedDuration, Timestamp};
+
+use crate::controllers::restore::builders::CanopyProxyArgs;
 
 use super::{
 	extra_users_with_schemas, generate_password, no_successful_restore,
@@ -49,7 +48,7 @@ fn explicit_ready_timeout_overrides_the_derived_value() {
 	assert_eq!(derived, SignedDuration::from_secs(90 * 60));
 }
 
-/// The canopy path always sets `storageSizeOverride` from its intent config
+/// The syncer always sets `storageSizeOverride` from its intent config
 /// (50Gi for `analytics`), which must not cap a replica whose snapshot is
 /// larger than that — doing so restores into a volume that fills partway
 /// through.
@@ -479,7 +478,7 @@ fn snapshot_list_job_rotates_kopia_logs() {
 		"default",
 		"kopia:latest",
 		"http://x",
-		None,
+		&snapshot_list_proxy(),
 		&PodPlacement::default(),
 	)
 	.expect("job builds");
@@ -644,7 +643,7 @@ fn snapshot_list_job_carries_the_placement_defaults() {
 		"default",
 		"kopia:latest",
 		"http://x",
-		None,
+		&snapshot_list_proxy(),
 		&placement,
 	)
 	.expect("job builds");
@@ -706,4 +705,14 @@ fn a_restore_written_into_gets_headroom_beyond_the_plain_margin() {
 	};
 
 	assert!(size(true) >= size(false) + ParsedQuantity::try_from("5Gi").unwrap());
+}
+
+fn snapshot_list_proxy() -> CanopyProxyArgs<'static> {
+	CanopyProxyArgs {
+		image: "ghcr.io/beyondessential/canopy:latest",
+		broker_base_url: "http://operator.pgro-system.svc:9091",
+		stats_callback_url: "http://operator.pgro-system.svc:8080/api/v1/canopy-stats/ns/job",
+		progress_callback_url: None,
+		run_id: None,
+	}
 }

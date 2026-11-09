@@ -36,9 +36,7 @@ pub struct CanopyStats {
 	pub received_payload_bytes: u64,
 }
 
-/// Report the outcome of a canopy-managed restore to canopy. No-op for
-/// non-canopy replicas (missing `spec.canopy_source`) and when the canopy
-/// client isn't configured.
+/// Report the outcome of a restore to canopy.
 pub async fn report(
 	ctx: &Context,
 	replica: &PostgresPhysicalReplica,

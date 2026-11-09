@@ -364,12 +364,11 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 
 	// Ephemeral teardown. For a `spec.ephemeral` replica (e.g. the `verify`
 	// intent) the point of the restore is to prove the snapshot comes up —
-	// once it's Active (the switchover block above ran and, for canopy
-	// replicas, reported the verification), keeping the database running
-	// just wastes resources. Record the verified snapshot and delete the
-	// restore. The replica CR stays; the should_restore logic below only
-	// re-triggers when a newer snapshot is offered (canopy) or the schedule
-	// fires (legacy), gated by `verifiedSnapshotId`.
+	// once it's Active (the switchover block above ran and reported the
+	// verification), keeping the database running just wastes resources.
+	// Record the verified snapshot and delete the restore. The replica CR
+	// stays; the should_restore logic below only re-triggers when a newer
+	// snapshot is offered, gated by `verifiedSnapshotId`.
 	if replica.spec.ephemeral
 		&& let Some(active) = active_restore
 		&& active.metadata.deletion_timestamp.is_none()
@@ -966,8 +965,8 @@ pub async fn reconcile(replica: Arc<PostgresPhysicalReplica>, ctx: Arc<Context>)
 
 	let schedule_decision = replica.check_schedule();
 
-	// On the canopy path, the worklist syncer updates
-	// `status.canopyDesiredSnapshotId` when canopy offers a newer snapshot.
+	// The worklist syncer updates `status.canopyDesiredSnapshotId` when
+	// canopy offers a newer snapshot.
 	// Trigger a restore whenever the desired snapshot differs from what the
 	// replica already carries, in addition to the usual schedule /
 	// never-restored / active-deleted triggers. minimum_ttl still gates:

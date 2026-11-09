@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use jiff::Span;
 use k8s_openapi::api::core::v1::{
 	Affinity, LocalObjectReference, NodeAffinity, NodeSelector, NodeSelectorRequirement,
-	NodeSelectorTerm, ResourceRequirements, SecretReference,
+	NodeSelectorTerm, ResourceRequirements,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 
@@ -401,7 +401,7 @@ fn canopy_restore_job_proxy_is_native_sidecar() {
 	// plain container it keeps the Pod Running after the main `restore`
 	// container exits, so the Job never succeeds and eventually hits
 	// activeDeadlineSeconds → DeadlineExceeded.
-	let (restore, mut replica) = test_restore_and_replica();
+	let (restore, replica) = test_restore_and_replica();
 	let proxy = super::builders::CanopyProxyArgs {
 		image: "ghcr.io/beyondessential/postgres-restore-operator:latest",
 		broker_base_url: "http://operator.pgro-system.svc:9091",
@@ -452,7 +452,7 @@ fn canopy_restore_job_sidecar_carries_run_id() {
 	// The run_id passed in CanopyProxyArgs must reach the sidecar as
 	// PGRO_RUN_ID so its credential requests are attributed to the run; when
 	// no run_id is given (non-run credential consumers) the env is absent.
-	let (restore, mut replica) = test_restore_and_replica();
+	let (restore, replica) = test_restore_and_replica();
 
 	let run_id_env = |run_id: Option<&str>| {
 		let proxy = super::builders::CanopyProxyArgs {
@@ -524,6 +524,12 @@ fn restore_job_has_ttl_seconds_after_finished() {
 		.ttl_seconds_after_finished
 		.expect("restore job must set ttlSecondsAfterFinished");
 	assert!(ttl > 0, "ttlSecondsAfterFinished must be positive");
+}
+
+#[test]
+fn restore_job_has_the_four_hour_deadline() {
+	let job = restore_job_for("10Gi");
+	assert_eq!(job.spec.unwrap().active_deadline_seconds, Some(14400));
 }
 
 #[test]
@@ -677,7 +683,7 @@ fn parsed_bytes(q: &Quantity) -> u64 {
 /// The sidecar can only sample progress if the Job tells it where to post.
 #[test]
 fn canopy_restore_job_sidecar_carries_progress_callback_url() {
-	let (restore, mut replica) = test_restore_and_replica();
+	let (restore, replica) = test_restore_and_replica();
 	let url = "http://operator.pgro-system.svc:8080/api/v1/canopy-progress/ns/job";
 	let proxy = super::builders::CanopyProxyArgs {
 		image: "ghcr.io/beyondessential/postgres-restore-operator:latest",

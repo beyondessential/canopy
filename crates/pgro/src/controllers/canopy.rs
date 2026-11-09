@@ -9,7 +9,7 @@
 //!
 //! This module owns the "canopy is desired-state, pgro reconciles" edge
 //! only. Everything downstream — Job creation, Deployment, verification —
-//! goes through the same CR machinery as legacy replicas.
+//! goes through the replica and restore controllers.
 
 use std::{
 	collections::{BTreeMap, HashSet},

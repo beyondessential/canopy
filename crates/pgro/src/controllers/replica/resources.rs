@@ -58,7 +58,7 @@ impl SnapshotInfo {
 /// Size the restore PVC for a snapshot.
 ///
 /// `override_size` (`spec.storageSizeOverride`) is a floor, not a replacement:
-/// the canopy path always sets it from the intent config, so treating it as an
+/// the syncer always sets it from the intent config, so treating it as an
 /// exact size would truncate any replica whose snapshot outgrew it.
 ///
 /// `maximum` bounds the result. It fails the restore only when the

@@ -930,10 +930,8 @@ echo -n "$VERSION" > /dev/termination-log
 }
 
 /// All the inputs `build_postgres_deployment_with` needs, factored out so
-/// both the CRD path and the canopy path can call the shared builder
-/// without pretending to be each other. The CRD path fills this from
-/// `PostgresPhysicalRestore` + `PostgresPhysicalReplica`; the canopy path
-/// fills it from a `WorklistEntry` + intent defaults.
+/// the builder has no dependency on the CRs. [`build_deployment`] fills this
+/// from `PostgresPhysicalRestore` + `PostgresPhysicalReplica`.
 pub struct PostgresDeploymentInputs<'a> {
 	pub name: &'a str,
 	pub namespace: &'a str,
@@ -1474,10 +1472,8 @@ fn apply_shm_floor(
 	}
 }
 
-/// Shared postgres Deployment builder — no CR dependencies. Both the
-/// CRD path (`build_deployment`) and the canopy path
-/// (`controllers::canopy::builders::build_canopy_postgres_deployment`) go
-/// through this.
+/// Postgres Deployment builder with no CR dependencies; [`build_deployment`]
+/// goes through it.
 pub fn build_postgres_deployment_with(cfg: &PostgresDeploymentInputs<'_>) -> Result<Deployment> {
 	let PostgresDeploymentInputs {
 		name,

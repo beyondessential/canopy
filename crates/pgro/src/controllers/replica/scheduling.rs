@@ -217,9 +217,9 @@ impl PostgresPhysicalReplica {
 	}
 
 	/// True when the replica's `minimum_ttl` is configured and the last
-	/// restore completed within that window relative to `now`. Used by both
-	/// the cron path (via [`Self::check_schedule`]) and the canopy path
-	/// where TTL gates the desired-snapshot trigger.
+	/// restore completed within that window relative to `now`. Used by the
+	/// cron path (via [`Self::check_schedule`]) and by the desired-snapshot
+	/// trigger.
 	pub fn within_minimum_ttl(&self, now: Timestamp) -> bool {
 		let Some(ref minimum_ttl) = self.spec.minimum_ttl else {
 			return false;
@@ -294,10 +294,8 @@ impl PostgresPhysicalReplica {
 
 #[cfg(test)]
 mod tests {
-	use std::collections::HashMap;
-
 	use jiff::Span;
-	use k8s_openapi::{api::core::v1::SecretReference, apimachinery::pkg::apis::meta::v1::Time};
+	use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 	use kube::api::ObjectMeta;
 
 	use crate::util::TimeSpan;
