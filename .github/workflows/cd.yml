@@ -54,7 +54,7 @@ jobs:
           rustup default stable
           rustup target add "$TARGET"
 
-      - uses: taiki-e/install-action@v2.87.29
+      - uses: taiki-e/install-action@v2.87.32
         with:
           tool: just
 
@@ -155,7 +155,7 @@ jobs:
         run: rm -rf ops/.git
 
       - name: Connect to Tailscale
-        uses: tailscale/github-action@v4.2.0
+        uses: tailscale/github-action@v4.3.0
         with:
           oauth-client-id: ${{ vars.TS_OAUTH_CLIENT_ID }}
           audience: api.tailscale.com/${{ vars.TS_OAUTH_CLIENT_ID }}
@@ -179,7 +179,7 @@ jobs:
         uses: pulumi/actions@v7
 
       - name: Authenticate to Pulumi Cloud
-        uses: pulumi/auth-actions@v2.1.0
+        uses: pulumi/auth-actions@v2.1.1
         with:
           organization: bes
           requested-token-type: urn:pulumi:token-type:access_token:organization
@@ -217,7 +217,7 @@ jobs:
         run: rm -rf ops/.git
 
       - name: Connect to Tailscale
-        uses: tailscale/github-action@v4.2.0
+        uses: tailscale/github-action@v4.3.0
         with:
           oauth-client-id: ${{ vars.TS_OAUTH_CLIENT_ID }}
           audience: api.tailscale.com/${{ vars.TS_OAUTH_CLIENT_ID }}
@@ -241,7 +241,7 @@ jobs:
         uses: pulumi/actions@v7
 
       - name: Authenticate to Pulumi Cloud
-        uses: pulumi/auth-actions@v2.1.0
+        uses: pulumi/auth-actions@v2.1.1
         with:
           organization: bes
           requested-token-type: urn:pulumi:token-type:access_token:organization
