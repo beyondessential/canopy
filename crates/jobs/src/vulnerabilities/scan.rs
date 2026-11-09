@@ -280,7 +280,7 @@ impl Scanner {
 					.iter()
 					.flatten()
 					.map(|v| v.id.clone())
-					.filter(|id| !unavailable.contains(id.as_str()))
+					.filter(|id| !unavailable.contains(id.as_str()) && !stale.contains(id.as_str()))
 					.collect::<HashSet<_>>()
 					.into_iter()
 					.collect();
