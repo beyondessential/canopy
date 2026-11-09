@@ -16,7 +16,7 @@ An operator in these specs is a person, as in the rest of Canopy's specs.
 Canopy decides which replicas exist, which snapshot each is restored from, what each is for and how each is configured.
 pgro keeps no list of what to restore, and every credential it uses to read a backup repository is issued by Canopy for the run that needs it (see [RST](../public-server/restore-replicas.md), "Credentials").
 It reconciles Canopy's worklist against the replicas it is running, creating, refreshing and tearing down replicas until the two match, and reports each replica's outcome back.
-pgro needs its connection to Canopy at startup and does not start without it.
+pgro needs Canopy's connection details at startup and does not start without them.
 
 ## Reaching Canopy
 

@@ -998,15 +998,16 @@ fn load_canopy_client() -> anyhow::Result<Arc<canopy::Client>> {
 }
 
 /// POST `/restore-capabilities` to canopy with the intents pgro implements.
-/// Retries on transient failure with exponential-ish backoff up to ~5 min;
-/// past that, gives up and logs — the next operator restart will re-attempt.
+/// Retries until it succeeds, backing off to a few minutes between attempts:
+/// the tailnet path can be down for a while, and pgro resumes advertising when
+/// it returns.
 async fn register_capabilities(ctx: Arc<Context>) {
 	let canopy = &ctx.canopy;
 	let descriptors = intent::descriptors();
 	let intent_names: Vec<&str> = descriptors.iter().map(|d| d.intent.as_str()).collect();
 	let mut delay = Duration::from_secs(1);
 	let max_delay = Duration::from_secs(300);
-	for attempt in 1..=8u32 {
+	for attempt in 1u32.. {
 		match canopy.restore_capabilities(&descriptors).await {
 			Ok(_) => {
 				info!(
@@ -1026,7 +1027,6 @@ async fn register_capabilities(ctx: Arc<Context>) {
 			}
 		}
 	}
-	warn!("gave up registering supported intents with canopy after 8 attempts");
 }
 
 /// State passed to the credential-broker Router. Holds the operator's canopy

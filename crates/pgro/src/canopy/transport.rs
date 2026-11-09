@@ -19,8 +19,14 @@ const TAILNET_MOUNT: &str = "/public";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A dead connection is detected by the kernel's own keepalive, not by a cap on
-/// how long a call may take: registering a large schema legitimately runs long.
+/// how long a call may take. Through the sidecar the keepalive covers only the
+/// hop to the proxy, so a stall past it is caught by `READ_IDLE`.
 const KEEPALIVE: Duration = Duration::from_secs(30);
+
+/// How long a response may go without a byte before the call fails. Canopy
+/// answers each of pgro's calls promptly, so this is a stall, not slow work,
+/// and a limit on the time between reads leaves a long transfer alone.
+const READ_IDLE: Duration = Duration::from_secs(120);
 
 /// How the transport finds Canopy's tailnet endpoint.
 #[derive(Debug, Clone)]
@@ -50,10 +56,17 @@ impl TailnetTransport {
 			resolve_to,
 		} = endpoint;
 
+		if !matches!(url.path(), "" | "/") {
+			anyhow::bail!(
+				"Canopy tailnet URL {url} has a path; the device API is mounted at `{TAILNET_MOUNT}` of the host"
+			);
+		}
+
 		let mut builder = reqwest::Client::builder()
 			.user_agent(concat!("pgro/", env!("CARGO_PKG_VERSION")))
 			.redirect(Policy::none())
 			.connect_timeout(CONNECT_TIMEOUT)
+			.read_timeout(READ_IDLE)
 			.tcp_keepalive(KEEPALIVE);
 
 		if let Some(mut proxy) = socks5_proxy {
@@ -227,6 +240,19 @@ mod tests {
 			.unwrap_err();
 
 		assert!(matches!(err, Error::Transport(_)));
+	}
+
+	#[test]
+	fn refuses_a_url_with_a_path() {
+		let err = TailnetTransport::new(TailnetEndpoint {
+			url: "https://canopy.example.ts.net/api".parse().unwrap(),
+			socks5_proxy: None,
+			resolve_to: None,
+		})
+		.err()
+		.expect("a URL with a path is refused");
+
+		assert!(err.to_string().contains("has a path"));
 	}
 
 	#[test]

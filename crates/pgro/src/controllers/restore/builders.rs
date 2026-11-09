@@ -43,7 +43,7 @@ pub struct ExtraUser {
 /// What the canopy-proxy sidecar on a kopia Job needs from the operator.
 pub struct CanopyProxyArgs<'a> {
 	/// Image of the canopy-proxy sidecar (same image as the operator; the
-	/// container runs the `canopy-proxy` binary instead of `operator`).
+	/// container runs the `canopy-proxy` binary instead of `pgro`).
 	pub image: &'a str,
 	/// Base URL the sidecar hits for STS creds
 	/// (e.g. `http://postgres-restore-operator.pgro-system.svc:9091`).
@@ -627,7 +627,7 @@ pub fn canopy_proxy_sidecar(source: &KopiaSource, proxy: &CanopyProxyArgs<'_>) -
 		image: Some(proxy.image.to_string()),
 		restart_policy: Some("Always".to_string()),
 		// Same image as the operator; run the `canopy-proxy` binary instead
-		// of the default `operator` entrypoint.
+		// of the default `pgro` entrypoint.
 		command: Some(vec!["canopy-proxy".to_string()]),
 		env: Some(env),
 		volume_mounts: Some(vec![VolumeMount {
