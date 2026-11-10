@@ -12,6 +12,7 @@ use commons_types::Uuid;
 use database::{
 	audit::{self, Action, Record},
 	diesel_async::{AsyncConnection, AsyncPgConnection},
+	issues::Incident,
 	notes::{AuthorKind, Edited, IncidentNote, IssueNote},
 	notes_log::{self, NotesRecord, Outcome},
 };
@@ -298,6 +299,7 @@ impl CanopyMcp {
 		let mut conn = self.db_write.get().await.map_err(mcp_err)?;
 		let note = conn
 			.transaction::<_, AppError, _>(async |conn| {
+				let issue = Record::issue(conn, issue_id).await?;
 				let note = IssueNote::add(
 					conn,
 					issue_id,
@@ -306,7 +308,6 @@ impl CanopyMcp {
 					text,
 				)
 				.await?;
-				let issue = Record::issue(conn, issue_id).await?;
 				let action = Action::IssueNoteAdded {
 					issue,
 					note: Record::note(note.id, &note.author),
@@ -318,7 +319,9 @@ impl CanopyMcp {
 			.await;
 		match note {
 			Ok(note) => ok_json(&NoteOut::from(note)),
-			Err(error) if is_not_found(&error) => Ok(not_found("no such issue or incident".into())),
+			Err(error) if is_not_found(&error) => {
+				Ok(not_found(format!("no issue with id {issue_id}")))
+			}
 			Err(error) => Err(mcp_err(error)),
 		}
 	}
@@ -348,6 +351,7 @@ impl CanopyMcp {
 		let mut conn = self.db_write.get().await.map_err(mcp_err)?;
 		let note = conn
 			.transaction::<_, AppError, _>(async |conn| {
+				Incident::get_by_id(conn, incident_id).await?;
 				let note = IncidentNote::add(
 					conn,
 					incident_id,
@@ -368,7 +372,9 @@ impl CanopyMcp {
 			.await;
 		match note {
 			Ok(note) => ok_json(&NoteOut::from(note)),
-			Err(error) if is_not_found(&error) => Ok(not_found("no such issue or incident".into())),
+			Err(error) if is_not_found(&error) => {
+				Ok(not_found(format!("no incident with id {incident_id}")))
+			}
 			Err(error) => Err(mcp_err(error)),
 		}
 	}
