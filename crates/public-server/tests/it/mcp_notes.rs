@@ -206,6 +206,11 @@ async fn an_agent_adds_edits_and_deletes_its_own_notes_but_not_an_operators() {
 			stale["result"]["structuredContent"]["current"]["body"],
 			"disk is 99% full"
 		);
+		let text = stale["result"]["content"][1]["text"].as_str().unwrap();
+		assert!(
+			text.contains("disk is 99% full"),
+			"the text carries the current note too: {text}"
+		);
 
 		for tool in ["edit_note", "delete_note"] {
 			let env = call(

@@ -148,10 +148,16 @@ pub(crate) async fn require_notes(
 }
 
 /// A refused write, as a result the client reads: what happened, and the
-/// current state to reconcile with.
+/// current state to reconcile with. The current state is in the text as well
+/// as the structured content, since many clients show the model only the text.
 pub(crate) fn refusal(message: impl Into<String>, current: serde_json::Value) -> CallToolResult {
 	let message = message.into();
-	let mut result = CallToolResult::error(vec![ContentBlock::text(message.clone())]);
+	let mut content = vec![ContentBlock::text(message.clone())];
+	if !current.is_null() {
+		let text = serde_json::to_string_pretty(&current).unwrap_or_default();
+		content.push(ContentBlock::text(format!("Current state:\n{text}")));
+	}
+	let mut result = CallToolResult::error(content);
 	result.structured_content = Some(json!({ "error": message, "current": current }));
 	result
 }
