@@ -48,7 +48,25 @@ function page(label: string, to: string, adminOnly?: boolean): NavPage {
 
 const SECTIONS: NavSection[] = [
 	{ label: "Status", to: "/status" },
-	{ label: "Incidents", to: "/incidents" },
+	{
+		label: "Incidents",
+		to: "/incidents",
+		groups: [
+			{
+				pages: [
+					{
+						label: "Incidents",
+						to: "/incidents",
+						// An incident's own page is reached from the list.
+						current: (pathname) =>
+							under("/incidents")(pathname) &&
+							!under("/incidents/memory")(pathname),
+					},
+					page("Memory", "/incidents/memory"),
+				],
+			},
+		],
+	},
 	{
 		label: "Fleet",
 		to: "/fleet",

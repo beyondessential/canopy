@@ -1,3 +1,4 @@
+import NotesHistory from "../components/NotesHistory";
 import {
 	Alert,
 	Box,
@@ -164,10 +165,16 @@ export default function ServerDetail() {
 			{data.group && (
 				<GroupSection group={data.group} billingLabels={data.billing_labels} />
 			)}
+			{!data.server.notes && Object.keys(data.server.tags ?? {}).length === 0 && (
+				<NotesHistory
+					record={{ module: "fleet/applications", id: data.server.id }}
+				/>
+			)}
 			{(data.server.notes || Object.keys(data.server.tags ?? {}).length > 0) && (
 				<NotesAndTagsSection
 					notes={data.server.notes}
 					tags={data.server.tags}
+					serverId={data.server.id}
 				/>
 			)}
 			<ServerDnsNamesSection
@@ -786,9 +793,11 @@ function GroupSection({
 function NotesAndTagsSection({
 	notes,
 	tags,
+	serverId,
 }: {
 	notes: string;
 	tags: Record<string, string>;
+	serverId: string;
 }) {
 	const tagEntries = Object.entries(tags ?? {});
 	return (
@@ -801,6 +810,7 @@ function NotesAndTagsSection({
 					{notes}
 				</Typography>
 			)}
+			<NotesHistory record={{ module: "fleet/applications", id: serverId }} />
 			{tagEntries.length > 0 && (
 				<Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
 					{tagEntries.map(([k, v]) => (

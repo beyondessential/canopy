@@ -346,6 +346,16 @@ export type IncidentIssueData = Solidify<Schemas["IncidentIssueData"]>;
 export type IncidentWithIssues = Solidify<Schemas["IncidentWithIssues"]>;
 export type IssueNoteData = Solidify<Schemas["IssueNoteData"]>;
 export type IncidentNoteData = Solidify<Schemas["IncidentNoteData"]>;
+export type NotesRevision = Solidify<Schemas["NotesRevision"]>;
+export type MemoryEntryData = Solidify<Schemas["MemoryEntryData"]>;
+export type MemoryEntryDetail = Solidify<Schemas["MemoryEntryDetail"]>;
+export type MemoryRevision = Solidify<Schemas["MemoryRevision"]>;
+export type MemoryList = Solidify<Schemas["MemoryList"]>;
+export type MemoryLink = Solidify<Schemas["Link"]>;
+/** The longest an incident memory entry's title may be. */
+export const MEMORY_TITLE_LIMIT = 512;
+/** The longest an incident memory entry's body may be. */
+export const MEMORY_BODY_LIMIT = 16_384;
 
 export type BestoolSnippetInfo = Solidify<Schemas["BestoolSnippetInfo"]>;
 export type BestoolSnippetDetail = Solidify<Schemas["BestoolSnippetDetail"]>;

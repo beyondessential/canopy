@@ -2,13 +2,16 @@ import {
 	Alert as MuiAlert,
 	Box,
 	Button,
+	Chip,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogTitle,
+	FormControlLabel,
 	IconButton,
 	LinearProgress,
 	Stack,
+	Switch,
 	TextField,
 	Typography,
 } from "@mui/material";
@@ -25,6 +28,9 @@ interface NoteLike {
 	author: string;
 	body: string;
 	created_at: string;
+	author_kind: "operator" | "agent";
+	deleted_at?: string | null;
+	deleted_by?: string | null;
 }
 
 type ApiModule = "issues" | "incidents";
@@ -49,11 +55,13 @@ export default function NotesList({
 	 * too, but hiding the button keeps the UI honest. */
 	canEdit?: boolean;
 }) {
+	// Administrators can ask for the notes that were deleted too.
+	const [showDeleted, setShowDeleted] = useState(false);
 	const list = useApi(
 		apiModule,
 		"list_notes",
-		{ [parentKey]: parentId },
-		[apiModule, parentId, refreshKey],
+		{ [parentKey]: parentId, include_deleted: canEdit && showDeleted },
+		[apiModule, parentId, refreshKey, showDeleted],
 	);
 
 	if (list.status === "loading" || list.status === "idle") {
@@ -62,15 +70,32 @@ export default function NotesList({
 	if (list.status === "error") {
 		return <MuiAlert severity="error">{list.error.message}</MuiAlert>;
 	}
+	const toggle = canEdit && (
+		<FormControlLabel
+			control={
+				<Switch
+					size="small"
+					checked={showDeleted}
+					onChange={(e) => setShowDeleted(e.target.checked)}
+				/>
+			}
+			label="Show deleted"
+			slotProps={{ typography: { variant: "caption" } }}
+		/>
+	);
 	if (list.data.length === 0) {
 		return (
-			<Typography variant="caption" color="text.secondary">
-				No notes yet.
-			</Typography>
+			<Stack spacing={0.5}>
+				<Typography variant="caption" color="text.secondary">
+					No notes yet.
+				</Typography>
+				{toggle}
+			</Stack>
 		);
 	}
 	return (
 		<Stack spacing={1}>
+			{toggle}
 			{list.data.map((n) => (
 				<NoteRow
 					key={n.id}
@@ -209,6 +234,7 @@ function NoteRow({
 				borderColor: "divider",
 				borderRadius: 1,
 				bgcolor: "background.paper",
+				opacity: note.deleted_at ? 0.6 : 1,
 			}}
 		>
 			<Stack
@@ -216,14 +242,19 @@ function NoteRow({
 				spacing={1}
 				sx={{ alignItems: "center", justifyContent: "space-between" }}
 			>
-				<Typography variant="caption" color="text.secondary">
-					{note.author}
-				</Typography>
+				<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+					<Typography variant="caption" color="text.secondary">
+						{note.author}
+					</Typography>
+					{note.author_kind === "agent" && (
+						<Chip size="small" variant="outlined" label="Agent" />
+					)}
+				</Stack>
 				<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
 					<Typography variant="caption" color="text.secondary">
 						<TimeAgo timestamp={note.created_at} />
 					</Typography>
-					{canEdit && (
+					{canEdit && !note.deleted_at && (
 						<GradedAction
 							calls={`${apiModule}/delete_note`}
 							action={`Delete note by ${note.author} from this ${parent}`}
@@ -247,6 +278,11 @@ function NoteRow({
 			>
 				{note.body}
 			</Typography>
+			{note.deleted_at && (
+				<Typography variant="caption" color="text.secondary">
+					Deleted by {note.deleted_by} <TimeAgo timestamp={note.deleted_at} />
+				</Typography>
+			)}
 			{del.error && (
 				<MuiAlert severity="error" sx={{ mt: 1 }}>
 					{del.error.message}

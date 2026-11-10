@@ -53,6 +53,7 @@ import Healthchecks from "./routes/Healthchecks";
 import SourcesSettings from "./routes/SourcesSettings";
 import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
+import Memory from "./routes/Memory";
 import Maintenance from "./routes/Maintenance";
 import Status from "./routes/Status";
 import MachineCreate from "./routes/MachineCreate";
@@ -226,6 +227,7 @@ export default function App() {
 					<Route path="/status" element={<Status />} />
 					<Route path="/alerts" element={<SelfAlerts />} />
 					<Route path="/incidents" element={<Incidents />} />
+					<Route path="/incidents/memory" element={<Memory />} />
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
 					<Route
 						path="/healthchecks/:source/:namespace/:check"

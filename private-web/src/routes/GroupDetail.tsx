@@ -1,3 +1,4 @@
+import NotesHistory from "../components/NotesHistory";
 import {
 	Alert,
 	Box,
@@ -220,7 +221,12 @@ export default function GroupDetail() {
 					<Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
 						{group.notes}
 					</Typography>
+					<NotesHistory record={{ module: "fleet/groups", id: group.id }} />
 				</Paper>
+			)}
+			{/* Notes that were cleared still have a history. */}
+			{!group.notes && (
+				<NotesHistory record={{ module: "fleet/groups", id: group.id }} />
 			)}
 
 			{tagEntries.length > 0 && (

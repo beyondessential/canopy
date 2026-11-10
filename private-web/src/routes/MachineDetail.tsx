@@ -1,3 +1,4 @@
+import NotesHistory from "../components/NotesHistory";
 import {
 	Alert,
 	Box,
@@ -321,6 +322,12 @@ export default function MachineDetail() {
 				</Paper>
 			)}
 
+			{!data.machine.notes &&
+				Object.keys(data.machine.tags ?? {}).length === 0 && (
+					<NotesHistory
+						record={{ module: "fleet/machines", id: data.machine.id }}
+					/>
+				)}
 			{(data.machine.notes ||
 				Object.keys(data.machine.tags ?? {}).length > 0) && (
 				<Paper variant="outlined" sx={{ p: 2 }}>
@@ -329,6 +336,9 @@ export default function MachineDetail() {
 							{data.machine.notes}
 						</Typography>
 					)}
+					<NotesHistory
+						record={{ module: "fleet/machines", id: data.machine.id }}
+					/>
 					{Object.entries(data.machine.tags ?? {}).map(([key, value]) => (
 						<Typography
 							key={key}

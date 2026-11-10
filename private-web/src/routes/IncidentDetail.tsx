@@ -3,12 +3,14 @@ import {
 	Box,
 	Button,
 	Chip,
+	FormControlLabel,
 	IconButton,
 	LinearProgress,
 	Link as MuiLink,
 	MenuItem,
 	Paper,
 	Stack,
+	Switch,
 	TextField,
 	Tooltip,
 	Typography,
@@ -62,10 +64,19 @@ export default function IncidentDetail() {
 		{ incident_id: id },
 		[id, refreshTick],
 	);
+	const isAdmin = useIsAdmin() === true;
+	// Administrators can ask for the notes that were deleted too.
+	const [showDeleted, setShowDeleted] = useState(false);
 	const notes = useApi(
 		"incidents",
 		"list_notes",
-		{ incident_id: id },
+		{ incident_id: id, include_deleted: isAdmin && showDeleted },
+		[id, refreshTick, showDeleted, isAdmin],
+	);
+	const memory = useApi(
+		"memory",
+		"list",
+		{ relevant_to_incident: id, limit: 1 },
 		[id, refreshTick],
 	);
 
@@ -114,6 +125,30 @@ export default function IncidentDetail() {
 					onClick={() => setFilter("notes")}
 					clickable
 				/>
+				{isAdmin && (
+					<FormControlLabel
+						control={
+							<Switch
+								size="small"
+								checked={showDeleted}
+								onChange={(e) => setShowDeleted(e.target.checked)}
+							/>
+						}
+						label="Show deleted notes"
+						slotProps={{ typography: { variant: "caption" } }}
+					/>
+				)}
+				{memory.status === "ok" && memory.data.total > 0 && (
+					<Typography variant="body2">
+						<MuiLink
+							component={RouterLink}
+							to={`/incidents/memory?relevant=${id}`}
+						>
+							{memory.data.total} memory{" "}
+							{memory.data.total === 1 ? "entry" : "entries"} relevant
+						</MuiLink>
+					</Typography>
+				)}
 				<Box sx={{ ml: "auto" }}>
 					<IconButton aria-label="Refresh" size="small" onClick={bumpRefresh}>
 						<RefreshIcon fontSize="small" />
@@ -540,6 +575,7 @@ function NoteEntry({ note }: { note: IncidentNoteData }) {
 	return (
 		<Box
 			sx={{
+				opacity: note.deleted_at ? 0.6 : 1,
 				p: 1.5,
 				border: 1,
 				borderColor: "divider",
@@ -557,6 +593,9 @@ function NoteEntry({ note }: { note: IncidentNoteData }) {
 					<Typography variant="caption" color="text.secondary">
 						{note.author}
 					</Typography>
+					{note.author_kind === "agent" && (
+						<Chip size="small" variant="outlined" label="Agent" />
+					)}
 				</Stack>
 				<Typography variant="caption" color="text.secondary">
 					<TimeAgo timestamp={note.created_at} />
@@ -569,6 +608,11 @@ function NoteEntry({ note }: { note: IncidentNoteData }) {
 			>
 				{note.body}
 			</Typography>
+			{note.deleted_at && (
+				<Typography variant="caption" color="text.secondary">
+					Deleted by {note.deleted_by} <TimeAgo timestamp={note.deleted_at} />
+				</Typography>
+			)}
 		</Box>
 	);
 }
