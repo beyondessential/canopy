@@ -16,41 +16,22 @@ use crate::state::AppState;
 /// Kept because a device API client cannot follow a redirect: a fielded
 /// bestool asks for the path it was built against and takes the answer, so the
 /// old prefix has to keep answering rather than pointing elsewhere.
-// spec: PAC
+// spec: APP, DID
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(public, silent: list))
 		.routes(routes!(public, silent: self_identity))
 }
 
-/// The same two routes under `/applications`, which is what they are about.
+/// The self identity route under `/applications`, which is what it is about.
 ///
-/// Aliases, not a move. Both prefixes answer identically and are documented
+/// An alias, not a move. Both prefixes answer identically and are documented
 /// separately, because withdrawing either from the schema would break the
 /// generated client — a consumer cannot tell a withdrawn path from an
 /// unreachable one.
-// spec: PAC
+// spec: DID
 pub fn alias_routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new()
-		.routes(routes!(public, silent: list_applications))
-		.routes(routes!(public, silent: application_self))
-}
-
-/// List publicly-listed central applications.
-///
-/// The `/applications` name for [`list`], answering identically.
-#[utoipa::path(
-	get,
-	path = "/",
-	operation_id = "list_applications",
-	tag = "applications",
-	responses(
-		(status = 200, description = "Publicly-listed central applications, ordered by rank then name.", body = Vec<PublicServer>),
-		(status = 500, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn list_applications(state: State<Db>) -> Result<Json<Vec<PublicServer>>> {
-	list(state).await
+	OpenApiRouter::new().routes(routes!(public, silent: application_self))
 }
 
 /// Get the calling identity and the box it is enrolled as.

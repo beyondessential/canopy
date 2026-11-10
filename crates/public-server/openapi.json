@@ -2172,46 +2172,10 @@
       "name": "GPL-3.0-or-later"
     },
     "title": "canopy public-server",
-    "version": "2.0.1"
+    "version": "3.0.0"
   },
   "openapi": "3.1.0",
   "paths": {
-    "/applications": {
-      "get": {
-        "description": "The `/applications` name for [`list`], answering identically.",
-        "operationId": "list_applications",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/PublicServer"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Publicly-listed central applications, ordered by rank then name."
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "summary": "List publicly-listed central applications.",
-        "tags": [
-          "applications"
-        ],
-        "x-canopy-audit": []
-      }
-    },
     "/applications/self": {
       "get": {
         "description": "The `/applications` name for [`self_identity`], answering identically.",

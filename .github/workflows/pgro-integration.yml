@@ -420,6 +420,7 @@ jobs:
         run: |
           mkdir /tmp/proxy-image
           cp target/debug/canopy-proxy crates/pgro/tests/fixtures/canopy-proxy.Containerfile /tmp/proxy-image/
+          cp /etc/ssl/certs/ca-certificates.crt /tmp/proxy-image/
           docker build -t pgro-canopy-proxy:ci -f /tmp/proxy-image/canopy-proxy.Containerfile /tmp/proxy-image
           kind load docker-image pgro-canopy-proxy:ci
 
