@@ -4403,7 +4403,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Get an incident memory entry with its history. */
+        /**
+         * Get an incident memory entry with its history.
+         * @description Every version the entry has had, newest first, each with who made it, how,
+         *     and when.
+         */
         post: operations["memory_get"];
         delete?: never;
         options?: never;
@@ -11095,8 +11099,12 @@ export interface components {
         };
         /** @description An amendment, against the revision the caller read. */
         MemoryAmendArgs: {
+            /** @description A new body, or omitted to keep it. */
             body?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The entry to amend.
+             */
             id: string;
             link?: null | components["schemas"]["Link"];
             /**
@@ -11104,40 +11112,63 @@ export interface components {
              * @description The revision of the entry the caller read.
              */
             revision: number;
+            /** @description A new title, or omitted to keep it. */
             title?: string | null;
         };
         /** @description A memory entry, with what it links to resolved to a name. */
         MemoryEntryData: {
+            /** @description What a later investigator would otherwise rediscover. */
             body: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the entry was recorded.
+             */
             created_at: string;
+            /** @description Who recorded it: an operator's login or an access token's name. */
             created_by: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The entry's identifier.
+             */
             id: string;
             link?: null | components["schemas"]["ResolvedLink"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the entry was retired, if it is.
+             */
             retired_at?: string | null;
+            /** @description Who retired it. */
             retired_by?: string | null;
+            /** @description Why it was retired. */
             retired_reason?: string | null;
             /**
              * Format: int64
              * @description Changes whenever the entry does; writes state the revision they read.
              */
             revision: number;
+            /** @description What the entry is, in a line. */
             title: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the entry last changed.
+             */
             updated_at: string;
+            /** @description Who last changed it. */
             updated_by: string;
         };
         /** @description An entry with every version it has had. */
         MemoryEntryDetail: {
+            /** @description The entry as it stands. */
             entry: components["schemas"]["MemoryEntryData"];
             /** @description Newest first. */
             history: components["schemas"]["MemoryRevision"][];
         };
         /** @description Identifies an entry. */
         MemoryEntryIdArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The entry's identifier.
+             */
             id: string;
         };
         /** @description The entries that matched. */
@@ -11153,6 +11184,7 @@ export interface components {
         };
         /** @description What to list. Everything is optional; the filters narrow together. */
         MemoryListArgs: {
+            /** @description The name of the check, given with `check_source`. */
             check_name?: string | null;
             /** @description Only entries linked to the check with this source and name. */
             check_source?: string | null;
@@ -11185,7 +11217,10 @@ export interface components {
         };
         /** @description Restoring an entry to an earlier version of itself. */
         MemoryRestoreArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The entry to restore.
+             */
             id: string;
             /**
              * Format: int64
@@ -11200,7 +11235,10 @@ export interface components {
         };
         /** @description Retiring an entry. */
         MemoryRetireArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The entry to retire.
+             */
             id: string;
             /** @description Why the entry no longer holds. */
             reason: string;
@@ -11209,9 +11247,14 @@ export interface components {
         MemoryRevision: {
             /** @description Who made the change: an operator's login or a token's name. */
             actor: string;
+            /** @description The body the entry held after this change. */
             body: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the change was made.
+             */
             created_at: string;
+            /** @description What kind of change it was. */
             kind: components["schemas"]["RevisionKind"];
             link?: null | components["schemas"]["Link"];
             /** @description Why, for a retirement. */
@@ -11221,8 +11264,12 @@ export interface components {
              * @description For a restoration, the version it restored.
              */
             restored_from?: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The entry's revision after this change.
+             */
             revision: number;
+            /** @description The title the entry held after this change. */
             title: string;
             /** @description How it was made: `operator` or `token`. */
             via: string;
@@ -11390,8 +11437,10 @@ export interface components {
         };
         /** @description A new entry. */
         NewEntry: {
+            /** @description What a later investigator would otherwise rediscover, at most 16,384 characters. */
             body: string;
             link?: null | components["schemas"]["Link"];
+            /** @description What the entry is, in a line, at most 512 characters. */
             title: string;
         };
         /** @description When a machine's next backup of a type is expected. */
@@ -11428,12 +11477,19 @@ export interface components {
              *     when the log began.
              */
             author?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the change was made.
+             */
             created_at: string;
             /** @description The text the notes held after this change. */
             notes: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The revision the notes were at after this change.
+             */
             revision: number;
+            /** @description How the change was made: `operator`, `ansible_import` or `token`. Absent for the revision existing notes were given. */
             via?: string | null;
         };
         /**

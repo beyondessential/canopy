@@ -248,7 +248,12 @@ async fn a_change_to_notes_is_kept_in_the_log_and_audited_without_the_text() {
 				GROUP,
 				"key is in the safe",
 			),
-			("/api/fleet/machines/notes_history", "machine_id", BOX, "rack 4"),
+			(
+				"/api/fleet/machines/notes_history",
+				"machine_id",
+				BOX,
+				"rack 4",
+			),
 			(
 				"/api/fleet/applications/notes_history",
 				"server_id",

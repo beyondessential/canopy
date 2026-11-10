@@ -177,10 +177,15 @@ impl RevisionKind {
 /// One version of an entry: what it held after a change, and who made it.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MemoryRevision {
+	/// The entry's revision after this change.
 	pub revision: i64,
+	/// What kind of change it was.
 	pub kind: RevisionKind,
+	/// The title the entry held after this change.
 	pub title: String,
+	/// The body the entry held after this change.
 	pub body: String,
+	/// What the entry was linked to after this change.
 	pub link: Option<Link>,
 	/// Who made the change: an operator's login or a token's name.
 	pub actor: String,
@@ -190,6 +195,7 @@ pub struct MemoryRevision {
 	pub reason: Option<String>,
 	/// For a restoration, the version it restored.
 	pub restored_from: Option<i64>,
+	/// When the change was made.
 	pub created_at: Timestamp,
 }
 
@@ -268,8 +274,11 @@ impl Outcome {
 /// A new entry.
 #[derive(Clone, Debug, Deserialize, utoipa::ToSchema)]
 pub struct NewEntry {
+	/// What the entry is, in a line, at most 512 characters.
 	pub title: String,
+	/// What a later investigator would otherwise rediscover, at most 16,384 characters.
 	pub body: String,
+	/// What the entry is about; none applies it to the fleet as a whole.
 	#[serde(default)]
 	pub link: Option<Link>,
 }
@@ -940,19 +949,29 @@ pub async fn resolve_links(
 /// A memory entry, with what it links to resolved to a name.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MemoryEntryData {
+	/// The entry's identifier.
 	pub id: Uuid,
+	/// What the entry is, in a line.
 	pub title: String,
+	/// What a later investigator would otherwise rediscover.
 	pub body: String,
 	/// What the entry is about, none for the fleet as a whole.
 	pub link: Option<ResolvedLink>,
 	/// Changes whenever the entry does; writes state the revision they read.
 	pub revision: i64,
+	/// When the entry was recorded.
 	pub created_at: Timestamp,
+	/// Who recorded it: an operator's login or an access token's name.
 	pub created_by: String,
+	/// When the entry last changed.
 	pub updated_at: Timestamp,
+	/// Who last changed it.
 	pub updated_by: String,
+	/// When the entry was retired, if it is.
 	pub retired_at: Option<Timestamp>,
+	/// Who retired it.
 	pub retired_by: Option<String>,
+	/// Why it was retired.
 	pub retired_reason: Option<String>,
 }
 

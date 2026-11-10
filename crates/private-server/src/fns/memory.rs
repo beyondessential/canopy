@@ -54,6 +54,7 @@ pub struct MemoryListArgs {
 	/// Only entries linked to the check with this source and name.
 	#[serde(default)]
 	pub check_source: Option<String>,
+	/// The name of the check, given with `check_source`.
 	#[serde(default)]
 	pub check_name: Option<String>,
 	/// Only entries linked to this incident.
@@ -126,18 +127,23 @@ pub async fn list(
 /// Identifies an entry.
 #[derive(Deserialize, ToSchema)]
 pub struct MemoryEntryIdArgs {
+	/// The entry's identifier.
 	pub id: Uuid,
 }
 
 /// An entry with every version it has had.
 #[derive(Serialize, ToSchema)]
 pub struct MemoryEntryDetail {
+	/// The entry as it stands.
 	pub entry: MemoryEntryData,
 	/// Newest first.
 	pub history: Vec<MemoryRevision>,
 }
 
 /// Get an incident memory entry with its history.
+///
+/// Every version the entry has had, newest first, each with who made it, how,
+/// and when.
 #[utoipa::path(
 	post,
 	path = "/get",
@@ -201,10 +207,13 @@ pub async fn record(
 /// An amendment, against the revision the caller read.
 #[derive(Deserialize, ToSchema)]
 pub struct MemoryAmendArgs {
+	/// The entry to amend.
 	pub id: Uuid,
 	/// The revision of the entry the caller read.
 	pub revision: i64,
+	/// A new title, or omitted to keep it.
 	pub title: Option<String>,
+	/// A new body, or omitted to keep it.
 	pub body: Option<String>,
 	/// A link to set, or `null` to clear it.
 	#[serde(default, deserialize_with = "memory::present_option")]
@@ -268,6 +277,7 @@ pub async fn amend(
 /// Retiring an entry.
 #[derive(Deserialize, ToSchema)]
 pub struct MemoryRetireArgs {
+	/// The entry to retire.
 	pub id: Uuid,
 	/// Why the entry no longer holds.
 	pub reason: String,
@@ -319,6 +329,7 @@ pub async fn retire(
 /// Restoring an entry to an earlier version of itself.
 #[derive(Deserialize, ToSchema)]
 pub struct MemoryRestoreArgs {
+	/// The entry to restore.
 	pub id: Uuid,
 	/// The revision of the entry the caller read.
 	pub revision: i64,

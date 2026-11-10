@@ -112,6 +112,7 @@ pub struct CurrentNotes {
 /// One entry in a record's revision log.
 #[derive(Clone, Debug, Serialize, Deserialize, QueryableByName, utoipa::ToSchema)]
 pub struct NotesRevision {
+	/// The revision the notes were at after this change.
 	#[diesel(sql_type = sql_types::BigInt)]
 	pub revision: i64,
 	/// The text the notes held after this change.
@@ -121,8 +122,10 @@ pub struct NotesRevision {
 	/// when the log began.
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
 	pub author: Option<String>,
+	/// How the change was made: `operator`, `ansible_import` or `token`. Absent for the revision existing notes were given.
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
 	pub via: Option<String>,
+	/// When the change was made.
 	#[diesel(sql_type = sql_types::Timestamptz, deserialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
 }

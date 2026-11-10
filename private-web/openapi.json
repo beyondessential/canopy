@@ -8491,12 +8491,14 @@
         "description": "An amendment, against the revision the caller read.",
         "properties": {
           "body": {
+            "description": "A new body, or omitted to keep it.",
             "type": [
               "string",
               "null"
             ]
           },
           "id": {
+            "description": "The entry to amend.",
             "format": "uuid",
             "type": "string"
           },
@@ -8517,6 +8519,7 @@
             "type": "integer"
           },
           "title": {
+            "description": "A new title, or omitted to keep it.",
             "type": [
               "string",
               "null"
@@ -8533,16 +8536,20 @@
         "description": "A memory entry, with what it links to resolved to a name.",
         "properties": {
           "body": {
+            "description": "What a later investigator would otherwise rediscover.",
             "type": "string"
           },
           "created_at": {
+            "description": "When the entry was recorded.",
             "format": "date-time",
             "type": "string"
           },
           "created_by": {
+            "description": "Who recorded it: an operator's login or an access token's name.",
             "type": "string"
           },
           "id": {
+            "description": "The entry's identifier.",
             "format": "uuid",
             "type": "string"
           },
@@ -8558,6 +8565,7 @@
             ]
           },
           "retired_at": {
+            "description": "When the entry was retired, if it is.",
             "format": "date-time",
             "type": [
               "string",
@@ -8565,12 +8573,14 @@
             ]
           },
           "retired_by": {
+            "description": "Who retired it.",
             "type": [
               "string",
               "null"
             ]
           },
           "retired_reason": {
+            "description": "Why it was retired.",
             "type": [
               "string",
               "null"
@@ -8582,13 +8592,16 @@
             "type": "integer"
           },
           "title": {
+            "description": "What the entry is, in a line.",
             "type": "string"
           },
           "updated_at": {
+            "description": "When the entry last changed.",
             "format": "date-time",
             "type": "string"
           },
           "updated_by": {
+            "description": "Who last changed it.",
             "type": "string"
           }
         },
@@ -8608,7 +8621,8 @@
         "description": "An entry with every version it has had.",
         "properties": {
           "entry": {
-            "$ref": "#/components/schemas/MemoryEntryData"
+            "$ref": "#/components/schemas/MemoryEntryData",
+            "description": "The entry as it stands."
           },
           "history": {
             "description": "Newest first.",
@@ -8628,6 +8642,7 @@
         "description": "Identifies an entry.",
         "properties": {
           "id": {
+            "description": "The entry's identifier.",
             "format": "uuid",
             "type": "string"
           }
@@ -8663,6 +8678,7 @@
         "description": "What to list. Everything is optional; the filters narrow together.",
         "properties": {
           "check_name": {
+            "description": "The name of the check, given with `check_source`.",
             "type": [
               "string",
               "null"
@@ -8736,6 +8752,7 @@
         "description": "Restoring an entry to an earlier version of itself.",
         "properties": {
           "id": {
+            "description": "The entry to restore.",
             "format": "uuid",
             "type": "string"
           },
@@ -8761,6 +8778,7 @@
         "description": "Retiring an entry.",
         "properties": {
           "id": {
+            "description": "The entry to retire.",
             "format": "uuid",
             "type": "string"
           },
@@ -8783,14 +8801,17 @@
             "type": "string"
           },
           "body": {
+            "description": "The body the entry held after this change.",
             "type": "string"
           },
           "created_at": {
+            "description": "When the change was made.",
             "format": "date-time",
             "type": "string"
           },
           "kind": {
-            "$ref": "#/components/schemas/RevisionKind"
+            "$ref": "#/components/schemas/RevisionKind",
+            "description": "What kind of change it was."
           },
           "link": {
             "oneOf": [
@@ -8798,7 +8819,8 @@
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/Link"
+                "$ref": "#/components/schemas/Link",
+                "description": "What the entry was linked to after this change."
               }
             ]
           },
@@ -8818,10 +8840,12 @@
             ]
           },
           "revision": {
+            "description": "The entry's revision after this change.",
             "format": "int64",
             "type": "integer"
           },
           "title": {
+            "description": "The title the entry held after this change.",
             "type": "string"
           },
           "via": {
@@ -9070,6 +9094,7 @@
         "description": "A new entry.",
         "properties": {
           "body": {
+            "description": "What a later investigator would otherwise rediscover, at most 16,384 characters.",
             "type": "string"
           },
           "link": {
@@ -9078,11 +9103,13 @@
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/Link"
+                "$ref": "#/components/schemas/Link",
+                "description": "What the entry is about; none applies it to the fleet as a whole."
               }
             ]
           },
           "title": {
+            "description": "What the entry is, in a line, at most 512 characters.",
             "type": "string"
           }
         },
@@ -9195,6 +9222,7 @@
             ]
           },
           "created_at": {
+            "description": "When the change was made.",
             "format": "date-time",
             "type": "string"
           },
@@ -9203,10 +9231,12 @@
             "type": "string"
           },
           "revision": {
+            "description": "The revision the notes were at after this change.",
             "format": "int64",
             "type": "integer"
           },
           "via": {
+            "description": "How the change was made: `operator`, `ansible_import` or `token`. Absent for the revision existing notes were given.",
             "type": [
               "string",
               "null"
@@ -26950,6 +26980,7 @@
     },
     "/api/memory/get": {
       "post": {
+        "description": "Every version the entry has had, newest first, each with who made it, how,\nand when.",
         "operationId": "memory_get",
         "requestBody": {
           "content": {
