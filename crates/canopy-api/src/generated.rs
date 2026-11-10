@@ -3,11 +3,11 @@
 
 /// Version of the OpenAPI document this source was generated from, which is also
 /// this crate's own version.
-pub const OPENAPI_VERSION: &str = "2.0.1";
+pub const OPENAPI_VERSION: &str = "3.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "d602e8a7481426026538f03658ee3de11ae5c102d030388e70aeb037d60e5330";
+pub const OPENAPI_BLAKE3: &str = "c6d1c73e0ea20468c4c74f67ac48d6b95e82cc3eec9c4e9506f3bee22cdd43ef";
 
 /// Error types.
 pub mod error {
@@ -4541,14 +4541,6 @@ for CreateVersionRequest {
 }
 /// One method per operation in canopy's OpenAPI document.
 impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
-    /// List publicly-listed central applications.
-    ///
-    /// The `/applications` name for [`list`], answering identically.
-    ///
-    /// `GET /applications`
-    pub async fn applications(&self) -> crate::Result<::std::vec::Vec<PublicServer>> {
-        self.call_json(::http::Method::GET, "/applications", None::<&()>).await
-    }
     /// Get the calling identity and the box it is enrolled as.
     ///
     /// The `/applications` name for [`self_identity`], answering identically.

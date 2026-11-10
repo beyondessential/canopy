@@ -1,10 +1,11 @@
-//! `/applications` and `/servers` answer identically on the device API.
+//! `/applications/self` and `/servers/self` answer identically on the device
+//! API, and `/applications` serves no listing.
 //!
 //! A device API client cannot follow a redirect: a fielded bestool asks for the
-//! path it was built against and takes the answer. So the application
-//! endpoints gained the name they are about without the old one going
-//! anywhere, and both have to keep saying the same thing — an alias that
-//! drifted would be worse than not having one.
+//! path it was built against and takes the answer. So the self identity
+//! endpoint gained the name it is about without the old one going anywhere,
+//! and both have to keep saying the same thing — an alias that drifted would
+//! be worse than not having one. The listing is only `GET /servers`.
 
 use diesel::{sql_query, sql_types};
 use diesel_async::{RunQueryDsl, SimpleAsyncConnection};
@@ -25,8 +26,11 @@ struct SelfResponse {
 	device_id: Uuid,
 }
 
+/// `GET /servers` is the only unauthenticated listing; an `/applications` one
+/// would be a second public enumeration of the fleet.
+// spec: APP
 #[tokio::test(flavor = "multi_thread")]
-async fn the_listing_reads_the_same_under_both_names() {
+async fn only_servers_serves_the_public_listing() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
 			"WITH m AS (INSERT INTO machines (name) VALUES ('box') RETURNING id) \
@@ -36,19 +40,17 @@ async fn the_listing_reads_the_same_under_both_names() {
 		.await
 		.unwrap();
 
-		let expected = vec![PublicServer {
+		let listing = public.get("/servers").await;
+		listing.assert_status_ok();
+		listing.assert_json::<Vec<PublicServer>>(&vec![PublicServer {
 			name: "Test Application".to_string(),
 			host: "https://test.com".to_string(),
 			rank: Some("production".to_string()),
-		}];
+		}]);
 
-		let aliased = public.get("/applications").await;
-		aliased.assert_status_ok();
-		aliased.assert_json::<Vec<PublicServer>>(&expected);
-
-		let original = public.get("/servers").await;
-		original.assert_status_ok();
-		original.assert_json::<Vec<PublicServer>>(&expected);
+		for path in ["/applications", "/applications/"] {
+			public.get(path).await.assert_status(StatusCode::NOT_FOUND);
+		}
 	})
 	.await
 }

@@ -1251,7 +1251,7 @@ checksum = "32637268377fc7b10a8c6d51de3e7fba1ce5dd371a96e342b34e6078db558e7f"
 
 [[package]]
 name = "bes-canopy-api"
-version = "2.0.1"
+version = "3.0.0"
 dependencies = [
  "async-trait",
  "bon",

@@ -8,7 +8,7 @@ pub struct PublicServer {
 	pub rank: Option<String>,
 }
 
-// GET /applications tests. (The device-driven create/edit/remove endpoints were
+// GET /servers tests. (The device-driven create/edit/remove endpoints were
 // removed in favour of operator-first enrollment; see server_enrollment.rs.)
 
 #[tokio::test(flavor = "multi_thread")]
