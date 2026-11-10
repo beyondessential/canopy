@@ -133,6 +133,9 @@ struct ServerDetail {
 	is_monitored: bool,
 	archived: bool,
 	notes: String,
+	/// The revision the notes are at, to state when replacing them with
+	/// `replace_notes`.
+	notes_revision: i64,
 	registered_at: Option<Timestamp>,
 	group_id: Option<Uuid>,
 	group_name: Option<String>,
@@ -336,6 +339,14 @@ impl CanopyMcp {
 			timezone: merged.timezone(),
 		};
 
+		let notes_revision = database::notes_log::current(
+			&mut conn,
+			database::notes_log::NotesRecord::Application(id),
+		)
+		.await
+		.map_err(mcp_err)?
+		.revision;
+
 		ok_json(&ServerDetail {
 			id: server.id,
 			name: server.name.clone(),
@@ -348,6 +359,7 @@ impl CanopyMcp {
 			is_monitored: server.is_monitored,
 			archived: server.deleted_at.is_some(),
 			notes: server.notes.clone(),
+			notes_revision,
 			registered_at: server.registered_at,
 			group_id: server.group_id,
 			group_name: group.as_ref().map(|g| g.name.clone()),

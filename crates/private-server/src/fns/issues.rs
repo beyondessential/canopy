@@ -13,11 +13,11 @@ use commons_types::{
 	status::CheckResult,
 };
 use database::applications::Application;
+use database::audit::{Action, Record};
 use database::issues::{
 	CheckFiling, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters, MANUAL_SOURCE,
 	Scope, file_check,
 };
-use database::audit::{Action, Record};
 use database::notes::{AuthorKind, IssueNote};
 use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
 use jiff::Timestamp;

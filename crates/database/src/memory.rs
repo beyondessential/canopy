@@ -285,7 +285,9 @@ pub struct Amendment {
 	pub link: Option<Option<Link>>,
 }
 
-pub fn present_option<'de, D, T>(deserializer: D) -> std::result::Result<Option<Option<T>>, D::Error>
+pub fn present_option<'de, D, T>(
+	deserializer: D,
+) -> std::result::Result<Option<Option<T>>, D::Error>
 where
 	D: serde::Deserializer<'de>,
 	T: Deserialize<'de>,
@@ -933,6 +935,61 @@ pub async fn resolve_links(
 		}
 	}
 	Ok(names)
+}
+
+/// A memory entry, with what it links to resolved to a name.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MemoryEntryData {
+	pub id: Uuid,
+	pub title: String,
+	pub body: String,
+	/// What the entry is about, none for the fleet as a whole.
+	pub link: Option<ResolvedLink>,
+	/// Changes whenever the entry does; writes state the revision they read.
+	pub revision: i64,
+	pub created_at: Timestamp,
+	pub created_by: String,
+	pub updated_at: Timestamp,
+	pub updated_by: String,
+	pub retired_at: Option<Timestamp>,
+	pub retired_by: Option<String>,
+	pub retired_reason: Option<String>,
+}
+
+/// Entries with what they link to resolved to names.
+pub async fn present(
+	conn: &mut AsyncPgConnection,
+	entries: Vec<MemoryEntry>,
+) -> Result<Vec<MemoryEntryData>> {
+	let names = resolve_links(conn, entries.iter().filter_map(MemoryEntry::link)).await?;
+	Ok(entries
+		.into_iter()
+		.map(|entry| MemoryEntryData {
+			link: entry.link().map(|link| ResolvedLink {
+				name: names.get(&link).cloned().unwrap_or_default(),
+				link,
+			}),
+			id: entry.id,
+			title: entry.title,
+			body: entry.body,
+			revision: entry.revision,
+			created_at: entry.created_at,
+			created_by: entry.created_by,
+			updated_at: entry.updated_at,
+			updated_by: entry.updated_by,
+			retired_at: entry.retired_at,
+			retired_by: entry.retired_by,
+			retired_reason: entry.retired_reason,
+		})
+		.collect())
+}
+
+/// One entry with what it links to resolved to a name.
+pub async fn present_one(
+	conn: &mut AsyncPgConnection,
+	entry: MemoryEntry,
+) -> Result<MemoryEntryData> {
+	Ok(present(conn, vec![entry]).await?.remove(0))
 }
 
 /// An entry in the index: enough to choose which to read in full.

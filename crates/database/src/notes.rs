@@ -87,6 +87,17 @@ pub enum Edited<N> {
 	Stale(N),
 }
 
+impl<N> Edited<N> {
+	/// The same outcome, with the note as something else.
+	pub fn map<M>(self, f: impl FnOnce(N) -> M) -> Edited<M> {
+		match self {
+			Self::Changed(note) => Edited::Changed(f(note)),
+			Self::Unchanged(note) => Edited::Unchanged(f(note)),
+			Self::Stale(note) => Edited::Stale(f(note)),
+		}
+	}
+}
+
 /// The text a note held before an edit replaced it.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct NoteRevision {

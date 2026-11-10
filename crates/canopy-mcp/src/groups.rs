@@ -95,6 +95,9 @@ struct GroupDetail {
 	id: Uuid,
 	name: String,
 	notes: String,
+	/// The revision the notes are at, to state when replacing them with
+	/// `replace_notes`.
+	notes_revision: i64,
 	tags: commons_types::server::TagMap,
 	effective_version: Option<VersionStr>,
 	created_at: Timestamp,
@@ -245,10 +248,17 @@ impl CanopyMcp {
 			.await
 			.map_err(mcp_err)?;
 
+		let notes_revision =
+			database::notes_log::current(&mut conn, database::notes_log::NotesRecord::Group(id))
+				.await
+				.map_err(mcp_err)?
+				.revision;
+
 		ok_json(&GroupDetail {
 			id: group.id,
 			name: group.name.clone(),
 			notes: group.notes.clone(),
+			notes_revision,
 			tags: group.tags.clone(),
 			effective_version: group.effective_version.clone(),
 			created_at: group.created_at,

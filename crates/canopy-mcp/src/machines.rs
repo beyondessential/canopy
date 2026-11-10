@@ -157,6 +157,9 @@ struct MachineDetail {
 	is_monitored: bool,
 	archived: bool,
 	notes: String,
+	/// The revision the notes are at, to state when replacing them with
+	/// `replace_notes`.
+	notes_revision: i64,
 	registered_at: Option<Timestamp>,
 	tags: commons_types::server::TagMap,
 	/// What the box reports about itself: platform, hardware, addresses.
@@ -393,6 +396,12 @@ impl CanopyMcp {
 			});
 		}
 
+		let notes_revision =
+			database::notes_log::current(&mut conn, database::notes_log::NotesRecord::Machine(id))
+				.await
+				.map_err(mcp_err)?
+				.revision;
+
 		ok_json(&MachineDetail {
 			id: machine.id,
 			name: machine.name,
@@ -403,6 +412,7 @@ impl CanopyMcp {
 			is_monitored: machine.is_monitored,
 			archived: machine.deleted_at.is_some(),
 			notes: machine.notes,
+			notes_revision,
 			registered_at: machine.registered_at,
 			tags: machine.tags,
 			figures,

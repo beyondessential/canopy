@@ -12,6 +12,7 @@ use axum::{Json, extract::State};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{audit::Audit, tailscale_auth::TailscaleAdmin};
 use commons_types::{Uuid, server::rank::ServerRank};
+use database::notes_log::{self, Author, NotesRecord, Via};
 use database::{
 	Device,
 	ansible_catalogue::{Catalogue, Loaded, ScopeKind},
@@ -23,7 +24,6 @@ use database::{
 	machines::{Machine, MachineUpdate},
 	server_groups::{PartialServerGroup, ServerGroup},
 };
-use database::notes_log::{self, Author, NotesRecord, Via};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;

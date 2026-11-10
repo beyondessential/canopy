@@ -7,8 +7,8 @@ use commons_servers::{
 	tailscale_auth::{TailscaleAdmin, TailscaleUser},
 };
 use commons_types::{Uuid, issue::ResolvedReason, server::rank::ServerRank};
-use database::issues::{Incident, IncidentIssue, IncidentStats};
 use database::audit::{Action, Record};
+use database::issues::{Incident, IncidentIssue, IncidentStats};
 use database::notes::{AuthorKind, IncidentNote};
 use database::server_groups::ServerGroup;
 use database::tailscale_users::TailscaleUser as CachedTailscaleUser;

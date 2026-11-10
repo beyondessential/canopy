@@ -15,7 +15,8 @@ use commons_servers::{
 use database::{
 	audit::{Action, Record},
 	memory::{
-		self, Amendment, Find, Link, LinkKind, MemoryEntry, MemoryRevision, NewEntry, ResolvedLink,
+		self, Amendment, Find, Link, LinkKind, MemoryEntryData, MemoryRevision, NewEntry, present,
+		present_one,
 	},
 	notes_log::{Author, Via},
 };
@@ -37,59 +38,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(write, audit(MemoryEntryAmended): amend))
 		.routes(routes!(write, audit(MemoryEntryRetired): retire))
 		.routes(routes!(write, audit(MemoryEntryRestored): restore))
-}
-
-/// A memory entry, with what it links to resolved to a name.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct MemoryEntryData {
-	pub id: Uuid,
-	pub title: String,
-	pub body: String,
-	/// What the entry is about, none for the fleet as a whole.
-	pub link: Option<ResolvedLink>,
-	/// Changes whenever the entry does; writes state the revision they read.
-	pub revision: i64,
-	pub created_at: Timestamp,
-	pub created_by: String,
-	pub updated_at: Timestamp,
-	pub updated_by: String,
-	pub retired_at: Option<Timestamp>,
-	pub retired_by: Option<String>,
-	pub retired_reason: Option<String>,
-}
-
-async fn present(
-	conn: &mut database::diesel_async::AsyncPgConnection,
-	entries: Vec<MemoryEntry>,
-) -> Result<Vec<MemoryEntryData>> {
-	let names = memory::resolve_links(conn, entries.iter().filter_map(MemoryEntry::link)).await?;
-	Ok(entries
-		.into_iter()
-		.map(|entry| MemoryEntryData {
-			link: entry.link().map(|link| ResolvedLink {
-				name: names.get(&link).cloned().unwrap_or_default(),
-				link,
-			}),
-			id: entry.id,
-			title: entry.title,
-			body: entry.body,
-			revision: entry.revision,
-			created_at: entry.created_at,
-			created_by: entry.created_by,
-			updated_at: entry.updated_at,
-			updated_by: entry.updated_by,
-			retired_at: entry.retired_at,
-			retired_by: entry.retired_by,
-			retired_reason: entry.retired_reason,
-		})
-		.collect())
-}
-
-async fn present_one(
-	conn: &mut database::diesel_async::AsyncPgConnection,
-	entry: MemoryEntry,
-) -> Result<MemoryEntryData> {
-	Ok(present(conn, vec![entry]).await?.remove(0))
 }
 
 /// What to list. Everything is optional; the filters narrow together.

@@ -7,7 +7,8 @@
 //! `mcp::require_tailnet_user`), and at `/mcp` on the internet-facing
 //! surface behind the bearer-token gate (public-server's `mcp` module).
 //! Every tool reads, except the three that record, withdraw and edit
-//! vulnerability triage decisions; they are held to the caller's standing (see
+//! vulnerability triage decisions, and the ones that write notes and incident
+//! memory (see [`AUDITED_TOOLS`]); they are held to the caller's standing (see
 //! [`Caller`]). The interface also offers one prompt,
 //! `triage_vulnerabilities`, in the `vulnerabilities` module.
 //!
@@ -18,7 +19,7 @@
 //! so the verdicts match what the operator UI and the alerting sweep present.
 //!
 //! Tools are grouped into domain modules (`applications`, `groups`, `versions`,
-//! `fleet`, `backups`, `restore`, `incidents`, `upgrade_plans`), each
+//! `fleet`, `backups`, `restore`, `incidents`, `upgrade_plans`, `notes`, `memory`), each
 //! contributing its own tool router (via rmcp's
 //! `#[tool_router(router = ..., vis = "pub(crate)")]`) that [`CanopyMcp::new`]
 //! combines into the single stored `ToolRouter`. `util` holds helpers shared
@@ -32,6 +33,8 @@ mod fleet;
 mod groups;
 mod incidents;
 mod machines;
+mod memory;
+mod notes;
 mod restore;
 mod upgrade_plans;
 mod util;
@@ -59,6 +62,15 @@ pub const AUDITED_TOOLS: &[&str] = &[
 	"record_vulnerability_decisions",
 	"withdraw_vulnerability_decisions",
 	"edit_vulnerability_decision",
+	"add_issue_note",
+	"add_incident_note",
+	"edit_note",
+	"delete_note",
+	"replace_notes",
+	"record_memory_entry",
+	"amend_memory_entry",
+	"retire_memory_entry",
+	"restore_memory_entry",
 ];
 
 #[derive(Clone)]
@@ -85,7 +97,9 @@ impl CanopyMcp {
 				+ Self::restore_router()
 				+ Self::incidents_router()
 				+ Self::upgrade_plans_router()
-				+ Self::vulnerabilities_router(),
+				+ Self::vulnerabilities_router()
+				+ Self::notes_router()
+				+ Self::memory_router(),
 			prompt_router: Self::vulnerabilities_prompts(),
 		}
 	}
@@ -104,7 +118,8 @@ impl ServerHandler for CanopyMcp {
 			"Access to the Canopy fleet: machines, applications, groups, health/status, \
 			 Tamanu versions, planned upgrades, backups, incidents/issues, and vulnerabilities. \
 			 All data is live; every tool reads except the three that change vulnerability triage \
-			 decisions (record_, withdraw_ and edit_). \
+			 decisions (record_, withdraw_ and edit_) and those that write notes and incident \
+			 memory. \
 			 Use find_* to locate entities and get_* for detail; fleet_summary and \
 			 find_backup_problems for triage.\n\n\
 			 Machines and applications are different things and both are queryable. A machine is \
@@ -146,7 +161,17 @@ impl ServerHandler for CanopyMcp {
 			 withdraw_vulnerability_decisions takes decisions back, and \
 			 edit_vulnerability_decision corrects a reason or issue link; only an administrator \
 			 or a token with the triage grant may call them. To triage a repository you have \
-			 checked out, use the `triage_vulnerabilities` prompt, which takes the repository."
+			 checked out, use the `triage_vulnerabilities` prompt, which takes the repository.\n\n\
+			 Notes and memory: groups, machines and applications carry free-text notes (read \
+			 with their `notes_revision`, replaced with replace_notes and the revision you \
+			 read, with get_notes_history for the log of changes), and issues and incidents \
+			 carry notes (add_issue_note, add_incident_note; edit_note and delete_note only on \
+			 notes agents wrote). Incident memory is separate: short titled entries on what \
+			 past incidents taught. Start an investigation with get_memory_index, read what \
+			 applies with find_memory and get_memory_entry, and record what a later \
+			 investigator would otherwise rediscover with record_memory_entry, amending an \
+			 existing entry rather than adding a duplicate. These writes need an administrator \
+			 or a token with the notes grant."
 				.into(),
 		);
 		info.capabilities = ServerCapabilities::builder()

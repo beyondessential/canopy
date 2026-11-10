@@ -13,6 +13,7 @@ use commons_types::{
 	status::{HealthState, ShortStatus},
 	version::VersionStr,
 };
+use database::notes_log::{self, Author, NotesRecord, NotesRevision, Via};
 use database::{
 	applications::{Application, PartialServer},
 	devices::Device,
@@ -21,7 +22,6 @@ use database::{
 	statuses::Status,
 	versions::Version,
 };
-use database::notes_log::{self, Author, NotesRecord, NotesRevision, Via};
 use futures::future::join;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};

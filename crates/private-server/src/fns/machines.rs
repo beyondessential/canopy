@@ -457,7 +457,13 @@ pub async fn create(
 		},
 	)
 	.await?;
-	audit_notes_change(&mut conn, NotesRecord::Machine(machine.id), Via::Operator, 0).await?;
+	audit_notes_change(
+		&mut conn,
+		NotesRecord::Machine(machine.id),
+		Via::Operator,
+		0,
+	)
+	.await?;
 
 	Ok(Json(machine.id))
 }
