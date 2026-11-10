@@ -14,7 +14,6 @@ Canopy serves an environment only to the holder of its lease, so two runs never 
 Taking a lease names the environment and what the run intends: to configure the environment as it stands, or to upgrade it.
 A lease expires after a fixed period, so a run that dies does not hold an environment shut.
 Its holder extends it while the run is still going and releases it when the run ends.
-Only its holder can extend or release it, and needs no raised mode to, since the run that does both has no session; anyone else takes it over.
 
 ### Starting a run
 

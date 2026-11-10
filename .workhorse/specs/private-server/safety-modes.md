@@ -65,6 +65,8 @@ A client that has lost its record of its own mode is read-only, so doubt resolve
 A request presenting a session identifier that is unknown or has expired is treated as read-only rather than refused outright.
 A session is usable only by the login it belongs to.
 A read-only-graded request needs no session at all, so a client can read before it has one.
+The operator interface names its session on every request it makes.
+A request naming no session comes from a command or a script rather than from that interface, which has no mode to raise, so it is not graded and is allowed by the caller's standing alone: an Ansible run takes, extends and releases its lease this way (see [ANSRUN](ansible/runs.md), "Run leases").
 
 A session that has not been seen for some time is retired.
 
@@ -97,8 +99,6 @@ A handler that lets an already-trusted machine obtain credentials is graded writ
 Opening a machine's restore window is graded on this basis.
 
 Recording, withdrawing or editing a vulnerability triage decision is graded write: it amends Canopy's records, and the item's history keeps what it replaced (see [VTR](../security/vulnerability-triage.md)).
-
-Extending and releasing a run lease are graded read-only: a run is a command with no session to raise, the lease it holds was taken under a raised one, and only the lease's holder is allowed either (see [ANSRUN](ansible/runs.md), "Run leases").
 
 The fleet query interface (see [MCP](mcp.md)) changes nothing on the fleet, so every one of its tools is read-only except its triage writes, recording, withdrawing and editing triage decisions, which are graded write.
 That interface has no sessions, so its writes are allowed by the caller's standing instead of a raised mode: an administrator on the operator path, a token with the triage grant on the token path.

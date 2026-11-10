@@ -784,11 +784,11 @@ async fn backup_schedules_are_write_and_clearing_retention_is_danger() {
 	.await;
 }
 
-/// A run is a command, with no session to raise, so it extends and gives back
-/// the lease it holds on its holder's standing. Anyone else is refused.
-// spec: SAFE, ANSRUN#run-leases
+/// A run is a command, with no session to raise, so the modes do not gate it:
+/// it takes, extends and gives back a lease on its operator's standing.
+// spec: SAFE
 #[tokio::test(flavor = "multi_thread")]
-async fn a_run_extends_and_releases_its_lease_without_a_session() {
+async fn a_request_naming_no_session_is_not_gated() {
 	use super::audit::{GROUP, seed};
 
 	trust_headers();
@@ -796,24 +796,27 @@ async fn a_run_extends_and_releases_its_lease_without_a_session() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		seed(&mut conn).await;
 		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
-		Admin::add(&mut conn, OTHER).await.expect("add admin");
+		let take = json!({ "server_group_id": GROUP, "intent": "configure" });
+
+		// The same request from a session that has not been raised is refused.
 		let id = new_session(&private, OPERATOR).await;
-		private
-			.post("/api/safety/raise")
-			.add_header("Tailscale-User-Login", OPERATOR)
-			.add_header("Tailscale-User-Name", "Operator")
-			.add_header(SESSION_HEADER, &id)
-			.json(&json!({"mode": "write"}))
-			.await
-			.assert_status_ok();
-		let lease: serde_json::Value = private
+		let gated = private
 			.post("/api/ansible/take_lease")
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
 			.add_header(SESSION_HEADER, &id)
-			.json(&json!({ "server_group_id": GROUP, "intent": "configure" }))
-			.await
-			.json();
+			.json(&take)
+			.await;
+		assert!(problem_type(&gated.json()).ends_with("safety-mode-too-low"));
+
+		let lease = private
+			.post("/api/ansible/take_lease")
+			.add_header("Tailscale-User-Login", OPERATOR)
+			.add_header("Tailscale-User-Name", "Operator")
+			.json(&take)
+			.await;
+		lease.assert_status_ok();
+		let lease: serde_json::Value = lease.json();
 		let body = json!({ "lease_id": lease["id"] });
 
 		let as_run = async |login: &str, path: &str| {
@@ -827,9 +830,10 @@ async fn a_run_extends_and_releases_its_lease_without_a_session() {
 		};
 
 		assert_eq!(as_run(OPERATOR, "/api/ansible/extend_lease").await, 200);
-		assert_eq!(as_run(OTHER, "/api/ansible/extend_lease").await, 409);
-		assert_eq!(as_run(OTHER, "/api/ansible/release_lease").await, 409);
 		assert_eq!(as_run(OPERATOR, "/api/ansible/release_lease").await, 200);
+
+		// Standing still decides: someone who is not an administrator is refused.
+		assert_eq!(as_run(OTHER, "/api/ansible/take_lease").await, 403);
 	})
 	.await
 }

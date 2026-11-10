@@ -190,8 +190,8 @@ export interface paths {
         put?: never;
         /**
          * Give the environment back when the run ends.
-         * @description Only the holder can release: a run has no session to raise, so this is
-         *     allowed on the holder's standing, and anyone else takes the lease over.
+         * @description Releasing is audited with who did it, since it can be another operator
+         *     taking work over rather than the holder finishing.
          */
         post: operations["ansible_release_lease"];
         delete?: never;

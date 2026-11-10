@@ -16865,7 +16865,7 @@
         "x-canopy-audit": [
           "inventory_lease_extended"
         ],
-        "x-canopy-safety-mode": "read-only"
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/ansible/for_group": {
@@ -17152,7 +17152,7 @@
     },
     "/api/ansible/release_lease": {
       "post": {
-        "description": "Only the holder can release: a run has no session to raise, so this is\nallowed on the holder's standing, and anyone else takes the lease over.",
+        "description": "Releasing is audited with who did it, since it can be another operator\ntaking work over rather than the holder finishing.",
         "operationId": "ansible_release_lease",
         "requestBody": {
           "content": {
@@ -17208,7 +17208,7 @@
         "x-canopy-audit": [
           "inventory_lease_released"
         ],
-        "x-canopy-safety-mode": "read-only"
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/ansible/run_options": {

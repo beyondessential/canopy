@@ -202,7 +202,9 @@ async fn touch(safety: &SafetyState, id: Uuid, login: &str) -> Result<()> {
 /// Read-only-graded requests are answered without a session, so a client can
 /// read before it has one. Anything higher is decided against the session named
 /// by [`SESSION_HEADER`]: an unknown, expired, or someone else's session all
-/// read as read-only rather than being refused outright.
+/// read as read-only rather than being refused outright. A request naming no
+/// session is not the operator interface's, and is left to the handler to
+/// allow on the caller's standing.
 pub async fn enforce(
 	State(safety): State<SafetyState>,
 	request: Request,
@@ -242,6 +244,14 @@ pub async fn enforce(
 			"no safety mode is declared for {path}"
 		)));
 	};
+
+	// The operator interface names its session on every request, so one that
+	// names none comes from a command or a script, which has no mode to raise.
+	if !parts.headers.contains_key(SESSION_HEADER) {
+		return Ok(next
+			.run(axum::extract::Request::from_parts(parts, body))
+			.await);
+	}
 
 	let session_id = parts
 		.headers
