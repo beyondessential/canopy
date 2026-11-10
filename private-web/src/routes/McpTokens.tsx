@@ -50,6 +50,7 @@ export default function McpTokens() {
 	const list = useApi("mcp_tokens", "list");
 	const [name, setName] = useState("");
 	const [triage, setTriage] = useState(false);
+	const [notes, setNotes] = useState(false);
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
@@ -67,10 +68,11 @@ export default function McpTokens() {
 		try {
 			const res = await callApi("mcp_tokens", "mint", {
 				name: trimmed,
-				grants: triage ? ["triage"] : [],
+				grants: [...(triage ? ["triage"] : []), ...(notes ? ["notes"] : [])],
 			});
 			setName("");
 			setTriage(false);
+			setNotes(false);
 			setMinted({ name: res.token.name, secret: res.secret });
 			list.reload();
 		} catch (err) {
@@ -122,6 +124,17 @@ export default function McpTokens() {
 								/>
 							}
 							label="Triage grant"
+						/>
+						<FormControlLabel
+							sx={{ whiteSpace: "nowrap", flexShrink: 0 }}
+							control={
+								<Checkbox
+									checked={notes}
+									onChange={(e) => setNotes(e.target.checked)}
+									disabled={pending}
+								/>
+							}
+							label="Notes grant"
 						/>
 						<GradedAction
 							calls="mcp_tokens/mint"

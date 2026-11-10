@@ -849,7 +849,7 @@
             ]
           },
           "notes": {
-            "description": "Free-form operator notes about this server.",
+            "description": "Free-form operator notes about this server. Held in the application's\nnotes log from [`Application::create_by`], not inserted with the row.",
             "type": "string"
           },
           "public_name": {
@@ -1271,6 +1271,14 @@
           }
         },
         "type": "object"
+      },
+      "AuthorKind": {
+        "description": "Whether a person or an agent wrote a note.",
+        "enum": [
+          "operator",
+          "agent"
+        ],
+        "type": "string"
       },
       "AuthorityView": {
         "description": "The certificate authority Canopy is configured to use, and whether it works.",
@@ -5865,6 +5873,10 @@
             "format": "uuid",
             "type": "string"
           },
+          "include_deleted": {
+            "description": "Include deleted notes, which are otherwise left out. Honoured for\nadministrators only.",
+            "type": "boolean"
+          },
           "limit": {
             "description": "Maximum number of notes to return; defaults to 100.",
             "format": "int64",
@@ -5880,11 +5892,15 @@
         "type": "object"
       },
       "IncidentNoteData": {
-        "description": "A note attached to an incident.\n\nNotes are immutable once written; to change one, delete it and add a\nreplacement.",
+        "description": "A note attached to an incident, written by an operator or an agent.",
         "properties": {
           "author": {
-            "description": "Login of the operator who wrote the note.",
+            "description": "Login of the operator who wrote the note, or the name of the access\ntoken an agent wrote it through.",
             "type": "string"
+          },
+          "author_kind": {
+            "$ref": "#/components/schemas/AuthorKind",
+            "description": "Whether an operator or an agent wrote the note."
           },
           "body": {
             "description": "The note text.",
@@ -5895,6 +5911,21 @@
             "format": "date-time",
             "type": "string"
           },
+          "deleted_at": {
+            "description": "When the note was deleted. Only present when deleted notes were asked\nfor.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deleted_by": {
+            "description": "Who deleted the note.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
             "description": "Unique identifier of the note.",
             "format": "uuid",
@@ -5904,14 +5935,21 @@
             "description": "Identifier of the incident the note is attached to.",
             "format": "uuid",
             "type": "string"
+          },
+          "revision": {
+            "description": "How many times the text has been edited, plus one.",
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
           "id",
           "incident_id",
           "author",
+          "author_kind",
           "body",
-          "created_at"
+          "created_at",
+          "revision"
         ],
         "type": "object"
       },
@@ -6377,6 +6415,10 @@
       "IssueListNotesArgs": {
         "description": "Identifies the issue whose notes to list.",
         "properties": {
+          "include_deleted": {
+            "description": "Include deleted notes, which are otherwise left out. Honoured for\nadministrators only.",
+            "type": "boolean"
+          },
           "issue_id": {
             "description": "Id of the issue whose notes to list.",
             "format": "uuid",
@@ -6397,11 +6439,15 @@
         "type": "object"
       },
       "IssueNoteData": {
-        "description": "A free-text note left by an operator on an issue, for handoff and\ncontext that doesn't belong in the issue's own message.",
+        "description": "A free-text note left by an operator or an agent on an issue, for handoff\nand context that doesn't belong in the issue's own message.",
         "properties": {
           "author": {
-            "description": "Login of the operator who wrote the note.",
+            "description": "Login of the operator who wrote the note, or the name of the access\ntoken an agent wrote it through.",
             "type": "string"
+          },
+          "author_kind": {
+            "$ref": "#/components/schemas/AuthorKind",
+            "description": "Whether an operator or an agent wrote the note."
           },
           "body": {
             "description": "Text of the note.",
@@ -6412,6 +6458,21 @@
             "format": "date-time",
             "type": "string"
           },
+          "deleted_at": {
+            "description": "When the note was deleted. Only present when deleted notes were asked\nfor.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deleted_by": {
+            "description": "Who deleted the note.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
             "description": "Unique identifier for this note.",
             "format": "uuid",
@@ -6421,14 +6482,21 @@
             "description": "Id of the issue this note is attached to.",
             "format": "uuid",
             "type": "string"
+          },
+          "revision": {
+            "description": "How many times the text has been edited, plus one.",
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
           "id",
           "issue_id",
           "author",
+          "author_kind",
           "body",
-          "created_at"
+          "created_at",
+          "revision"
         ],
         "type": "object"
       },
@@ -6804,6 +6872,82 @@
           }
         ],
         "description": "A limit to evaluate against an environment's machines."
+      },
+      "Link": {
+        "description": "What an entry is about. An entry with none applies to the fleet as a whole.",
+        "oneOf": [
+          {
+            "properties": {
+              "id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "group"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "incident"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A check by its source and presented name, wherever it is filed.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "check"
+                ],
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "source",
+              "name",
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "LinkKind": {
+        "description": "A kind of link, for narrowing a find. `Fleet` is an entry with no link.",
+        "enum": [
+          "fleet",
+          "group",
+          "check",
+          "incident"
+        ],
+        "type": "string"
       },
       "ListActiveArgs": {
         "description": "Filters for listing open incidents.",
@@ -8343,6 +8487,383 @@
         ],
         "type": "object"
       },
+      "MemoryAmendArgs": {
+        "description": "An amendment, against the revision the caller read.",
+        "properties": {
+          "body": {
+            "description": "A new body, or omitted to keep it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "The entry to amend.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "link": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Link",
+                "description": "A link to set, or `null` to clear it."
+              }
+            ]
+          },
+          "revision": {
+            "description": "The revision of the entry the caller read.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "description": "A new title, or omitted to keep it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "MemoryEntryData": {
+        "description": "A memory entry, with what it links to resolved to a name.",
+        "properties": {
+          "body": {
+            "description": "What a later investigator would otherwise rediscover.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When the entry was recorded.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "description": "Who recorded it: an operator's login or an access token's name.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The entry's identifier.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "link": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResolvedLink",
+                "description": "What the entry is about, none for the fleet as a whole."
+              }
+            ]
+          },
+          "retired_at": {
+            "description": "When the entry was retired, if it is.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retired_by": {
+            "description": "Who retired it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retired_reason": {
+            "description": "Why it was retired.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "description": "Changes whenever the entry does; writes state the revision they read.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "description": "What the entry is, in a line.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When the entry last changed.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "updated_by": {
+            "description": "Who last changed it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "body",
+          "revision",
+          "created_at",
+          "created_by",
+          "updated_at",
+          "updated_by"
+        ],
+        "type": "object"
+      },
+      "MemoryEntryDetail": {
+        "description": "An entry with every version it has had.",
+        "properties": {
+          "entry": {
+            "$ref": "#/components/schemas/MemoryEntryData",
+            "description": "The entry as it stands."
+          },
+          "history": {
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/MemoryRevision"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "entry",
+          "history"
+        ],
+        "type": "object"
+      },
+      "MemoryEntryIdArgs": {
+        "description": "Identifies an entry.",
+        "properties": {
+          "id": {
+            "description": "The entry's identifier.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "MemoryList": {
+        "description": "The entries that matched.",
+        "properties": {
+          "entries": {
+            "description": "Newest amended first.",
+            "items": {
+              "$ref": "#/components/schemas/MemoryEntryData"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "How many entries matched in all, which exceeds `entries` when the list\nwas cut short.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entries",
+          "total"
+        ],
+        "type": "object"
+      },
+      "MemoryListArgs": {
+        "description": "What to list. Everything is optional; the filters narrow together.",
+        "properties": {
+          "check_name": {
+            "description": "The name of the check, given with `check_source`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "check_source": {
+            "description": "Only entries linked to the check with this source and name.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "group_id": {
+            "description": "Only entries linked to this group.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "incident_id": {
+            "description": "Only entries linked to this incident.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "include_retired": {
+            "description": "Include retired entries, which are otherwise left out.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "The most entries to return. Defaults to 100.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "link_kind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LinkKind",
+                "description": "Only entries with this kind of link, or none."
+              }
+            ]
+          },
+          "relevant_to_incident": {
+            "description": "Only entries relevant to this incident: linked to it, to its target's\ngroup, or to a check among its issues.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "Free text matched against titles and bodies.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "MemoryRestoreArgs": {
+        "description": "Restoring an entry to an earlier version of itself.",
+        "properties": {
+          "id": {
+            "description": "The entry to restore.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "revision": {
+            "description": "The revision of the entry the caller read.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "to_revision": {
+            "description": "The earlier version to restore.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "to_revision"
+        ],
+        "type": "object"
+      },
+      "MemoryRetireArgs": {
+        "description": "Retiring an entry.",
+        "properties": {
+          "id": {
+            "description": "The entry to retire.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the entry no longer holds.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "MemoryRevision": {
+        "description": "One version of an entry: what it held after a change, and who made it.",
+        "properties": {
+          "actor": {
+            "description": "Who made the change: an operator's login or a token's name.",
+            "type": "string"
+          },
+          "body": {
+            "description": "The body the entry held after this change.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When the change was made.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RevisionKind",
+            "description": "What kind of change it was."
+          },
+          "link": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Link",
+                "description": "What the entry was linked to after this change."
+              }
+            ]
+          },
+          "reason": {
+            "description": "Why, for a retirement.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "restored_from": {
+            "description": "For a restoration, the version it restored.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "revision": {
+            "description": "The entry's revision after this change.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "description": "The title the entry held after this change.",
+            "type": "string"
+          },
+          "via": {
+            "description": "How it was made: `operator` or `token`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "kind",
+          "title",
+          "body",
+          "actor",
+          "via",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "MergeIntoArgs": {
         "description": "Request to merge two device records into one.",
         "properties": {
@@ -8569,6 +9090,35 @@
         },
         "type": "object"
       },
+      "NewEntry": {
+        "description": "A new entry.",
+        "properties": {
+          "body": {
+            "description": "What a later investigator would otherwise rediscover, at most 16,384 characters.",
+            "type": "string"
+          },
+          "link": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Link",
+                "description": "What the entry is about; none applies it to the fleet as a whole."
+              }
+            ]
+          },
+          "title": {
+            "description": "What the entry is, in a line, at most 512 characters.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "body"
+        ],
+        "type": "object"
+      },
       "NextBackup": {
         "description": "When a machine's next backup of a type is expected.",
         "oneOf": [
@@ -8660,6 +9210,45 @@
             "type": "object"
           }
         ]
+      },
+      "NotesRevision": {
+        "description": "One entry in a record's revision log.",
+        "properties": {
+          "author": {
+            "description": "Who made the change. Absent for the revision a record's notes were given\nwhen the log began.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "description": "When the change was made.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "notes": {
+            "description": "The text the notes held after this change.",
+            "type": "string"
+          },
+          "revision": {
+            "description": "The revision the notes were at after this change.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "via": {
+            "description": "How the change was made: `operator`, `ansible_import` or `token`. Absent for the revision existing notes were given.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "revision",
+          "notes",
+          "created_at"
+        ],
+        "type": "object"
       },
       "OpenWindow": {
         "description": "An open window with the target it covers, named so a fleet-wide view\nreads without a lookup per row.",
@@ -9344,7 +9933,7 @@
             ]
           },
           "notes": {
-            "description": "New free-form operator notes for the group.",
+            "description": "New free-form operator notes for the group, applied through the group's\nnotes log by [`ServerGroup::update_by`] rather than as a column update.",
             "type": [
               "string",
               "null"
@@ -10297,7 +10886,11 @@
           "certificate",
           "relying_party",
           "advisory",
-          "source"
+          "source",
+          "issue",
+          "incident",
+          "note",
+          "memory_entry"
         ],
         "type": "string"
       },
@@ -10848,6 +11441,26 @@
           }
         },
         "type": "object"
+      },
+      "ResolvedLink": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Link"
+          },
+          {
+            "properties": {
+              "name": {
+                "description": "The group's name, the incident's target and when it opened, or the\ncheck's name.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "A link with what it names, as it is now."
       },
       "ResolvedReason": {
         "description": "Reason an issue or incident was resolved by an operator.\n\nStored as text in Postgres, validated as this enum at the API layer.\nCategories follow common operational practice (PagerDuty/Sentry/Opsgenie):\n\n- `Fixed` — the underlying problem was addressed.\n- `WontFix` — won't fix; not worth doing, or not actually a problem.\n- `Expected` — known/expected behaviour (e.g. planned maintenance window).\n- `Duplicate` — a duplicate of another issue.\n- `Flapping` — too noisy; suppressed rather than fixed (often paired with\n  a snooze).\n- `Decommissioned` — the check itself was retired fleet-wide; its states\n  are resolved as a side effect, not by an operator addressing them.",
@@ -11487,6 +12100,16 @@
           "keep_monthly"
         ],
         "type": "object"
+      },
+      "RevisionKind": {
+        "description": "What kind of change a version of an entry was.",
+        "enum": [
+          "recorded",
+          "amended",
+          "retired",
+          "restored"
+        ],
+        "type": "string"
       },
       "RevocationReason": {
         "description": "Why a certificate was revoked. The names are the RFC 5280 reasons an\nauthority accepts; Canopy offers the few an operator would actually reach\nfor rather than the whole set.",
@@ -17017,7 +17640,8 @@
           "ansible"
         ],
         "x-canopy-audit": [
-          "ansible_inventory_imported"
+          "ansible_inventory_imported",
+          "notes_changed"
         ],
         "x-canopy-safety-mode": "write"
       }
@@ -22273,6 +22897,58 @@
         "x-canopy-safety-mode": "read-only"
       }
     },
+    "/api/fleet/applications/notes_history": {
+      "post": {
+        "description": "Every change to the application's notes with who made it, how, and when,\nnewest first.",
+        "operationId": "applications_notes_history",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NotesRevision"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "An application's notes revision log.",
+        "tags": [
+          "applications"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
     "/api/fleet/applications/restore": {
       "post": {
         "description": "Restores a previously archived server to regular listings. Its machine\nmust re-enroll afterwards to rebind a device. Restoring a server that\nisn't archived has no effect.",
@@ -22353,7 +23029,10 @@
         "tags": [
           "applications"
         ],
-        "x-canopy-audit": [],
+        "x-canopy-audit": [
+          "notes_changed"
+        ],
+        "x-canopy-audit-optional": true,
         "x-canopy-safety-mode": "write"
       }
     },
@@ -22510,7 +23189,10 @@
         "tags": [
           "server_groups"
         ],
-        "x-canopy-audit": [],
+        "x-canopy-audit": [
+          "notes_changed"
+        ],
+        "x-canopy-audit-optional": true,
         "x-canopy-safety-mode": "write"
       }
     },
@@ -22678,6 +23360,58 @@
           }
         ],
         "summary": "List archived server groups.",
+        "tags": [
+          "server_groups"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/fleet/groups/notes_history": {
+      "post": {
+        "description": "Every change to the group's notes with who made it, how, and when, newest\nfirst.",
+        "operationId": "server_groups_notes_history",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NotesRevision"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "A group's notes revision log.",
         "tags": [
           "server_groups"
         ],
@@ -22864,7 +23598,10 @@
         "tags": [
           "server_groups"
         ],
-        "x-canopy-audit": [],
+        "x-canopy-audit": [
+          "notes_changed"
+        ],
+        "x-canopy-audit-optional": true,
         "x-canopy-safety-mode": "write"
       }
     },
@@ -23059,7 +23796,10 @@
         "tags": [
           "machines"
         ],
-        "x-canopy-audit": [],
+        "x-canopy-audit": [
+          "notes_changed"
+        ],
+        "x-canopy-audit-optional": true,
         "x-canopy-safety-mode": "write"
       }
     },
@@ -23366,6 +24106,58 @@
         "x-canopy-safety-mode": "danger"
       }
     },
+    "/api/fleet/machines/notes_history": {
+      "post": {
+        "description": "Every change to the machine's notes with who made it, how, and when,\nnewest first.",
+        "operationId": "machines_notes_history",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NotesRevision"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "A machine's notes revision log.",
+        "tags": [
+          "machines"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
     "/api/fleet/machines/restore": {
       "post": {
         "description": "Brings an archived machine back into the live fleet at the rank it kept.\nArchival released its identity, so it must be enrolled again. The\napplications archived with it stay archived and are restored one at a\ntime. Refused with a 409 while the machine's group is archived. Restoring a\nmachine that isn't archived has no effect.",
@@ -23545,7 +24337,10 @@
         "tags": [
           "machines"
         ],
-        "x-canopy-audit": [],
+        "x-canopy-audit": [
+          "notes_changed"
+        ],
+        "x-canopy-audit-optional": true,
         "x-canopy-safety-mode": "write"
       }
     },
@@ -24503,13 +25298,15 @@
         "tags": [
           "incidents"
         ],
-        "x-canopy-audit": [],
+        "x-canopy-audit": [
+          "incident_note_added"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
     "/api/incidents/delete_note": {
       "post": {
-        "description": "Permanently removes the note. Notes cannot be edited in place; to change\none, delete it and add a replacement. Requires the caller to be on the\nadmin allow-list.",
+        "description": "The note leaves the incident's notes but is kept, with who deleted it and\nwhen, and administrators can list deleted notes. Deleting a note that\ndoesn't exist or is already deleted succeeds without effect. Requires the\ncaller to be on the admin allow-list.",
         "operationId": "incident_delete_note",
         "requestBody": {
           "content": {
@@ -24535,7 +25332,9 @@
         "tags": [
           "incidents"
         ],
-        "x-canopy-audit": [],
+        "x-canopy-audit": [
+          "note_deleted"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -24716,7 +25515,7 @@
     },
     "/api/incidents/list_notes": {
       "post": {
-        "description": "Returns notes written on the incident itself; notes on its contributing\nissues are not included.",
+        "description": "Returns notes written on the incident itself; notes on its contributing\nissues are not included. Deleted notes are left out, unless an\nadministrator asks for them.",
         "operationId": "incident_list_notes",
         "requestBody": {
           "content": {
@@ -24879,13 +25678,15 @@
         "tags": [
           "issues"
         ],
-        "x-canopy-audit": [],
+        "x-canopy-audit": [
+          "issue_note_added"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
     "/api/issues/delete_note": {
       "post": {
-        "description": "The note is removed outright; there is no undo. Deleting a note that\ndoesn't exist succeeds without effect.",
+        "description": "The note leaves the issue's notes but is kept, with who deleted it and\nwhen, and administrators can list deleted notes. Deleting a note that\ndoesn't exist or is already deleted succeeds without effect.",
         "operationId": "issue_delete_note",
         "requestBody": {
           "content": {
@@ -24907,11 +25708,13 @@
             "tailscale-admin": []
           }
         ],
-        "summary": "Permanently delete a note from an issue.",
+        "summary": "Delete a note from an issue.",
         "tags": [
           "issues"
         ],
-        "x-canopy-audit": [],
+        "x-canopy-audit": [
+          "note_deleted"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -25043,7 +25846,7 @@
     },
     "/api/issues/list_notes": {
       "post": {
-        "description": "Returns the issue's notes, most recent first, each with its author and\ncreation time.",
+        "description": "Returns the issue's notes, most recent first, each with its author and\ncreation time. Deleted notes are left out, unless an administrator asks for\nthem.",
         "operationId": "issue_list_notes",
         "requestBody": {
           "content": {
@@ -26102,6 +26905,358 @@
           "invalidates"
         ],
         "x-canopy-safety-mode": "danger"
+      }
+    },
+    "/api/memory/amend": {
+      "post": {
+        "description": "Requires the caller to be an administrator. Responds 409 if the entry has\nchanged since the revision given.",
+        "operationId": "memory_amend",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryAmendArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEntryData"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Amend an incident memory entry's title, body or link.",
+        "tags": [
+          "memory"
+        ],
+        "x-canopy-audit": [
+          "memory_entry_amended"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/memory/get": {
+      "post": {
+        "description": "Every version the entry has had, newest first, each with who made it, how,\nand when.",
+        "operationId": "memory_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryEntryIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEntryDetail"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "Get an incident memory entry with its history.",
+        "tags": [
+          "memory"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/memory/list": {
+      "post": {
+        "description": "Newest amended first, narrowed by free text, link, and relevance to an\nincident, and widened to retired entries on request.",
+        "operationId": "memory_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryListArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryList"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "List incident memory entries.",
+        "tags": [
+          "memory"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/memory/record": {
+      "post": {
+        "description": "Requires the caller to be an administrator. Responds 400 if the title or\nbody is over its limit or the link names nothing.",
+        "operationId": "memory_record",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewEntry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEntryData"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Record a new incident memory entry.",
+        "tags": [
+          "memory"
+        ],
+        "x-canopy-audit": [
+          "memory_entry_recorded"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/memory/restore": {
+      "post": {
+        "description": "The restoration is a new version, and makes a retired entry current again.\nRequires the caller to be an administrator. Responds 409 if the entry has\nchanged since the revision given.",
+        "operationId": "memory_restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryRestoreArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEntryData"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Restore an incident memory entry to an earlier version.",
+        "tags": [
+          "memory"
+        ],
+        "x-canopy-audit": [
+          "memory_entry_restored"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/memory/retire": {
+      "post": {
+        "description": "The entry is kept in full, with its history, and is left out of lists\nunless retired entries are asked for. Requires the caller to be an\nadministrator.",
+        "operationId": "memory_retire",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryRetireArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEntryData"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Retire an incident memory entry.",
+        "tags": [
+          "memory"
+        ],
+        "x-canopy-audit": [
+          "memory_entry_retired"
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/migration_tests/for_group": {
@@ -29673,6 +30828,10 @@
     {
       "description": "Windows declaring that a server or a group is being worked on.",
       "name": "maintenance"
+    },
+    {
+      "description": "Incident memory: what past incidents taught, for the next investigation.",
+      "name": "memory"
     },
     {
       "description": "Bearer tokens for the public MCP mount.",

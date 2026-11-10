@@ -78,7 +78,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only, silent: runs::run_options))
 		.routes(routes!(read_only, silent: runs::limit_preview))
 		.routes(routes!(read_only, silent: import::import_preview))
-		.routes(routes!(write, audit(AnsibleInventoryImported): import::import_apply))
+		.routes(routes!(write, audit(AnsibleInventoryImported, NotesChanged): import::import_apply))
 }
 
 /// Which environment to act on: exactly one of the group's identifier or its

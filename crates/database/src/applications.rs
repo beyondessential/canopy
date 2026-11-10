@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use super::pg_duration::PgDuration;
 use super::url_field::UrlField;
+use crate::notes_log::{self, Author, NotesRecord};
 
 /// Recompute each distinct, present group id, deduping repeats and skipping
 /// `None`. Used by the server write paths that can change a group's canonical
@@ -129,8 +130,10 @@ pub struct Application {
 	/// defaults to 600 (10 minutes) for newly-created applications.
 	#[schema(value_type = i64)]
 	pub alert_when_down_for: PgDuration,
-	/// Free-form operator notes about this server.
+	/// Free-form operator notes about this server. Held in the application's
+	/// notes log from [`Application::create_by`], not inserted with the row.
 	#[serde(default)]
+	#[diesel(skip_insertion)]
 	pub notes: String,
 	/// Key/value tags for this server.
 	#[serde(default)]
@@ -361,16 +364,39 @@ impl Application {
 	/// optional URL). URLs are no longer unique, so there is no collision
 	/// check.
 	pub async fn create(db: &mut AsyncPgConnection, server: Application) -> Result<Self> {
+		Self::create_by(db, server, None).await
+	}
+
+	/// [`Self::create`], the application's notes starting its notes log under
+	/// `author`.
+	// spec: FLT#notes
+	pub async fn create_by(
+		db: &mut AsyncPgConnection,
+		server: Application,
+		author: Option<Author<'_>>,
+	) -> Result<Self> {
 		use crate::schema::applications;
 
 		crate::tags::reject_reserved_keys(&server.tags)?;
 
-		let created = diesel::insert_into(applications::table)
+		let notes = server.notes.clone();
+		let mut created: Self = diesel::insert_into(applications::table)
 			.values(server)
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
 			.map_err(AppError::from)?;
+		if !notes.is_empty() {
+			notes_log::set(
+				db,
+				NotesRecord::Application(created.id),
+				&notes,
+				author,
+				None,
+			)
+			.await?;
+			created.notes = notes;
+		}
 		// A new member can change the group's canonical version source.
 		recompute_groups(db, [created.group_id]).await?;
 		Ok(created)
@@ -1045,7 +1071,23 @@ impl Application {
 		server_id: Uuid,
 		updates: PartialServer,
 	) -> Result<Self> {
+		Self::update_by(db, server_id, updates, None).await
+	}
+
+	/// [`Self::update`], a change to the application's notes going through its
+	/// notes log under `author`.
+	// spec: FLT#notes
+	pub async fn update_by(
+		db: &mut AsyncPgConnection,
+		server_id: Uuid,
+		updates: PartialServer,
+		author: Option<Author<'_>>,
+	) -> Result<Self> {
 		use crate::schema::applications::dsl;
+
+		if let Some(notes) = &updates.notes {
+			notes_log::set(db, NotesRecord::Application(server_id), notes, author, None).await?;
+		}
 
 		if let Some(tags) = &updates.tags {
 			crate::tags::reject_reserved_keys(tags)?;
@@ -1320,7 +1362,10 @@ pub struct PartialServer {
 	#[schema(value_type = Option<i64>)]
 	#[diesel(serialize_as = PgDuration)]
 	pub alert_when_down_for: Option<PgDuration>,
-	/// New free-form operator notes for the server.
+	/// New free-form operator notes for the server, applied through the
+	/// application's notes log by [`Application::update_by`], not as a column
+	/// update.
+	#[diesel(skip_update)]
 	pub notes: Option<String>,
 	/// New set of key/value tags for the server. This replaces the whole
 	/// tag set.

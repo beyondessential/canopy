@@ -34,6 +34,7 @@ use utoipa::{
 		(name = "kubernetes_clusters", description = "The Kubernetes cluster registry: registering a cluster and its relay, and confirming the relay is answering."),
 		(name = "machines", description = "The hosts applications run on: their group, location, and monitoring."),
 		(name = "maintenance", description = "Windows declaring that a server or a group is being worked on."),
+		(name = "memory", description = "Incident memory: what past incidents taught, for the next investigation."),
 		(name = "mcp_tokens", description = "Bearer tokens for the public MCP mount."),
 		(name = "upgrade_plans", description = "Where each group is going: the version it intends to move to, and when."),
 		(name = "migration_tests", description = "Where each server stands against the version it would take next."),

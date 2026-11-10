@@ -2,7 +2,10 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::{
+	audit::Audit,
+	tailscale_auth::{TailscaleAdmin, TailscaleUser},
+};
 use commons_types::{
 	Uuid,
 	geo::GeoPoint,
@@ -10,6 +13,7 @@ use commons_types::{
 	status::{HealthState, ShortStatus},
 	version::VersionStr,
 };
+use database::notes_log::{self, Author, NotesRecord, NotesRevision, Via};
 use database::{
 	applications::{Application, PartialServer},
 	devices::Device,
@@ -24,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use utoipa::ToSchema;
 
-use crate::fns::Page;
+use crate::fns::{Page, audit_notes_change};
 use crate::state::AppState;
 
 /// Full detail view of a server: its own record, its bound device, its most
@@ -533,7 +537,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only, silent: get_name))
 		.routes(routes!(read_only, silent: get_info))
 		.routes(routes!(read_only, silent: get_detail))
-		.routes(routes!(write, silent: update))
+		.routes(routes!(write, audit_optional(NotesChanged): update))
+		.routes(routes!(read_only, silent: notes_history))
 		.routes(routes!(write, silent: delete))
 		.routes(routes!(write, silent: restore))
 }
@@ -933,7 +938,7 @@ pub struct ServerUpdateArgs {
 	),
 )]
 pub async fn update(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<ServerUpdateArgs>,
 ) -> Result<Json<()>> {
@@ -949,7 +954,9 @@ pub async fn update(
 		Some(Some(rank)) => Some(rank),
 		None => None,
 	};
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
+	let notes_record = NotesRecord::Application(args.server_id);
+	let notes_before = notes_log::current(&mut conn, notes_record).await?.revision;
 
 	// Capture the server's pre-update state when this request touches one of
 	// the fields whose transitions warrant an incident catch-up: `group_id`
@@ -1022,7 +1029,14 @@ pub async fn update(
 		may_manage_dns: args.data.may_manage_dns,
 		may_manage_tls: args.data.may_manage_tls,
 	};
-	Application::update(&mut conn, args.server_id, update_data).await?;
+	Application::update_by(
+		&mut conn,
+		args.server_id,
+		update_data,
+		Some(Author::operator(&admin.0.login)),
+	)
+	.await?;
+	audit_notes_change(&mut conn, notes_record, Via::Operator, notes_before).await?;
 
 	let group_just_set = matches!(
 		(before.as_ref().map(|s| s.group_id), new_group_id),
@@ -1039,6 +1053,34 @@ pub async fn update(
 		Application::set_rank(&mut conn, args.server_id, rank, Some(&admin.0.login)).await?;
 	}
 	Ok(Json(()))
+}
+
+/// An application's notes revision log.
+///
+/// Every change to the application's notes with who made it, how, and when,
+/// newest first.
+#[utoipa::path(
+	post,
+	path = "/notes_history",
+	operation_id = "applications_notes_history",
+	tag = "applications",
+	security(("tailscale-user" = [])),
+	request_body = ServerIdOnlyArgs,
+	responses(
+		(status = 200, body = Vec<NotesRevision>),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn notes_history(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<ServerIdOnlyArgs>,
+) -> Result<Json<Vec<NotesRevision>>> {
+	let mut conn = state.db_read.get().await?;
+	Application::get_by_id(&mut conn, args.server_id).await?;
+	Ok(Json(
+		notes_log::history(&mut conn, NotesRecord::Application(args.server_id)).await?,
+	))
 }
 
 /// Identifies a single server by id.

@@ -31,7 +31,7 @@ use database::{
 	issues::{Incident, Issue, NewEvent},
 	machine_enrollment_tokens::MachineEnrollmentToken,
 	machines::{Machine, NewMachine},
-	notes::{IncidentNote, IssueNote},
+	notes::{AuthorKind, IncidentNote, IssueNote},
 	pg_duration::PgDuration,
 	server_groups::{NewServerGroup, ServerGroup},
 	silenced_refs::{ServerGroupSilencedRef, ServerSilencedRef},
@@ -1294,6 +1294,7 @@ async fn seed_issues_and_incidents(
 		conn,
 		crit.id,
 		&admins[0],
+		AuthorKind::Operator,
 		"Paged the on-call DBA; investigating the connection pool.",
 	)
 	.await?;
@@ -1309,6 +1310,7 @@ async fn seed_issues_and_incidents(
 			conn,
 			incident.id,
 			&admins[0],
+			AuthorKind::Operator,
 			"Incident acknowledged; bridge call in progress.",
 		)
 		.await?;

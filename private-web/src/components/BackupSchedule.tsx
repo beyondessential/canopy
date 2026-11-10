@@ -17,7 +17,8 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useDebounced } from "../hooks/useDebounced";
 import { useApi } from "../api";
 import { humanSeconds } from "../lib/humanDuration";
 import type {
@@ -303,15 +304,6 @@ export interface ScheduleScope {
 }
 
 const PREVIEW_DEBOUNCE_MS = 400;
-
-function useDebounced<T>(value: T, ms: number): T {
-	const [held, setHeld] = useState(value);
-	useEffect(() => {
-		const id = window.setTimeout(() => setHeld(value), ms);
-		return () => window.clearTimeout(id);
-	}, [value, ms]);
-	return held;
-}
 
 /** Everything an editor needs from the schedule being edited. */
 export interface ScheduleState {

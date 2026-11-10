@@ -12,6 +12,7 @@ use axum::{Json, extract::State};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{audit::Audit, tailscale_auth::TailscaleAdmin};
 use commons_types::{Uuid, server::rank::ServerRank};
+use database::notes_log::{self, Author, NotesRecord, Via};
 use database::{
 	Device,
 	ansible_catalogue::{Catalogue, Loaded, ScopeKind},
@@ -32,7 +33,10 @@ use super::{
 	ANSIBLE_HOST, Environment, EnvironmentArgs, MANAGED, host_of, hosts, inventory_file, reach,
 	resolve_environment,
 };
-use crate::{fns::ansible_variables::variable_problems, state::AppState};
+use crate::{
+	fns::{ansible_variables::variable_problems, audit_notes_change},
+	state::AppState,
+};
 
 const ANSIBLE_PORT: &str = "ansible_port";
 const CLONE: &str = "tamanu_clone";
@@ -947,8 +951,11 @@ pub async fn import_apply(
 			)
 			.await?;
 		}
+		let author = Some(Author::ansible_import(&admin.0.login));
 		if notes_added {
-			ServerGroup::update(
+			let record = NotesRecord::Group(group.id);
+			let before = notes_log::current(&mut conn, record).await?.revision;
+			ServerGroup::update_by(
 				&mut conn,
 				group.id,
 				PartialServerGroup {
@@ -958,20 +965,26 @@ pub async fn import_apply(
 					slack_open_delay: None,
 					slack_close_delay: None,
 				},
+				author,
 			)
 			.await?;
+			audit_notes_change(&mut conn, record, Via::AnsibleImport, before).await?;
 		}
 		for noted in &machine_notes {
 			let machine = Machine::get_by_id(&mut conn, noted.machine).await?;
-			Machine::update(
+			let record = NotesRecord::Machine(noted.machine);
+			let before = notes_log::current(&mut conn, record).await?.revision;
+			Machine::update_by(
 				&mut conn,
 				noted.machine,
 				MachineUpdate {
 					notes: Some(append_notes(&machine.notes, &noted.notes)),
 					..Default::default()
 				},
+				author,
 			)
 			.await?;
+			audit_notes_change(&mut conn, record, Via::AnsibleImport, before).await?;
 		}
 		match &pending {
 			Some(pending) => conn.settle_done(pending, None).await,

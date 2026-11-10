@@ -83,4 +83,10 @@ An operator can resolve an open incident, recording who and why.
 Resolution cascades to the incident's open issues — each is resolved with the same attribution — and the incident closes as its members leave.
 Unresolving clears the resolution record; it does not reopen the incident.
 
-Notes attach free-form operator commentary to an incident.
+Notes attach free-form commentary to an incident, each recording who wrote it and when.
+A note can be added by an operator or by an agent through the fleet query interface (see [MCP](../private-server/mcp.md)).
+An operator can delete any note, and an agent can edit or delete a note another agent wrote but not one an operator wrote.
+An edited note keeps the text it replaced, with who edited it and when.
+A deleted note leaves the incident's notes but is kept, recording who deleted it and when, and administrators can show deleted notes again by asking for them.
+Adding, editing and deleting a note are audited actions (see [AUD](../platform/audit-log.md)).
+What an incident taught beyond its own span belongs in the [incident memory](incident-memory.md).

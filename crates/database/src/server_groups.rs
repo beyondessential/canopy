@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::applications::Application;
+use crate::notes_log::{self, Author, NotesRecord};
 use crate::pg_duration::PgDuration;
 use crate::statuses::Status;
 
@@ -128,8 +129,11 @@ pub struct ServerGroup {
 pub struct NewServerGroup {
 	/// The group's display name.
 	pub name: String,
-	/// Free-form operator notes about this group. Defaults to empty.
+	/// Free-form operator notes about this group. Defaults to empty. Held in
+	/// the group's notes log from [`ServerGroup::create_by`], not inserted with
+	/// the row.
 	#[serde(default)]
+	#[diesel(skip_insertion)]
 	pub notes: String,
 	/// Key/value tags shared by every server in the group. Defaults to
 	/// empty.
@@ -157,7 +161,9 @@ pub struct NewServerGroup {
 pub struct PartialServerGroup {
 	/// New display name for the group.
 	pub name: Option<String>,
-	/// New free-form operator notes for the group.
+	/// New free-form operator notes for the group, applied through the group's
+	/// notes log by [`ServerGroup::update_by`] rather than as a column update.
+	#[diesel(skip_update)]
 	pub notes: Option<String>,
 	/// New set of key/value tags shared by every server in the group. This
 	/// replaces the whole tag set.
@@ -172,14 +178,30 @@ pub struct PartialServerGroup {
 
 impl ServerGroup {
 	pub async fn create(db: &mut AsyncPgConnection, new: NewServerGroup) -> Result<Self> {
+		Self::create_by(db, new, None).await
+	}
+
+	/// Create a group, its notes starting its notes log under `author`.
+	// spec: FLT#notes
+	pub async fn create_by(
+		db: &mut AsyncPgConnection,
+		new: NewServerGroup,
+		author: Option<Author<'_>>,
+	) -> Result<Self> {
 		use crate::schema::server_groups;
 		crate::tags::reject_reserved_keys(&new.tags)?;
-		diesel::insert_into(server_groups::table)
+		let notes = new.notes.clone();
+		let group: Self = diesel::insert_into(server_groups::table)
 			.values(new)
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
-			.map_err(AppError::from)
+			.map_err(AppError::from)?;
+		if notes.is_empty() {
+			return Ok(group);
+		}
+		notes_log::set(db, NotesRecord::Group(group.id), &notes, author, None).await?;
+		Self::get_by_id(db, group.id).await
 	}
 
 	pub async fn get_by_id(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<Self> {
@@ -285,15 +307,32 @@ impl ServerGroup {
 		group_id: Uuid,
 		changes: PartialServerGroup,
 	) -> Result<Self> {
+		Self::update_by(db, group_id, changes, None).await
+	}
+
+	/// Update a group, a change to its notes going through its notes log under
+	/// `author`.
+	// spec: FLT#notes
+	pub async fn update_by(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		changes: PartialServerGroup,
+		author: Option<Author<'_>>,
+	) -> Result<Self> {
 		use crate::schema::server_groups::dsl;
 		if let Some(tags) = &changes.tags {
 			crate::tags::reject_reserved_keys(tags)?;
 		}
+		let notes = changes.notes.clone();
 		diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
 			.set(changes)
 			.execute(db)
 			.await
+			.optional_empty_changeset()
 			.map_err(AppError::from)?;
+		if let Some(notes) = notes {
+			notes_log::set(db, NotesRecord::Group(group_id), &notes, author, None).await?;
+		}
 		Self::get_by_id(db, group_id).await
 	}
 

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::pg_duration::PgDuration;
+use crate::notes_log::{self, Author, NotesRecord};
 
 /// How long a restore window stays open once an operator allows restores for a
 /// machine. Restores read the group's backup repo, so the window is deliberately
@@ -181,6 +182,9 @@ pub struct MachineUpdate {
 	pub is_monitored: Option<bool>,
 	#[diesel(serialize_as = PgDuration)]
 	pub alert_when_down_for: Option<PgDuration>,
+	/// Applied through the machine's notes log by [`Machine::update_by`], not
+	/// as a column update.
+	#[diesel(skip_update)]
 	pub notes: Option<String>,
 	pub tags: Option<TagMap>,
 }
@@ -238,7 +242,13 @@ impl Machine {
 			let machine = Self::create(conn, addition.machine).await?;
 			// The rest of the form is an edit applied to the machine just made,
 			// so creating and editing cannot disagree about what a field means.
-			let machine = Self::update(conn, machine.id, addition.settings).await?;
+			let machine = Self::update_by(
+				conn,
+				machine.id,
+				addition.settings,
+				addition.by.map(Author::operator),
+			)
+			.await?;
 			if !addition.alert_when_unreachable {
 				crate::silenced_refs::MachineSilencedRef::add(
 					conn,
@@ -276,7 +286,19 @@ impl Machine {
 	pub async fn update(
 		db: &mut AsyncPgConnection,
 		machine_id: Uuid,
+		updates: MachineUpdate,
+	) -> Result<Self> {
+		Self::update_by(db, machine_id, updates, None).await
+	}
+
+	/// [`Self::update`], a change to the machine's notes going through its notes
+	/// log under `author`.
+	// spec: FLT#notes
+	pub async fn update_by(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
 		mut updates: MachineUpdate,
+		author: Option<Author<'_>>,
 	) -> Result<Self> {
 		use crate::schema::machines::dsl;
 
@@ -286,6 +308,10 @@ impl Machine {
 
 		if let Some(tags) = &updates.tags {
 			crate::tags::reject_reserved_keys(tags)?;
+		}
+
+		if let Some(notes) = &updates.notes {
+			notes_log::set(db, NotesRecord::Machine(machine_id), notes, author, None).await?;
 		}
 
 		let before = Self::get_by_id(db, machine_id).await?;

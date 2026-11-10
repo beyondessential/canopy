@@ -1,9 +1,45 @@
 import { expect, test } from "./test-fixtures";
-import { resetSeededTables, seedServer, seedServerGroup } from "./seed";
+import {
+	resetSeededTables,
+	seedNotesRevision,
+	seedServer,
+	seedServerGroup,
+} from "./seed";
 
 test.describe("group detail page", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
+	});
+
+	test("shows the history of the group's notes, newest first", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, {
+			name: "history-group",
+			notes: "second text",
+		});
+		await seedNotesRevision(sql, {
+			groupId: group.id,
+			revision: 1,
+			notes: "first text",
+			author: null,
+			via: null,
+		});
+		await seedNotesRevision(sql, {
+			groupId: group.id,
+			revision: 2,
+			notes: "second text",
+			author: "agent-1",
+			via: "token",
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		await page.getByRole("button", { name: "History (2)" }).click();
+		const entries = page.getByText(/through|Before history was kept/);
+		await expect(entries.first()).toContainText("agent-1 through an access token");
+		await expect(entries.last()).toContainText("Before history was kept");
+		await expect(page.getByText("first text")).toBeVisible();
 	});
 
 	test("renders the group's name, notes, tags and member servers", async ({

@@ -22,8 +22,11 @@ pub const TOKEN_PREFIX: &str = "canopy_mcp_";
 /// What a token may do beyond reading, chosen when it is minted.
 pub const GRANT_TRIAGE: &str = "triage";
 
+/// Allows a token to write notes and incident memory.
+pub const GRANT_NOTES: &str = "notes";
+
 /// The grants a token can carry.
-pub const GRANTS: &[&str] = &[GRANT_TRIAGE];
+pub const GRANTS: &[&str] = &[GRANT_TRIAGE, GRANT_NOTES];
 
 /// Fixed token lifetime: one year from minting.
 pub const TOKEN_TTL: SignedDuration = SignedDuration::from_hours(365 * 24);
@@ -87,6 +90,11 @@ impl McpToken {
 	/// Whether the token may record triage decisions.
 	pub fn may_triage(&self) -> bool {
 		self.grants.iter().any(|grant| grant == GRANT_TRIAGE)
+	}
+
+	/// Whether the token may write notes and incident memory.
+	pub fn may_note(&self) -> bool {
+		self.grants.iter().any(|grant| grant == GRANT_NOTES)
 	}
 
 	/// Mint a fresh token, returning the row and the plaintext (which the

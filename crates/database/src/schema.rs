@@ -550,12 +550,26 @@ diesel::table! {
 }
 
 diesel::table! {
+	incident_note_revisions (note_id, revision) {
+		note_id -> Uuid,
+		revision -> Int8,
+		body -> Text,
+		edited_by -> Text,
+		edited_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	incident_notes (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		incident_id -> Uuid,
 		author -> Text,
 		body -> Text,
+		author_kind -> Text,
+		revision -> Int8,
+		deleted_at -> Nullable<Timestamptz>,
+		deleted_by -> Nullable<Text>,
 	}
 }
 
@@ -585,12 +599,26 @@ diesel::table! {
 }
 
 diesel::table! {
+	issue_note_revisions (note_id, revision) {
+		note_id -> Uuid,
+		revision -> Int8,
+		body -> Text,
+		edited_by -> Text,
+		edited_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	issue_notes (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		issue_id -> Uuid,
 		author -> Text,
 		body -> Text,
+		author_kind -> Text,
+		revision -> Int8,
+		deleted_at -> Nullable<Timestamptz>,
+		deleted_by -> Nullable<Text>,
 	}
 }
 
@@ -803,6 +831,49 @@ diesel::table! {
 }
 
 diesel::table! {
+	use diesel::sql_types::*;
+	use super::sql_types::Tsvector;
+
+	memory_entries (id) {
+		id -> Uuid,
+		title -> Text,
+		body -> Text,
+		server_group_id -> Nullable<Uuid>,
+		incident_id -> Nullable<Uuid>,
+		check_source -> Nullable<Text>,
+		check_name -> Nullable<Text>,
+		revision -> Int8,
+		created_at -> Timestamptz,
+		created_by -> Text,
+		updated_at -> Timestamptz,
+		updated_by -> Text,
+		retired_at -> Nullable<Timestamptz>,
+		retired_by -> Nullable<Text>,
+		retired_reason -> Nullable<Text>,
+		search -> Nullable<Tsvector>,
+	}
+}
+
+diesel::table! {
+	memory_entry_revisions (entry_id, revision) {
+		entry_id -> Uuid,
+		revision -> Int8,
+		kind -> Text,
+		title -> Text,
+		body -> Text,
+		server_group_id -> Nullable<Uuid>,
+		incident_id -> Nullable<Uuid>,
+		check_source -> Nullable<Text>,
+		check_name -> Nullable<Text>,
+		actor -> Text,
+		via -> Text,
+		reason -> Nullable<Text>,
+		restored_from -> Nullable<Int8>,
+		created_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	migration_test_requests (machine_id, plan_id) {
 		machine_id -> Uuid,
 		plan_id -> Uuid,
@@ -831,6 +902,20 @@ diesel::table! {
 		ordinal -> Int4,
 		name -> Text,
 		elapsed -> Interval,
+	}
+}
+
+diesel::table! {
+	notes_revisions (id) {
+		id -> Uuid,
+		server_group_id -> Nullable<Uuid>,
+		machine_id -> Nullable<Uuid>,
+		application_id -> Nullable<Uuid>,
+		revision -> Int8,
+		notes -> Text,
+		author -> Nullable<Text>,
+		via -> Nullable<Text>,
+		created_at -> Timestamptz,
 	}
 }
 
@@ -1331,9 +1416,11 @@ diesel::joinable!(identity_grants -> machines (machine_id));
 diesel::joinable!(identity_grants -> relying_parties (relying_party_id));
 diesel::joinable!(incident_issues -> incidents (incident_id));
 diesel::joinable!(incident_issues -> issues (issue_id));
+diesel::joinable!(incident_note_revisions -> incident_notes (note_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
 diesel::joinable!(incident_reeval_queue -> applications (application_id));
 diesel::joinable!(incidents -> server_groups (server_group_id));
+diesel::joinable!(issue_note_revisions -> issue_notes (note_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> applications (application_id));
 diesel::joinable!(issues -> devices (device_id));
@@ -1360,12 +1447,18 @@ diesel::joinable!(maintenance_windows -> applications (application_id));
 diesel::joinable!(maintenance_windows -> machines (machine_id));
 diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
 diesel::joinable!(maintenance_windows -> upgrade_plans (upgrade_plan_id));
+diesel::joinable!(memory_entries -> incidents (incident_id));
+diesel::joinable!(memory_entries -> server_groups (server_group_id));
+diesel::joinable!(memory_entry_revisions -> memory_entries (entry_id));
 diesel::joinable!(migration_test_requests -> machines (machine_id));
 diesel::joinable!(migration_test_requests -> upgrade_plans (plan_id));
 diesel::joinable!(migration_tests -> applications (application_id));
 diesel::joinable!(migration_tests -> backup_restore_checks (check_id));
 diesel::joinable!(migration_tests -> versions (target_version_id));
 diesel::joinable!(migration_timings -> migration_tests (check_id));
+diesel::joinable!(notes_revisions -> applications (application_id));
+diesel::joinable!(notes_revisions -> machines (machine_id));
+diesel::joinable!(notes_revisions -> server_groups (server_group_id));
 diesel::joinable!(post_migration_timings -> migration_tests (check_id));
 diesel::joinable!(reporting_schema_builds -> applications (application_id));
 diesel::joinable!(reporting_schema_builds -> backup_restore_checks (check_id));
@@ -1439,9 +1532,11 @@ diesel::allow_tables_to_appear_in_same_query!(
 	identity_grants,
 	identity_keys,
 	incident_issues,
+	incident_note_revisions,
 	incident_notes,
 	incident_reeval_queue,
 	incidents,
+	issue_note_revisions,
 	issue_notes,
 	issues,
 	kubernetes_clusters,
@@ -1457,9 +1552,12 @@ diesel::allow_tables_to_appear_in_same_query!(
 	maintenance_window_moves,
 	maintenance_windows,
 	mcp_tokens,
+	memory_entries,
+	memory_entry_revisions,
 	migration_test_requests,
 	migration_tests,
 	migration_timings,
+	notes_revisions,
 	operator_sessions,
 	post_migration_timings,
 	recovery_vault_writes,

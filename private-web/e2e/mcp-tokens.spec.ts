@@ -132,4 +132,32 @@ test.describe("mcp tokens page", () => {
 			await request.post("/api/mcp_tokens/revoke", { data: { id: token.id } });
 		}
 	});
+
+	test("mints a token with the notes grant and lists it", async ({
+		page,
+		request,
+	}) => {
+		const name = uniqueName("notes");
+
+		await page.goto("/settings/mcp-tokens");
+		await expect(page.getByLabel("Notes grant")).not.toBeChecked();
+		await page.getByLabel("Token name").fill(name);
+		await page.getByLabel("Notes grant").check();
+		await page.getByRole("button", { name: "Mint token" }).click();
+		await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
+
+		await expect(
+			page.getByRole("row").filter({ hasText: name }),
+		).toContainText("notes");
+
+		const list = await request.post("/api/mcp_tokens/list", { data: {} });
+		const tokens = (await list.json()) as Array<{
+			id: string;
+			name: string;
+			grants: string[];
+		}>;
+		const mine = tokens.find((t) => t.name === name);
+		expect(mine?.grants).toEqual(["notes"]);
+		await request.post("/api/mcp_tokens/revoke", { data: { id: mine?.id } });
+	});
 });

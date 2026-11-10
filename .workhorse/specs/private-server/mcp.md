@@ -39,6 +39,7 @@ Each token records when it was last used, so idle tokens are visible.
 
 A token carries the grants chosen when it is minted, which cannot be changed afterwards; a token minted without one never gains it.
 The **triage grant** allows the token to record, withdraw and edit vulnerability triage decisions.
+The **notes grant** allows the token to add notes to issues and incidents and to edit and delete the notes agents wrote, to replace the notes of a group, machine or application, and to record, amend, retire and restore [incident memory](../monitoring/incident-memory.md) entries.
 A token is minted with no grants unless the administrator chooses one, so every token reads only unless minted to write.
 The token list shows each token's grants.
 
@@ -47,7 +48,7 @@ From fifteen days before a token's expiry until that token expires or is revoked
 ## Reads and writes
 
 Most of the surface is reads, as that's the safe set. Writes are deliberately added where it makes sense, with some safeguards:
-- A write is refused to a caller not allowed it, without effect: on the operator path, a caller who is not an administrator; on the token path, a token without the triage grant.
+- A write is refused to a caller not allowed it, without effect: on the operator path, a caller who is not an administrator; on the token path, a token without the grant that holds the write.
 - Each write is audited as the action it takes, recorded the same way as when it is taken in the operator interface (see [AUD](../platform/audit-log.md)).
 
 ## Queries
@@ -168,6 +169,46 @@ All three writes are held by the triage grant.
 The agent lists the repository's items that need triage, groups and orders them as it finds easiest for a person to review, and reads how the code uses each vulnerable package.
 It then puts its proposed decisions to the user in batches of ten, each with a reason that says what was checked, and records a batch only once the user has confirmed it, so a person approves every decision.
 The prompt tells the agent that the model's suggestions were made without source and are to be checked, and that an advisory it cannot verify from the code is left for a person.
+
+### Notes
+
+**Add issue note** and **Add incident note** take an issue or incident identifier and the note's text, and add a note attributed to the caller (see [CHK](../monitoring/checks.md), "Notes", and [INC](../monitoring/incidents.md), "Resolution").
+**Edit note** takes a note's identifier, the revision of the note the caller read, and the new text, and **Delete note** takes a note's identifier.
+Both are refused for a note an operator wrote, naming that as the reason, and **Edit note** is refused if the note has changed since the revision given.
+**Get issue** and **Get incident** return the notes, newest first, each with its author, whether an agent or an operator wrote it, its revision, and its time.
+
+**Get group**, **Get machine** and **Get application** return the record's notes with their revision (see [FLT](../servers/overview.md), "Notes").
+**Replace notes** takes a group, machine or application identifier, the new text, and the revision the caller read, and replaces the record's notes with the text.
+It is refused if the notes have changed since that revision, and the result says so and returns the current notes and revision, so the caller can reconcile and try again.
+The change is recorded in the record's revision log as made through this interface by its caller.
+**Get notes history** takes the same identifier and returns the revision log newest first, each revision with its text, author, how it was made, and when.
+
+All of these writes are held by the notes grant.
+
+### Incident memory
+
+These tools read and write the [incident memory](../monitoring/incident-memory.md).
+
+**Find memory** takes optional free-text matched against titles and bodies, an optional link kind, an optional group, check or incident the entries link to, and a flag to include retired entries.
+It returns a bounded list of matching entries, newest amended first, each with its identifier, title, body, link resolved to a name alongside its identifier, revision, and when it was last amended, and says so when truncated.
+**Get memory entry** takes an identifier and returns the entry with its history.
+
+**Get memory index** takes an optional group and a look-back window in days, defaulting to ninety, and returns what an agent needs to start an investigation with the context of past incidents:
+
+- every current entry in compact form (identifier, title, link resolved to a name, when last amended), grouped as fleet-wide, per group, per check and per incident, so the agent can choose which to read in full;
+- the checks that have been part of the most incidents in the window, each with how many incidents, how many were published, when the latest was, which groups they were on, and how many memory entries are linked to it;
+- the groups with the most incidents in the window, each with how many incidents, how many were published, and how many memory entries are linked to it;
+- the incidents in the window that carry operator or agent notes, each with its target, status, how many notes, and when the latest was written, so the agent can find where a person has already said something worth reading.
+
+Narrowing to one group narrows the second, third and fourth lists to that group's incidents and the first to the entries that are fleet-wide or link to that group, one of its incidents, or a check it has had incidents on.
+A check or group that has had trouble but has no entry linked is shown as such rather than left out, so a gap in what is known is visible.
+Incident counts follow the same rule as **Find incidents**, counting published incidents separately from raw ones.
+
+**Record memory entry** takes a title, a body and optionally a link, and returns the entry.
+**Amend memory entry** takes an identifier, the revision read, and any of title, body and link to change, and is refused as **Replace notes** is when the entry has changed since.
+**Retire memory entry** takes an identifier and a reason.
+**Restore memory entry** takes an identifier, the revision read, and the earlier version to restore, and is refused as an amendment is when the entry has changed since.
+All four are held by the notes grant, and each is audited as the action it takes (see [AUD](../platform/audit-log.md)).
 
 ### Audit log
 

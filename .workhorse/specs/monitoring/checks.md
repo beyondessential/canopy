@@ -362,7 +362,12 @@ A silence on a machine's reachability is offered wherever that machine's state i
 **Resolution** is an operator marking one state as dealt with, recording who and why.
 A resolved state that degrades again reopens: the resolution is cleared and the state contributes anew.
 
-**Notes** attach free-form operator commentary to a state.
+**Notes** attach free-form commentary to a state, each recording who wrote it and when.
+A note can be added by an operator or by an agent through the fleet query interface (see [MCP](../private-server/mcp.md)).
+An operator can delete any note, and an agent can edit or delete a note another agent wrote but not one an operator wrote.
+An edited note keeps the text it replaced, with who edited it and when.
+A deleted note leaves the state's notes but is kept, recording who deleted it and when, and administrators can show deleted notes again by asking for them.
+Adding, editing and deleting a note are audited actions (see [AUD](../platform/audit-log.md)).
 
 ## Manual conditions
 

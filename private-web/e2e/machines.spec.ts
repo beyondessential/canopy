@@ -5,6 +5,7 @@ import {
 	seedIssue,
 	seedMachine,
 	seedMachineReport,
+	seedNotesRevision,
 	seedServer,
 	seedServerGroup,
 	seedStatus,
@@ -17,6 +18,34 @@ import {
 test.describe("machine detail", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
+	});
+
+	test("shows the history of the box's notes, including a clearing", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "notes-group" });
+		const machine = await seedMachine(sql, {
+			name: "noted-box",
+			groupId: group.id,
+		});
+		await seedNotesRevision(sql, {
+			machineId: machine.id,
+			revision: 1,
+			notes: "rack 4",
+		});
+		await seedNotesRevision(sql, {
+			machineId: machine.id,
+			revision: 2,
+			notes: "",
+			via: "ansible_import",
+		});
+
+		await page.goto(`/fleet/machines/${machine.id}`);
+		await page.getByRole("button", { name: "History (2)" }).click();
+		await expect(page.getByText("Cleared")).toBeVisible();
+		await expect(page.getByText("rack 4")).toBeVisible();
+		await expect(page.getByText(/through an Ansible import/)).toBeVisible();
 	});
 
 	test("presents what the box reports about itself", async ({ page, sql }) => {

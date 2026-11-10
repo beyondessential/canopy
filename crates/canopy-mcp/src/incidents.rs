@@ -5,6 +5,7 @@ use database::{
 	applications::Application,
 	diesel_async::AsyncPgConnection,
 	issues::{Incident, IncidentStatusFilter, Issue, IssueListFilters},
+	notes::{IncidentNote, IssueNote},
 	server_groups::ServerGroup,
 	slack_outbox::SlackOutbox,
 };
@@ -19,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	CanopyMcp,
+	notes::{NOTES_LIMIT, NoteOut},
 	util::{
 		group_names, mcp_err, not_found, ok_json, parse_opt_uuid, parse_uuid, since_from_days,
 		unique,
@@ -379,6 +381,8 @@ struct IncidentDetail {
 	open_duration_secs: i64,
 	created_at: Timestamp,
 	updated_at: Timestamp,
+	/// Notes on the incident, newest first, deleted ones left out.
+	notes: Vec<NoteOut>,
 	issues: Vec<IncidentIssueOut>,
 }
 
@@ -446,6 +450,8 @@ struct IssueDetail {
 	resolved_by: Option<String>,
 	resolved_reason: Option<String>,
 	snoozed_until: Option<Timestamp>,
+	/// Notes on the issue, newest first, deleted ones left out.
+	notes: Vec<NoteOut>,
 	incidents: Vec<IncidentRefOut>,
 }
 
@@ -600,6 +606,12 @@ impl CanopyMcp {
 			open_duration_secs: open_duration_secs(&incident),
 			created_at: incident.created_at,
 			updated_at: incident.updated_at,
+			notes: IncidentNote::list_for_incident(&mut conn, id, NOTES_LIMIT, false)
+				.await
+				.map_err(mcp_err)?
+				.into_iter()
+				.map(NoteOut::from)
+				.collect(),
 			issues,
 		})
 	}
@@ -732,6 +744,12 @@ impl CanopyMcp {
 			resolved_by: issue.resolved_by.clone(),
 			resolved_reason: issue.resolved_reason.clone(),
 			snoozed_until: issue.snoozed_until,
+			notes: IssueNote::list_for_issue(&mut conn, id, NOTES_LIMIT, false)
+				.await
+				.map_err(mcp_err)?
+				.into_iter()
+				.map(NoteOut::from)
+				.collect(),
 			incidents,
 		})
 	}

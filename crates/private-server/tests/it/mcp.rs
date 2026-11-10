@@ -1612,8 +1612,17 @@ async fn every_tool_is_read_only() {
 		assert_eq!(
 			not_read_only,
 			[
+				"add_incident_note",
+				"add_issue_note",
+				"amend_memory_entry",
+				"delete_note",
+				"edit_note",
 				"edit_vulnerability_decision",
+				"record_memory_entry",
 				"record_vulnerability_decisions",
+				"replace_notes",
+				"restore_memory_entry",
+				"retire_memory_entry",
 				"withdraw_vulnerability_decisions",
 			],
 			"tools not declared read-only"

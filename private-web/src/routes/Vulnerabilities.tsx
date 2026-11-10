@@ -26,6 +26,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
 import { useApi } from "../api";
 import { SeverityChip, StatusChip } from "../components/VulnerabilityChips";
+import { useDebounced } from "../hooks/useDebounced";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
 	VULNERABILITY_BASIS_LABEL,
@@ -71,16 +72,6 @@ const COLUMNS: Column[] = [
 	{ label: "Status", sort: "status" },
 	{ label: "Machines", sort: "machines" },
 ];
-
-/** A debounced copy of `value`. */
-function useDebounced<T>(value: T, ms: number): T {
-	const [debounced, setDebounced] = useState(value);
-	useEffect(() => {
-		const timer = setTimeout(() => setDebounced(value), ms);
-		return () => clearTimeout(timer);
-	}, [value, ms]);
-	return debounced;
-}
 
 export default function Vulnerabilities() {
 	usePageTitle("Vulnerabilities");

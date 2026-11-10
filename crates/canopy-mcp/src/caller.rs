@@ -8,7 +8,12 @@
 use std::{fmt, pin::Pin, sync::Arc};
 
 use commons_errors::AppError;
-use database::{audit::Actor, mcp_tokens::GRANT_TRIAGE};
+use database::{
+	audit::Actor,
+	mcp_tokens::{GRANT_NOTES, GRANT_TRIAGE},
+	notes::AuthorKind,
+	notes_log::Author,
+};
 use rmcp::{handler::server::tool::Extension, model::ErrorData as McpError};
 use uuid::Uuid;
 
@@ -66,6 +71,40 @@ impl Caller {
 				id: *id,
 				name: name.clone(),
 			},
+		}
+	}
+
+	/// The name a note or an edit is attributed to: an operator's login, a
+	/// token's name.
+	pub fn name(&self) -> &str {
+		match self {
+			Self::Operator { login, .. } => login,
+			Self::Token { name, .. } => name,
+		}
+	}
+
+	/// Whether a note the caller writes is an operator's or an agent's.
+	pub fn note_author_kind(&self) -> AuthorKind {
+		match self {
+			Self::Operator { .. } => AuthorKind::Operator,
+			Self::Token { .. } => AuthorKind::Agent,
+		}
+	}
+
+	/// The caller as the author of a change to notes or memory.
+	pub fn notes_author(&self) -> Author<'_> {
+		match self {
+			Self::Operator { login, .. } => Author::operator(login),
+			Self::Token { name, .. } => Author::token(name),
+		}
+	}
+
+	/// Whether the caller may write notes and incident memory: an administrator
+	/// on the operator surface, a token with the notes grant on the other.
+	pub async fn may_note(&self) -> Result<bool, AppError> {
+		match self {
+			Self::Operator { admin, .. } => admin.resolve().await,
+			Self::Token { grants, .. } => Ok(grants.iter().any(|grant| grant == GRANT_NOTES)),
 		}
 	}
 
