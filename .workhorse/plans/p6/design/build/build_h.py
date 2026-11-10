@@ -134,7 +134,7 @@ def fleet_rows(cols, outliers, total, groups, extra_cells):
     rest = total - len(outliers)
     cells = "".join(f"<td>{c}</td>" for c in extra_cells)
     out.append(
-        f'<tr class="fleet"><td><a href="#">{rest} more</a>{cap("behaving like the fleet")}</td>{cells}'
+        f'<tr class="fleet"><td><a href="#">{rest} more</a></td>{cells}'
         f'<td class="r"><span class="btn o s">Show {rest}</span></td></tr>'
     )
     return "".join(out)
@@ -155,7 +155,7 @@ def row(cells, cls=""):
     return f"<tr{c}>" + "".join(f"<td>{x}</td>" for x in cells) + "</tr>"
 
 
-def principals_table():
+def principals_table(added=False):
     head = ('<thead><tr><th style="width:260px">Principal</th><th style="width:200px">Authenticates by</th>'
             '<th>Roles</th><th style="width:190px">Last matched</th><th class="r" style="width:150px">Status</th></tr></thead>')
     R = []
@@ -185,25 +185,31 @@ def principals_table():
                   roles(role("triage")), "2 hours ago" + cap("read incidents"), status("expires in 9d", "warning")]))
     R.append(row([name_cell("vuln-review-2025", "MCP agent"), "Bearer token",
                   roles(role("triage", struck=True)), "1 Aug 2026" + cap("read vulnerabilities"), status("revoked")], "off"))
-    R.append(row([name_cell("release-publisher", "Releaser"), "GitHub Actions trust",
+    R.append(row([name_cell("release-publisher", "CI workflow"), "GitHub Actions trust",
                   roles(role("releaser", "bestool")), "2 hours ago" + cap("publish version 3.4.1"), ""]))
-    R.append(row([name_cell("pgro-restore-operator", "Restore consumer"), "Tailnet node",
+    R.append(row([name_cell("pgro-restore-operator", "Service"), "Enrolled key",
                   roles(role("restore-consumer", "own group")), "6 minutes ago" + cap("consume replica, tamanu-prod"), ""]))
-    R.append(row([name_cell("pgro-harbour", "Restore consumer"), "Tailnet node",
+    R.append(row([name_cell("pgro-harbour", "Service"), "Enrolled key",
                   roles(role("restore-consumer", "own group")), "1 hour ago" + cap("consume replica, harbour"), ""]))
-    R.append(row([name_cell("relay-syd-1", "Relay"), "Relay key",
+    R.append(row([name_cell("relay-syd-1", "Service"), "Relay key",
                   roles(role("relay", "syd-1")), "1 minute ago" + cap("connect cluster relay"), ""]))
-    R.append(row([name_cell("ci-deploy-runner", "Automation"), "Client certificate",
-                  roles(role("admin")), "5 days ago" + cap("edit Ansible variable"), ""]))
+    R.append(row([name_cell("ci-deploy-runner", "Automation"), "Enrolled key",
+                  roles(role("admin"), role("deploy-automation", struck=True)), "5 days ago" + cap("edit Ansible variable"), ""]))
     outliers = [
-        row([name_cell("tamanu-prod-db-3", "tamanu-prod"), "Client certificate",
+        row([name_cell("tamanu-prod-db-3", "tamanu-prod"), "Enrolled key",
              roles(role("fleet-machine", "own group")), "2 minutes ago" + cap("report status"),
              status("new key 2h ago", "warning")]),
-        row([name_cell("backup-runner-syd", "tamanu-prod"), "Client certificate",
-             roles(role("fleet-machine", "own group"), role("sso-grafana")),
-             "9 minutes ago" + cap("issue identity token"), status("exception", "warning")]),
+        row([name_cell("backup-runner-syd", "tamanu-prod"), "Enrolled key",
+             roles(role("fleet-machine", "own group"), role("sso-backup-runner")),
+             "9 minutes ago" + cap("issue identity token"), status("exception", "warning") + cap("ends 30 Nov")]),
     ]
-    fleet = fleet_rows(5, outliers, 412, 14, ["Client certificate", roles(role("fleet-machine", "own group")), "1 minute ago"])
+    attention = ["tamanu-iti-kiosk-14", "tomas.wiremu", "status-digest-bot", "vuln-review-2025"]
+    first = [r for n in attention for r in R if f">{n}" in r]
+    R = first + [r for r in R if r not in first]
+    if added:
+        R.insert(len(first), row([name_cell("grafana-sidecar", "MCP agent"), "Bearer token",
+                                  roles(role("triage")), '<span class="sec2">never</span>', status("new", "o")]))
+    fleet = fleet_rows(5, outliers, 412, 14, ["Enrolled key", roles(role("fleet-machine", "own group")), "1 minute ago"])
     return f"<table>{head}<tbody>{''.join(R)}{fleet}</tbody></table>"
 
 
@@ -245,7 +251,7 @@ def section(title, inner, action=""):
 
 
 def releaser_page():
-    head = detail_head("release-publisher", "Releaser", '<span class="btn oe">Suspend</span>')
+    head = detail_head("release-publisher", "CI workflow", '<span class="btn oe">Suspend</span>')
     f = facts([("Authenticates by", "GitHub Actions trust"), ("Last matched", "2 hours ago, publish version 3.4.1"),
                ("Added", "12 Mar 2026 by mei.tanaka")])
     claims = ('<dl class="claims"><dt>Issuer</dt><dd>token.actions.githubusercontent.com</dd>'
@@ -255,7 +261,7 @@ def releaser_page():
     creds = ('<table class="top"><thead><tr><th style="width:190px">Credential</th><th>Must present</th>'
              '<th style="width:170px">Matched through</th><th style="width:150px">Last used</th><th class="r" style="width:120px"></th></tr></thead><tbody>'
              f'<tr><td>GitHub Actions trust</td><td>{claims}</td><td>{role("releaser")}</td><td>2 hours ago</td><td></td></tr>'
-             f'<tr class="off"><td>Client certificate</td><td class="mono">SHA256:9f2c 41d7 &hellip; e41a</td><td class="sec2">direct</td>'
+             f'<tr class="off"><td>Enrolled key</td><td class="mono">SHA256:9f2c 41d7 &hellip; e41a</td><td class="sec2">direct</td>'
              f'<td>41 days ago</td><td class="r">{status("disabled")}</td></tr></tbody></table>')
     held = ('<table><thead><tr><th style="width:260px">Role</th><th>Through</th><th style="width:150px">Since</th>'
             '<th class="r" style="width:60px"></th></tr></thead><tbody>'
@@ -269,7 +275,7 @@ def releaser_page():
            f'<tr><td>Publish versions</td><td>bestool</td><td>{role("releaser")}</td><td>2 hours ago</td></tr>'
            f'<tr><td>Publish artifacts</td><td>bestool</td><td>{role("releaser")}</td><td>2 hours ago</td></tr>'
            f'<tr><td>Read artifacts</td><td>bestool</td><td>{role("releaser")}</td><td>2 hours ago</td></tr>'
-           f'<tr><td>Read versions</td><td>all software</td><td>{role("releaser")}</td><td>5 days ago</td></tr>'
+           f'<tr><td>Read versions</td><td>bestool</td><td>{role("releaser")}</td><td>5 days ago</td></tr>'
            '</tbody></table>')
     return (head + f + section("Credentials", creds, '<span class="btn o">Add credential</span>')
             + section("Roles", held) + section("Effective permissions", eff))
@@ -283,20 +289,21 @@ def triage_page():
     head = detail_head("incident-triage-bot", "MCP agent", '<span class="btn oe">Suspend</span>')
     f = facts([("Authenticates by", "Bearer token"), ("Last matched", "8 minutes ago, write note"),
                ("Added", "2 Feb 2026 by sofia.alvarez")])
-    creds = ('<table><thead><tr><th style="width:190px">Credential</th><th>Identifies</th><th style="width:150px">Expires</th>'
-             '<th style="width:150px">Last used</th><th class="r" style="width:120px"></th></tr></thead><tbody>'
-             '<tr><td>Bearer token</td><td class="mono">canopy_mcp_7Hq2&hellip;</td><td>2 Feb 2027</td><td>8 minutes ago</td>'
+    creds = ('<table><thead><tr><th style="width:190px">Credential</th><th>Must present</th>'
+             '<th style="width:170px">Matched through</th><th style="width:150px">Last used</th><th class="r" style="width:120px"></th></tr></thead><tbody>'
+             '<tr><td>Bearer token</td><td><span class="mono">canopy_mcp_7Hq2&hellip;</span>' + cap("expires 2 Feb 2027") + '</td>'
+             '<td class="sec2">direct</td><td>8 minutes ago</td>'
              '<td class="r"><span class="btn oe s">Revoke</span></td></tr></tbody></table>')
     held = ('<table><thead><tr><th style="width:260px">Role</th><th>Through</th><th style="width:150px">Since</th></tr></thead><tbody>'
-            f'<tr><td>{role("triage", "all groups")}</td><td>direct</td><td>2 Feb 2026</td></tr>'
-            f'<tr><td>{role("notes", "all groups")}</td><td>direct</td><td>2 Feb 2026</td></tr></tbody></table>')
+            f'<tr><td>{role("triage")}</td><td>direct</td><td>2 Feb 2026</td></tr>'
+            f'<tr><td>{role("notes")}</td><td>direct</td><td>2 Feb 2026</td></tr></tbody></table>')
     return head + f + section("Credentials", creds) + section("Roles", held)
 
 
 SUSPEND = (
     '<div class="backdrop"><div class="dialog"><h2>Suspend incident-triage-bot?</h2><div class="content">'
     '<p class="d-text">It loses these at once:</p>'
-    '<ul><li>Read and triage incidents, all groups</li><li>Write notes, all groups</li></ul>'
+    '<ul><li>Read incidents and vulnerabilities</li><li>Triage incidents</li><li>Read and write notes</li></ul>'
     '<div style="margin-top:20px">' + field("Reason", "Posting incident notes in a loop", fw=True) + "</div>"
     f'<div class="check">{svg("cboff")}Also revoke its bearer token</div>'
     '</div><div class="actions"><span class="btn">Cancel</span><span class="btn c" style="background:#d32f2f">Suspend</span></div></div></div>'
@@ -320,15 +327,15 @@ def roles_table():
     R = [
         rr("admin", "2 on the allow-list" + cap("2 by Tailscale policy, 1 automation"), "Everything", "4 minutes ago", builtin=True),
         rr("operator", "3 tailnet logins", "Read everything; write maintenance and notes", "2 days ago", builtin=True),
-        rr("releaser", "1 by GitHub Actions trust", "Publish versions and artifacts" + cap("one piece of software"), "2 hours ago"),
-        rr("restore-consumer", "2 by tag:restore-consumer", "Read backups, consume restore replicas" + cap("own group"), "6 minutes ago"),
+        rr("releaser", "1 by GitHub Actions trust", "Read and publish versions and artifacts" + cap("one piece of software"), "2 hours ago"),
+        rr("restore-consumer", "2 by enrolled key" + cap("tag:restore-consumer"), "Read backups, consume restore replicas" + cap("own group"), "6 minutes ago"),
         rr("relay", "1 by relay key", "Connect cluster relay" + cap("one cluster"), "1 minute ago"),
         rr("triage", "2 bearer tokens", "Read incidents and vulnerabilities, triage incidents", "8 minutes ago"),
         rr("notes", "1 bearer token", "Read and write notes", "8 minutes ago"),
         rr("dns-and-tls", "6 machines", "Manage DNS names and TLS certificates" + cap("own application"), "3 hours ago"),
         rr("sso-grafana", "9 machines", "Request identity tokens for grafana-sso", "9 minutes ago"),
         rr("maintenance-planner", "1 tailnet login", "Write maintenance windows" + cap("one group"), "2 days ago"),
-        rr("backup-verifier", "1 by tag:backup-verify", "Read backups, report verification" + cap("all groups"), "20 minutes ago"),
+        rr("backup-verifier", "1 by enrolled key" + cap("tag:backup-verify"), "Read backups, report verification" + cap("all groups"), "20 minutes ago"),
         rr("vuln-reporter", "3 machines", "Report vulnerabilities" + cap("own group"), "1 hour ago"),
         rr("auditor", '<span class="sec2">none</span>', "Read audit log and roles", "never"),
         rr("deploy-automation", "1 automation", "Write Ansible variables and maintenance", "12 Oct 2026",
@@ -422,12 +429,12 @@ def role_page():
                ("Changed", "2 Oct 2026 by sofia.alvarez")])
     trusts = ('<table><thead><tr><th style="width:190px">Trust</th><th>Must present</th><th style="width:120px">Matches</th>'
               '<th style="width:150px">Last matched</th><th class="r" style="width:60px"></th></tr></thead><tbody>'
-              f'<tr><td>Tailnet tag</td><td class="mono">tag:restore-consumer</td><td>2</td><td>6 minutes ago</td>'
+              f'<tr><td>Enrolled key</td><td>tagged <span class="mono">tag:restore-consumer</span></td><td>2</td><td>6 minutes ago</td>'
               f'<td class="r"><span class="iconbtn">{svg("del")}</span></td></tr></tbody></table>')
     members = ('<table><thead><tr><th style="width:260px">Principal</th><th>Own group</th><th style="width:190px">Through</th>'
                '<th style="width:150px">Last matched</th></tr></thead><tbody>'
-               '<tr><td><a class="mono" href="#">pgro-restore-operator</a></td><td>tamanu-prod</td><td>Tailnet tag</td><td>6 minutes ago</td></tr>'
-               '<tr><td><a class="mono" href="#">pgro-harbour</a></td><td>harbour</td><td>Tailnet tag</td><td>1 hour ago</td></tr>'
+               '<tr><td><a class="mono" href="#">pgro-restore-operator</a></td><td>tamanu-prod</td><td>Enrolled key</td><td>6 minutes ago</td></tr>'
+               '<tr><td><a class="mono" href="#">pgro-harbour</a></td><td>harbour</td><td>Enrolled key</td><td>1 hour ago</td></tr>'
                '</tbody></table>')
     return (head + f + section("Permissions", matrix()) + section("Trusts", trusts, '<span class="btn o">Add trust</span>')
             + section("Members", members, '<span class="btn o">Add member</span>'))
@@ -446,14 +453,14 @@ def who_can():
     head = ('<thead><tr><th style="width:260px">Principal</th><th style="width:240px">Role</th><th>Through</th>'
             '<th style="width:150px">Scope matched</th><th style="width:170px">Last matched</th></tr></thead>')
     R = [
-        row([name_cell("pgro-harbour", "Restore consumer"), roles(role("restore-consumer", "own group")),
-             "Tailnet tag" + cap("tag:restore-consumer"), "harbour", "1 hour ago"]),
+        row([name_cell("pgro-harbour", "Service"), roles(role("restore-consumer", "own group")),
+             "Enrolled key" + cap("tag:restore-consumer"), "harbour", "1 hour ago"]),
         row([name_cell("mei.tanaka@example.org", "Operator"), roles(role("admin")), "Allow-list", "all groups", "never"]),
         row([name_cell("sofia.alvarez@example.org", "Operator"), roles(role("admin")), "Allow-list", "all groups", "never"]),
         row([name_cell("rahul.verma@example.org", "Operator"), roles(role("admin", locked=True)), "Tailscale policy", "all groups", "never"]),
         row([name_cell("ci-deploy-runner", "Automation"), roles(role("admin")), "Direct", "all groups", "never"]),
         row([name_cell("tomas.wiremu@example.org", "Operator"), roles(role("admin", struck=True, locked=True)), "Tailscale policy",
-             '<span class="sec2">none</span>', status("suspended")], "off"),
+             '<span class="sec2">none</span>', status("suspended") + cap("by mei.tanaka, 3 Nov")], "off"),
     ]
     fleet = ('<tr class="sect"><td colspan="5">Fleet machines<span class="cap">412 in 14 groups</span></td></tr>'
              + row(['<span class="sec2">none of 412</span>', roles(role("fleet-machine", "own group")),
@@ -475,13 +482,13 @@ MINTED = (
     '<div class="secret"><div class="box">canopy_mcp_q8Vn2LxT0cRk4Yw7Hs1Pz9MbE3uJa6Df</div>'
     f'<span class="iconbtn big">{svg("copy")}</span></div>'
     '<div class="facts" style="margin-top:20px">'
-    f'<div><span class="cap">Role</span><span class="body2">{role("triage", "all groups")}</span></div>'
+    f'<div><span class="cap">Role</span><span class="body2">{role("triage")}</span></div>'
     '<div><span class="cap">Expires</span><span class="body2">11 Nov 2027</span></div></div>'
     '</div><div class="actions"><span class="btn">Done</span></div></div></div>'
 )
 
 page("h-token-minted.html", "Principals: MCP agent grafana-sidecar added, token shown once", "Principals",
      add_principal().replace("e.g. grafana-sidecar", "grafana-sidecar").replace('box ph">grafana', 'box">grafana')
-     + "<div>" + header("Principals", WHO) + filters() + principals_table() + "</div>", MINTED)
+     + "<div>" + header("Principals", WHO) + filters() + principals_table(added=True) + "</div>", MINTED)
 
 print("built", sorted(p.name for p in MOCKUPS.glob("h-*.html")))
