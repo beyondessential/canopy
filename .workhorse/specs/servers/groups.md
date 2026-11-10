@@ -24,7 +24,7 @@ Against a group Canopy holds:
 - the domains it claims, and the DNS name grants that work from them (see [DOM](domains.md));
 - one billing identity, which every member's effective labels derive from (see [APP](application-types.md), "Billing attribution");
 - the Ansible variables set on the group and on each of its environments (see [ANSVAR](../private-server/ansible/variables.md));
-- free-form notes, for what an operator working on the group needs to know, such as where a key is kept or which network to join.
+- free-form notes, for what an operator working on the group needs to know, such as where a key is kept or which network to join, with the history of their changes (see [FLT](overview.md), "Notes").
 
 A machine belonging to no group carries none of it: its issues reach no incident target and contribute to no incident (see [INC](../monitoring/incidents.md)), and it has no billing attribution (see [APP](application-types.md)).
 

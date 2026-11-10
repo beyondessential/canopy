@@ -119,6 +119,24 @@ It is offered whether or not anything on the machine has reported yet.
 An identity is not offered at all: it is bound by enrolment rather than by editing a form.
 A machine's name is required when a box is created and not when it is edited, so a box that arrived without one stays editable.
 
+## Notes
+
+A group, a machine, and an application each carry free-form notes, for what an operator working on that record needs to know.
+
+Every change to a record's notes is kept in its revision log: the text it replaced, with who made the change, how, and when.
+How is the operator interface, an Ansible import (see [ANSIMP](../private-server/ansible/import.md)), or a fleet query access token through the fleet query interface (see [MCP](../private-server/mcp.md)).
+Notes a record is created with start its log.
+A save that leaves the notes as they were records no revision.
+
+The record's page shows the history, newest first, and the text of any earlier revision can be read there.
+Clearing the notes is a change like any other and is kept.
+
+Notes carry a revision, which changes whenever the notes do.
+A change made through the fleet query interface states the revision it was made against, and is refused if the notes have changed since.
+
+Changing a record's notes is an audited action wherever it is made (see [AUD](../platform/audit-log.md)).
+The audit entry names the record and the revision, and the text is held in the revision log rather than repeated there.
+
 ## Navigating the two grains
 
 The fleet is browsed by group, and its listing offers the groups, the archived records, and the fleet's figures.
