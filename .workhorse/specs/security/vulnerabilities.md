@@ -92,7 +92,7 @@ A repository not read for a day raises a self-alert naming it and why (see [SELF
 ## Presentation
 
 Vulnerabilities are a top-level section of the operator interface, and the sidebar entry carries how many items need triage, leaving out closed ones.
-The section has a page of its own for the sources, reached from the list.
+The section's pages, the list of items and the sources, are offered beneath it in the sidebar.
 
 The list is one row per item, showing its severity, its summary and identifier, its affected packages with the source and their scopes, and its triage status (see [VTR](vulnerability-triage.md)).
 A Linux item also shows how many machines it exposes.
