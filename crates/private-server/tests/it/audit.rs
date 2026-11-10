@@ -5,11 +5,11 @@ use commons_tests::diesel_async::SimpleAsyncConnection;
 use database::audit::{self, Actor, Entry, Filter, Status};
 use serde_json::{Value, json};
 
-const GROUP: &str = "dddddddd-0000-0000-0000-000000000001";
+pub(super) const GROUP: &str = "dddddddd-0000-0000-0000-000000000001";
 const BOX: &str = "dddddddd-0000-0000-0000-0000000000b1";
 const APP: &str = "dddddddd-0000-0000-0000-0000000000a1";
 
-async fn seed(conn: &mut impl SimpleAsyncConnection) {
+pub(super) async fn seed(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'kamaka');
 		 INSERT INTO machines (name, id, group_id) VALUES ('box', '{BOX}', '{GROUP}');
