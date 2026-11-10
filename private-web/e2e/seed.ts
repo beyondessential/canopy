@@ -1124,19 +1124,105 @@ export async function seedIncidentNote(
 		body?: string;
 		/** ISO 8601; defaults to NOW(). */
 		createdAt?: string;
+		/** Written by an agent through an access token; operator when absent. */
+		agent?: boolean;
+		/** Who deleted it; a note with this set is deleted. */
+		deletedBy?: string;
 	},
 ): Promise<{ id: string }> {
 	const id = randomUUID();
 	await sql.query(
-		`INSERT INTO incident_notes (id, incident_id, author, body, created_at)
-		 VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, NOW()))`,
+		`INSERT INTO incident_notes
+		   (id, incident_id, author, body, created_at, author_kind, deleted_at, deleted_by)
+		 VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, NOW()), $6,
+		   CASE WHEN $7::text IS NULL THEN NULL ELSE NOW() END, $7::text)`,
 		[
 			id,
 			opts.incidentId,
 			opts.author ?? "operator@example.com",
 			opts.body ?? "a note",
 			opts.createdAt ?? null,
+			opts.agent ? "agent" : "operator",
+			opts.deletedBy ?? null,
 		],
+	);
+	return { id };
+}
+
+/** One entry in a group's, machine's or application's notes revision log. */
+export async function seedNotesRevision(
+	sql: Sql,
+	opts: {
+		groupId?: string;
+		machineId?: string;
+		applicationId?: string;
+		revision: number;
+		notes: string;
+		author?: string | null;
+		via?: "operator" | "ansible_import" | "token" | null;
+		/** ISO 8601; defaults to NOW(). */
+		createdAt?: string;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO notes_revisions
+		   (server_group_id, machine_id, application_id, revision, notes, author, via, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::timestamptz, NOW()))`,
+		[
+			opts.groupId ?? null,
+			opts.machineId ?? null,
+			opts.applicationId ?? null,
+			opts.revision,
+			opts.notes,
+			opts.author === undefined ? "operator@example.com" : opts.author,
+			opts.via === undefined ? "operator" : opts.via,
+			opts.createdAt ?? null,
+		],
+	);
+}
+
+/** An incident memory entry, with its first version in the history. */
+export async function seedMemoryEntry(
+	sql: Sql,
+	opts: {
+		title: string;
+		body?: string;
+		groupId?: string;
+		incidentId?: string;
+		check?: { source: string; name: string };
+		retiredReason?: string;
+		createdBy?: string;
+	},
+): Promise<{ id: string }> {
+	const id = randomUUID();
+	const by = opts.createdBy ?? "operator@example.com";
+	await sql.query(
+		`INSERT INTO memory_entries
+		   (id, title, body, server_group_id, incident_id, check_source, check_name,
+		    created_by, updated_by, retired_at, retired_by, retired_reason)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8,
+		   CASE WHEN $9::text IS NULL THEN NULL ELSE NOW() END,
+		   CASE WHEN $9::text IS NULL THEN NULL ELSE $8 END, $9::text)`,
+		[
+			id,
+			opts.title,
+			opts.body ?? `${opts.title} body`,
+			opts.groupId ?? null,
+			opts.incidentId ?? null,
+			opts.check?.source ?? null,
+			opts.check?.name ?? null,
+			by,
+			opts.retiredReason ?? null,
+		],
+	);
+	await sql.query(
+		`INSERT INTO memory_entry_revisions
+		   (entry_id, revision, kind, title, body, server_group_id, incident_id,
+		    check_source, check_name, actor, via)
+		 SELECT id, 1, 'recorded', title, body, server_group_id, incident_id,
+		   check_source, check_name, created_by, 'operator'
+		 FROM memory_entries WHERE id = $1`,
+		[id],
 	);
 	return { id };
 }
