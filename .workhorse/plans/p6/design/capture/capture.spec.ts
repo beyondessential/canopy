@@ -4,15 +4,14 @@
 // Deleted when the run finishes.
 
 import { mkdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { expect, test } from "./test-fixtures";
-import { seedDevice, seedDeviceConnection, seedDeviceKey } from "./seed";
+import { expect, test } from "../../../../../private-web/e2e/test-fixtures";
+import { seedDevice, seedDeviceConnection, seedDeviceKey } from "../../../../../private-web/e2e/seed";
 
-const SHOTS = resolve(
-	__dirname,
-	"../../.workhorse/plans/p6/design/shots/current",
-);
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SHOTS = resolve(HERE, "../shots/current");
 
 test.describe.configure({ mode: "serial" });
 
