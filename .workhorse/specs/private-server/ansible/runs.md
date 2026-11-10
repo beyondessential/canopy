@@ -95,6 +95,7 @@ A refusal to take the lease is shown before any command, naming its reason (see 
 Where a lease or a maintenance window holds over the environment, the presentation names who holds it and what they are running, by playbook where the lease names one and by intent otherwise.
 Where a lease held by someone else holds the environment and a run can be started, it offers taking the lease over, which starts one in its place.
 A lease the operator holds themselves is not offered for taking over.
+Where the operator holds the lease themselves and its run has started, it offers releasing the lease, for a run that ended without giving it back, and asks first, since releasing ends the maintenance the run declared.
 
 ### Machines with nothing on them
 
