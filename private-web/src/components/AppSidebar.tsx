@@ -75,7 +75,25 @@ const SECTIONS: NavSection[] = [
 	},
 	{ label: "Versions", to: "/versions" },
 	{ label: "Upgrades", to: "/upgrades" },
-	{ label: "Vulnerabilities", to: "/vulnerabilities" },
+	{
+		label: "Vulnerabilities",
+		to: "/vulnerabilities",
+		groups: [
+			{
+				pages: [
+					{
+						label: "Items",
+						to: "/vulnerabilities",
+						// Everything but the sources page is reached from the list.
+						current: (pathname) =>
+							under("/vulnerabilities")(pathname) &&
+							!under("/vulnerabilities/sources")(pathname),
+					},
+					page("Sources", "/vulnerabilities/sources"),
+				],
+			},
+		],
+	},
 	{ label: "Maintenance", to: "/maintenance" },
 	{
 		label: "Devices",

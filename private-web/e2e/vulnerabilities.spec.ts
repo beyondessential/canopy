@@ -163,7 +163,10 @@ test.describe("vulnerabilities", () => {
 		await seedFleet(sql);
 		await seedItems(sql);
 		await page.goto("/vulnerabilities");
-		await page.getByRole("link", { name: "Sources" }).click();
+		await page
+			.getByRole("group", { name: "Vulnerabilities pages" })
+			.getByRole("link", { name: "Sources" })
+			.click();
 		await expect(page).toHaveURL(/\/vulnerabilities\/sources$/);
 
 		const tamanu = page.getByRole("row").filter({ hasText: "tamanu" });

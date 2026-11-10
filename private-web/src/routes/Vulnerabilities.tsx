@@ -179,14 +179,9 @@ export default function Vulnerabilities() {
 
 	return (
 		<Stack spacing={3}>
-			<Stack direction="row" spacing={2} sx={{ alignItems: "baseline" }}>
-				<Typography variant="h4" component="h1">
-					Vulnerabilities
-				</Typography>
-				<MuiLink component={RouterLink} to="/vulnerabilities/sources">
-					Sources
-				</MuiLink>
-			</Stack>
+			<Typography variant="h4" component="h1">
+				Vulnerabilities
+			</Typography>
 
 			<Paper variant="outlined" sx={{ p: 2 }}>
 				<Stack
