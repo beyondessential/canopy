@@ -38,6 +38,7 @@ mod maintenance_amend;
 mod maintenance_machines;
 mod maintenance_targets;
 mod mcp;
+mod memory;
 mod migration_tests;
 mod notes;
 mod openapi_spec;
