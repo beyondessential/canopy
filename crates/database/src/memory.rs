@@ -1079,6 +1079,33 @@ fn status_of(incident: &Incident) -> &'static str {
 	}
 }
 
+/// What the index reads of a current entry: its body is left behind, since the
+/// index lists entries for choosing which to read in full.
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = memory_entries)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+struct IndexRow {
+	id: Uuid,
+	title: String,
+	server_group_id: Option<Uuid>,
+	incident_id: Option<Uuid>,
+	check_source: Option<String>,
+	check_name: Option<String>,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp)]
+	updated_at: Timestamp,
+}
+
+impl IndexRow {
+	fn link(&self) -> Option<Link> {
+		link_of(
+			self.server_group_id,
+			self.incident_id,
+			self.check_source.as_deref(),
+			self.check_name.as_deref(),
+		)
+	}
+}
+
 /// The index of memory and of recent trouble, optionally narrowed to one group.
 // spec: MCP#incident-memory
 pub async fn index(
@@ -1131,10 +1158,10 @@ pub async fn index(
 	}
 
 	// What is known about each check and group, among current entries.
-	let current: Vec<MemoryEntry> = memory_entries::table
+	let current: Vec<IndexRow> = memory_entries::table
 		.filter(memory_entries::retired_at.is_null())
 		.order((memory_entries::updated_at.desc(), memory_entries::id))
-		.select(MemoryEntry::as_select())
+		.select(IndexRow::as_select())
 		.load(conn)
 		.await
 		.map_err(AppError::from)?;
@@ -1267,7 +1294,7 @@ pub async fn index(
 		None => HashSet::new(),
 	};
 	let group_checks: HashSet<&(String, String)> = check_incidents.keys().collect();
-	let kept: Vec<&MemoryEntry> = current
+	let kept: Vec<&IndexRow> = current
 		.iter()
 		.filter(|entry| match (group, entry.link()) {
 			(None, _) | (Some(_), None) => true,
