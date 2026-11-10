@@ -783,3 +783,53 @@ async fn backup_schedules_are_write_and_clearing_retention_is_danger() {
 	})
 	.await;
 }
+
+/// A run is a command, with no session to raise, so it extends and gives back
+/// the lease it holds on its holder's standing. Anyone else is refused.
+// spec: SAFE, ANSRUN#run-leases
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_extends_and_releases_its_lease_without_a_session() {
+	use super::audit::{GROUP, seed};
+
+	trust_headers();
+
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed(&mut conn).await;
+		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		Admin::add(&mut conn, OTHER).await.expect("add admin");
+		let id = new_session(&private, OPERATOR).await;
+		private
+			.post("/api/safety/raise")
+			.add_header("Tailscale-User-Login", OPERATOR)
+			.add_header("Tailscale-User-Name", "Operator")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({"mode": "write"}))
+			.await
+			.assert_status_ok();
+		let lease: serde_json::Value = private
+			.post("/api/ansible/take_lease")
+			.add_header("Tailscale-User-Login", OPERATOR)
+			.add_header("Tailscale-User-Name", "Operator")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({ "server_group_id": GROUP, "intent": "configure" }))
+			.await
+			.json();
+		let body = json!({ "lease_id": lease["id"] });
+
+		let as_run = async |login: &str, path: &str| {
+			private
+				.post(path)
+				.add_header("Tailscale-User-Login", login)
+				.add_header("Tailscale-User-Name", "Operator")
+				.json(&body)
+				.await
+				.status_code()
+		};
+
+		assert_eq!(as_run(OPERATOR, "/api/ansible/extend_lease").await, 200);
+		assert_eq!(as_run(OTHER, "/api/ansible/extend_lease").await, 409);
+		assert_eq!(as_run(OTHER, "/api/ansible/release_lease").await, 409);
+		assert_eq!(as_run(OPERATOR, "/api/ansible/release_lease").await, 200);
+	})
+	.await
+}

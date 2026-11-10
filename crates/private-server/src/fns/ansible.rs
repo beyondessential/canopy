@@ -72,8 +72,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 			routes!(read_only, audit(AnsibleRead, AnsibleRunStarted, MaintenanceDeclared): for_group),
 		)
 		.routes(routes!(write, audit(AnsibleLeaseTaken, AnsibleLeaseTakenOver): take_lease))
-		.routes(routes!(write, audit(AnsibleLeaseExtended): extend_lease))
-		.routes(routes!(write, audit(AnsibleLeaseReleased): release_lease))
+		.routes(routes!(read_only, audit(AnsibleLeaseExtended): extend_lease))
+		.routes(routes!(read_only, audit(AnsibleLeaseReleased): release_lease))
 		.routes(routes!(read_only, silent: run_state))
 		.routes(routes!(read_only, silent: runs::run_options))
 		.routes(routes!(read_only, silent: runs::limit_preview))
@@ -620,8 +620,8 @@ pub async fn extend_lease(
 
 /// Give the environment back when the run ends.
 ///
-/// Releasing is audited with who did it, since it can be another operator
-/// taking work over rather than the holder finishing.
+/// Only the holder can release: a run has no session to raise, so this is
+/// allowed on the holder's standing, and anyone else takes the lease over.
 #[utoipa::path(
 	post,
 	path = "/release_lease",
@@ -642,6 +642,9 @@ pub async fn release_lease(
 ) -> Result<Json<()>> {
 	let mut conn = audit.begin().await?;
 	let lease = AnsibleLease::get(&mut conn, args.lease_id).await?;
+	if lease.released_at.is_none() {
+		held_by_caller(&lease, &admin.0.login)?;
+	}
 	let by = Some(admin.0.login.as_str());
 	let reason = if args.unless_started {
 		ReleaseReason::Unstarted

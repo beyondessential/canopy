@@ -98,6 +98,8 @@ Opening a machine's restore window is graded on this basis.
 
 Recording, withdrawing or editing a vulnerability triage decision is graded write: it amends Canopy's records, and the item's history keeps what it replaced (see [VTR](../security/vulnerability-triage.md)).
 
+Extending and releasing a run lease are graded read-only: a run is a command with no session to raise, the lease it holds was taken under a raised one, and only the lease's holder is allowed either (see [ANSRUN](ansible/runs.md), "Run leases").
+
 The fleet query interface (see [MCP](mcp.md)) changes nothing on the fleet, so every one of its tools is read-only except its triage writes, recording, withdrawing and editing triage decisions, which are graded write.
 That interface has no sessions, so its writes are allowed by the caller's standing instead of a raised mode: an administrator on the operator path, a token with the triage grant on the token path.
 The handlers that mint, revoke, and list its access tokens belong to the administrative surface rather than to that interface: minting and revoking are danger, and listing is read-only.
