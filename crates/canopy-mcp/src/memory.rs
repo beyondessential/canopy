@@ -171,9 +171,8 @@ fn link_kind(kind: &str) -> Result<LinkKind, McpError> {
 fn refused(error: AppError) -> Result<CallToolResult, McpError> {
 	match error {
 		AppError::BadRequest(message) => Err(McpError::invalid_params(message, None)),
-		error if is_not_found(&error) => {
-			Ok(not_found("no such memory entry, group or incident".into()))
-		}
+		AppError::NotFound(message) => Ok(not_found(message)),
+		error if is_not_found(&error) => Ok(not_found("not found".into())),
 		AppError::Conflict(message) => Ok(refusal(message, json!(null))),
 		error => Err(mcp_err(error)),
 	}

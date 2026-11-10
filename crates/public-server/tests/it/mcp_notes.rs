@@ -490,6 +490,29 @@ async fn memory_is_recorded_amended_retired_restored_and_read_back() {
 		let detail = call(&public, &token, "get_memory_entry", json!({ "id": id })).await;
 		assert_eq!(ok(&detail)["history"].as_array().unwrap().len(), 4);
 
+		let nobody = "00000000-0000-0000-0000-000000000000";
+		for (tool, args, message) in [
+			(
+				"restore_memory_entry",
+				json!({ "id": id, "revision": 4, "to_revision": 99 }),
+				"the entry has no revision 99".to_owned(),
+			),
+			(
+				"retire_memory_entry",
+				json!({ "id": nobody, "reason": "x" }),
+				format!("no memory entry with id {nobody}"),
+			),
+			(
+				"record_memory_entry",
+				json!({ "title": "x", "body": "x", "link": { "kind": "group", "id": nobody } }),
+				format!("no group with id {nobody}"),
+			),
+		] {
+			let env = call(&public, &token, tool, args).await;
+			assert_eq!(env["result"]["isError"], true, "{tool}: {env}");
+			assert_eq!(env["result"]["content"][0]["text"], message, "{tool}");
+		}
+
 		for action in [
 			"memory_entry_recorded",
 			"memory_entry_amended",
