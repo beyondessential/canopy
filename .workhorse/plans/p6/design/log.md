@@ -4,7 +4,7 @@ Rigour: Standard. Round cap 6. Stop rule: two clean rounds, the second by fresh 
 
 ## Where the run is
 
-Step 2, direction. The card has no specs, no plan and no commits, so there is no build to polish: the run starts at direction, not at polish. Step 3 waits on an implementation.
+Step 2, direction. Round 1 is closed with a direction chosen (see the taste ledger); round 2 refines it. The card has no specs, no plan and no commits, so there is no build to polish. Step 3 waits on an implementation.
 
 ## Step 0 — does the card need design
 
@@ -77,16 +77,22 @@ The four new ones:
 
 ## In flight
 
-Three direction agents (P, G, R), writing `p-`, `g-` and `r-` files into `.workhorse/design/mockups/p6/` and `direction-{p,g,r}.md`.
+All three directions are built: five mockups each in `.workhorse/design/mockups/p6/`, write-ups in `direction-{p,g,r}.md`, renders in `shots/r1/` and downscaled copies in `shots/r1-small/`. None of the three agents could view images, so each checked its own work by DOM geometry only.
+
+The fresh-eyes critic could not run: every spawn (Opus, Opus inherited, Fable) failed at start with "prompt too long", even with downscaled renders, so the cause is the subagent's starting context in this session, not the images. The user accepted the main session's read as round 1's critique (2026-11-11).
+
+The brief is wrong about the chrome: at 1440px the app has a permanent left sidebar with the safety-mode band at its foot, not a top bar. G and R followed the React source. The brief should say so before any later round.
 
 ## Next
 
-- View all three at full size, critique side by side with a fresh critic, choose one and record why in the taste ledger.
-- Refine the chosen mockup through a few UI-loop iterations before anything is built.
+- Round 2: build the P and R hybrid as one set of mockups. The home screen is P's principals list. Permissions are R's roles, edited with R's matrix, with R's own-group scope and dated exceptions. Suspend is the cut-off. Borrow G's last-matched column and its "who can do X" checker. Hard cases 1 to 10 still apply.
+- Fix the brief's chrome section first: a left sidebar with the safety-mode band at its foot, not a top bar.
+- Judge round 2 with fresh eyes from a session where subagents start.
 
 ## Open questions
 
-- What is realistic to build. This is judged after a direction is chosen and refined, not before.
+- What is realistic to build. This is judged after the direction is refined, not before.
+- Whether Canopy can resolve tailnet group membership. Role trusts by tailnet group depend on it; the inventory does not say it can.
 
 ## Taste ledger
 
@@ -95,6 +101,9 @@ Three direction agents (P, G, R), writing `p-`, `g-` and `r-` files into `.workh
 | Withdraw the scope-ladder spread (A rung 1, B rung 2, C rung 3) | The user fixed scope at rung 3, so the spread no longer answers a live question | `superseded/a-*.html` / `p-`, `g-`, `r-` | Withdrawn by user decision |
 | Organise the three directions by primary entity (principal, grant, role) | Each reference implies a different home entity, and that choice drives every screen | n/a | Adopted for round 1 |
 | Fleet machines out of default views, one step away | User decision: they would add most of the noise | n/a | Binding on all directions |
+| Take P and R forward as a hybrid: principals list as home, roles as the permission unit, borrowing G's last-matched column and checker | P is strongest at "what can this principal do" and at replacing the five Access pages; R keeps permissions auditable as a few named shapes; G's table drifts towards precedence puzzles ("overrides g16") | `p-*`, `r-*`, `g-*` / round 2 | User decision, 2026-11-11 |
+| Suspend, not an explicit deny | Allow-only keeps "who can" a lookup with no precedence to show | G's deny rows / Suspend on principal or role | User decision, 2026-11-11 |
+| A Canopy Suspend overrides a tailnet-policy admin | An emergency cut-off must not wait on a policy-file edit | P and R as drawn | User decision, 2026-11-11 |
 
 ## Differences from the reference
 

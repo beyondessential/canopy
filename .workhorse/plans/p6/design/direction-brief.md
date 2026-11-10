@@ -32,7 +32,7 @@ These mockups stand in for screens in a shipped operator UI. A critic compares t
 
 **Look at the real screens before you write any markup.** `shots/current/` beside this file holds full-page captures at 1440px of every surface this work touches: `admins.png`, `mcp-access.png`, `identity-provider.png`, `certificate-authority.png`, `audit-log.png`, `restore-consumers.png`, `devices-all.png`, `devices-search.png`, `device-detail.png`. View them at full size. Then read the React that produced them: `private-web/src/routes/Admins.tsx`, `McpTokens.tsx`, `IdentityProvider.tsx`, and `private-web/src/components/AppSidebar.tsx` for the navigation.
 
-Carry the chrome through unchanged: the top bar with the Canopy mark and the safety-mode control on the right, the left sidebar with its sections and the expanded Settings group. Your screen is what changes; everything around it is as captured.
+Carry the chrome through unchanged: at 1440px that is the permanent left sidebar, with the Canopy mark at its top, its sections and the expanded Settings group, and the safety-mode band at its foot. The top bar appears only below the md breakpoint. Your screen is what changes; everything around it is as captured.
 
 ## Visual language
 
