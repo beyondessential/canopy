@@ -15262,8 +15262,8 @@ export interface components {
             scope?: string | null;
             /**
              * @description Partial words, tolerating small typos, over the identifier and aliases,
-             *     summary, package names, workspace packages, source, and the advisory's
-             *     details.
+             *     summary, package names, workspace packages and source; and whole words
+             *     and word beginnings over the advisory's details.
              */
             search?: string | null;
             severity?: null | components["schemas"]["VulnerabilitySeverity"];
