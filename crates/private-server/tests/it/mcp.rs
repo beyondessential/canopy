@@ -474,6 +474,90 @@ async fn incidents_window_status_and_detail() {
 	.await
 }
 
+/// Call a tool and return its whole `result`, refused or not.
+async fn call_result(
+	private: &commons_tests::axum_test::TestServer,
+	name: &str,
+	args: serde_json::Value,
+) -> serde_json::Value {
+	let resp = private
+		.post("/api/mcp")
+		.add_header("accept", ACCEPT)
+		.add_header("mcp-protocol-version", PROTO)
+		.json(&serde_json::json!({
+			"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+			"params": { "name": name, "arguments": args }
+		}))
+		.await;
+	assert_eq!(resp.status_code().as_u16(), 200, "{name} should 200");
+	parse_envelope(&resp.text())["result"].clone()
+}
+
+// spec: MCP#notes
+#[tokio::test(flavor = "multi_thread")]
+async fn an_operator_edits_and_deletes_their_own_notes_but_not_another_operators() {
+	use database::notes::{AuthorKind, IncidentNote};
+
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed_incidents(&mut conn).await;
+		let incident = INC_OPEN.parse().unwrap();
+		let theirs = IncidentNote::add(
+			&mut conn,
+			incident,
+			"alice",
+			AuthorKind::Operator,
+			"alice's",
+		)
+		.await
+		.unwrap();
+
+		let added = call_tool!(
+			private,
+			"add_incident_note",
+			serde_json::json!({ "incident_id": INC_OPEN, "body": "mine" })
+		);
+		assert_eq!(added["author_kind"], "operator");
+		let mine = added["id"].as_str().unwrap().to_owned();
+
+		let edited = call_tool!(
+			private,
+			"edit_note",
+			serde_json::json!({ "note_id": mine, "revision": 1, "body": "mine, corrected" })
+		);
+		assert_eq!(edited["revision"], 2);
+
+		for (tool, args) in [
+			(
+				"edit_note",
+				serde_json::json!({ "note_id": theirs.id, "revision": 1, "body": "x" }),
+			),
+			("delete_note", serde_json::json!({ "note_id": theirs.id })),
+		] {
+			let result = call_result(&private, tool, args).await;
+			assert_eq!(result["isError"], true, "{tool}: {result}");
+			let message = result["content"][0]["text"].as_str().unwrap();
+			assert!(message.contains("operator"), "names the reason: {message}");
+		}
+		let kept = IncidentNote::get(&mut conn, theirs.id).await.unwrap();
+		assert!(kept.deleted_at.is_none() && kept.body == "alice's");
+
+		call_tool!(
+			private,
+			"delete_note",
+			serde_json::json!({ "note_id": mine })
+		);
+		let detail = call_tool!(
+			private,
+			"get_incident",
+			serde_json::json!({ "incident_id": INC_OPEN })
+		);
+		let notes = detail["notes"].as_array().unwrap();
+		assert_eq!(notes.len(), 1);
+		assert_eq!(notes[0]["author"], "alice");
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn issues_filter_and_detail() {
 	commons_tests::server::run(async |mut conn, _public, private| {

@@ -206,6 +206,11 @@ async fn an_agent_adds_edits_and_deletes_its_own_notes_but_not_an_operators() {
 			stale["result"]["structuredContent"]["current"]["body"],
 			"disk is 99% full"
 		);
+		let text = stale["result"]["content"][1]["text"].as_str().unwrap();
+		assert!(
+			text.contains("disk is 99% full"),
+			"the text carries the current note too: {text}"
+		);
 
 		for tool in ["edit_note", "delete_note"] {
 			let env = call(
@@ -265,6 +270,25 @@ async fn an_agent_adds_edits_and_deletes_its_own_notes_but_not_an_operators() {
 		)
 		.await;
 		assert_eq!(ok(&issue)["notes"].as_array().unwrap().len(), 1);
+
+		let nobody = "00000000-0000-0000-0000-000000000000";
+		for (tool, field, kind) in [
+			("add_issue_note", "issue_id", "issue"),
+			("add_incident_note", "incident_id", "incident"),
+		] {
+			let env = call(
+				&public,
+				&plaintext,
+				tool,
+				json!({ field: nobody, "body": "x" }),
+			)
+			.await;
+			assert_eq!(env["result"]["isError"], true, "{tool}: {env}");
+			assert_eq!(
+				env["result"]["content"][0]["text"],
+				format!("no {kind} with id {nobody}")
+			);
+		}
 
 		for action in [
 			"incident_note_added",
@@ -465,6 +489,29 @@ async fn memory_is_recorded_amended_retired_restored_and_read_back() {
 
 		let detail = call(&public, &token, "get_memory_entry", json!({ "id": id })).await;
 		assert_eq!(ok(&detail)["history"].as_array().unwrap().len(), 4);
+
+		let nobody = "00000000-0000-0000-0000-000000000000";
+		for (tool, args, message) in [
+			(
+				"restore_memory_entry",
+				json!({ "id": id, "revision": 4, "to_revision": 99 }),
+				"the entry has no revision 99".to_owned(),
+			),
+			(
+				"retire_memory_entry",
+				json!({ "id": nobody, "reason": "x" }),
+				format!("no memory entry with id {nobody}"),
+			),
+			(
+				"record_memory_entry",
+				json!({ "title": "x", "body": "x", "link": { "kind": "group", "id": nobody } }),
+				format!("no group with id {nobody}"),
+			),
+		] {
+			let env = call(&public, &token, tool, args).await;
+			assert_eq!(env["result"]["isError"], true, "{tool}: {env}");
+			assert_eq!(env["result"]["content"][0]["text"], message, "{tool}");
+		}
 
 		for action in [
 			"memory_entry_recorded",

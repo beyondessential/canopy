@@ -345,10 +345,16 @@ fn columns(link: Option<&Link>) -> Columns {
 async fn check_link(conn: &mut AsyncPgConnection, link: &Link) -> Result<()> {
 	match link {
 		Link::Group { id } => {
-			ServerGroup::get_by_id(conn, *id).await.map(drop)?;
+			ServerGroup::get_by_id(conn, *id)
+				.await
+				.map(drop)
+				.map_err(|error| named_not_found(error, || format!("no group with id {id}")))?;
 		}
 		Link::Incident { id } => {
-			Incident::get_by_id(conn, *id).await.map(drop)?;
+			Incident::get_by_id(conn, *id)
+				.await
+				.map(drop)
+				.map_err(|error| named_not_found(error, || format!("no incident with id {id}")))?;
 		}
 		Link::Check { source, name } => {
 			let known: i64 = check_policies::table
@@ -375,7 +381,16 @@ async fn lock(conn: &mut AsyncPgConnection, id: Uuid) -> Result<MemoryEntry> {
 		.for_update()
 		.first(conn)
 		.await
-		.map_err(AppError::from)
+		.map_err(|error| named_not_found(error.into(), || format!("no memory entry with id {id}")))
+}
+
+/// A not-found as one naming what was missing; any other error as it was.
+fn named_not_found(error: AppError, message: impl FnOnce() -> String) -> AppError {
+	if error.is_not_found() {
+		AppError::NotFound(message())
+	} else {
+		error
+	}
 }
 
 async fn write_revision(
