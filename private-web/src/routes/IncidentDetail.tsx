@@ -18,6 +18,7 @@ import {
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import BugReportIcon from "@mui/icons-material/BugReport";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
+import DeleteIcon from "@mui/icons-material/Delete";
 import NotesIcon from "@mui/icons-material/StickyNote2";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useState } from "react";
@@ -564,14 +565,34 @@ function Timeline({
 						onChanged={onChanged}
 					/>
 				) : (
-					<NoteEntry key={`note-${e.note.id}`} note={e.note} />
+					<NoteEntry
+						key={`note-${e.note.id}`}
+						note={e.note}
+						onChanged={onChanged}
+					/>
 				),
 			)}
 		</Stack>
 	);
 }
 
-function NoteEntry({ note }: { note: IncidentNoteData }) {
+function NoteEntry({
+	note,
+	onChanged,
+}: {
+	note: IncidentNoteData;
+	onChanged: () => void;
+}) {
+	const isAdmin = useIsAdmin() === true;
+	const del = useApiAction("incidents", "delete_note");
+	const remove = async () => {
+		try {
+			await del.call({ note_id: note.id });
+			onChanged();
+		} catch {
+			/* surfaced via del.error */
+		}
+	};
 	return (
 		<Box
 			sx={{
@@ -597,9 +618,26 @@ function NoteEntry({ note }: { note: IncidentNoteData }) {
 						<Chip size="small" variant="outlined" label="Agent" />
 					)}
 				</Stack>
-				<Typography variant="caption" color="text.secondary">
-					<TimeAgo timestamp={note.created_at} />
-				</Typography>
+				<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+					<Typography variant="caption" color="text.secondary">
+						<TimeAgo timestamp={note.created_at} />
+					</Typography>
+					{isAdmin && !note.deleted_at && (
+						<GradedAction
+							calls="incidents/delete_note"
+							action={`Delete note by ${note.author} from this incident`}
+						>
+							<IconButton
+								size="small"
+								aria-label="Delete note"
+								onClick={remove}
+								disabled={del.pending}
+							>
+								<DeleteIcon fontSize="inherit" />
+							</IconButton>
+						</GradedAction>
+					)}
+				</Stack>
 			</Stack>
 			<Typography
 				variant="body2"

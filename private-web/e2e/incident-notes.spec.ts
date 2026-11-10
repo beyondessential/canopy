@@ -38,4 +38,27 @@ test.describe("incident notes", () => {
 		await expect(page.getByText("paged the DBA")).toBeVisible();
 		await expect(page.getByText(/Deleted by someone@example.com/)).toBeVisible();
 	});
+
+	test("an administrator deletes a note, which leaves the timeline but stays in the record", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "delete-group" });
+		const incident = await seedIncident(sql, { serverGroupId: group.id });
+		await seedIncidentNote(sql, {
+			incidentId: incident.id,
+			body: "wrong guess",
+		});
+
+		await page.goto(`/incidents/${incident.id}`);
+		await page.getByRole("button", { name: "Delete note" }).click();
+		await expect(page.getByText("wrong guess")).toHaveCount(0);
+
+		const rows = await sql.query<{ deleted_by: string | null }>(
+			"SELECT deleted_by FROM incident_notes WHERE incident_id = $1",
+			[incident.id],
+		);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.deleted_by).toBeTruthy();
+	});
 });

@@ -32,55 +32,56 @@ Each section ends in its own targeted tests; run them by filter once a section's
   Detail never carries note or memory text, only the record and revision.
   Memory entries and notes need a `RecordKind` each so entries name what they acted on.
 - **Operator edit of issue and incident notes** is not specced, so the operator UI gets add and delete only; revisit if the open question on the card is answered the other way.
+- **Slack outbox** does not queue note messages today, so soft delete has nothing to reconcile there.
 
 ## Schema and database crate
 
-- [ ] `just migration notes_history`: `notes_revisions`, `notes_revision` columns on `server_groups`, `machines`, `applications`, backfill of revision 1 for non-empty notes
-- [ ] `just migration note_edit_and_delete`: `author_kind`, `revision`, `deleted_at`, `deleted_by` on `issue_notes` and `incident_notes`; `*_note_revisions` tables
-- [ ] `just migration incident_memory`: `memory_entries`, `memory_entry_revisions`, indexes, full-text index
-- [ ] Add `database::notes_log` with `set(conn, record, new_text, actor, via, expected_revision: Option<i64>)` and `history(conn, record)`; the stale case returns the conflict error with the current text and revision
-- [ ] Route `ServerGroup`, `Machine` and `Application` create and update through it and remove `notes` from their changesets (`server_groups.rs`, `machines.rs`, `applications.rs`)
-- [ ] Route the Ansible import's group and machine notes appends through it with `ansible_import` as how (`fns/ansible/import.rs`)
-- [ ] Extend `IssueNote` and `IncidentNote` in `notes.rs`: author kind on add, `edit` (revision-guarded, keeps the replaced text), soft `delete`, `include_deleted` on the list functions, edit history read; update the module docs, which say notes are immutable
-- [ ] Add `database::memory`: `record`, `amend`, `retire`, `restore` (each revision-guarded where the spec says so), `get` with history, `find` (free text, link kind, group, check, incident, relevant-to-incident, include retired, limit, total), and `relevant_count_for_incident`
-- [ ] "Relevant to an incident" is entries linked to the incident, to its target's group (through `Scope`/`IncidentTarget`, never the raw columns), or to a check among its issues' check names
-- [ ] Add `database::memory::index(group, window_days)`: current entries in compact form; checks and groups with the most incidents in the window with incident, published, latest, group and linked-entry counts; incidents in the window carrying non-deleted notes. Reuse the published rule and window rule `Find incidents` uses rather than restating them
-- [ ] Add the audit actions and `RecordKind`s in `crates/database/src/audit.rs`
-- [ ] Add `GRANT_NOTES = "notes"` to `mcp_tokens.rs` `GRANTS`
-- [ ] Database tests: revision numbering and no-op save, stale refusal, backfill, one-grain CHECKs, soft delete hiding from lists, edit keeping history, memory lifecycle including restore of a retired entry, search and relevant-to-incident, index counts and the gap rows (`just test -p database <filter>`)
+- [x] `just migration notes_history`: `notes_revisions`, `notes_revision` columns on `server_groups`, `machines`, `applications`, backfill of revision 1 for non-empty notes
+- [x] `just migration note_edit_and_delete`: `author_kind`, `revision`, `deleted_at`, `deleted_by` on `issue_notes` and `incident_notes`; `*_note_revisions` tables
+- [x] `just migration incident_memory`: `memory_entries`, `memory_entry_revisions`, indexes, full-text index
+- [x] Add `database::notes_log` with `set(conn, record, new_text, actor, via, expected_revision: Option<i64>)` and `history(conn, record)`; the stale case returns the conflict error with the current text and revision
+- [x] Route `ServerGroup`, `Machine` and `Application` create and update through it and remove `notes` from their changesets (`server_groups.rs`, `machines.rs`, `applications.rs`)
+- [x] Route the Ansible import's group and machine notes appends through it with `ansible_import` as how (`fns/ansible/import.rs`)
+- [x] Extend `IssueNote` and `IncidentNote` in `notes.rs`: author kind on add, `edit` (revision-guarded, keeps the replaced text), soft `delete`, `include_deleted` on the list functions, edit history read; update the module docs, which say notes are immutable
+- [x] Add `database::memory`: `record`, `amend`, `retire`, `restore` (each revision-guarded where the spec says so), `get` with history, `find` (free text, link kind, group, check, incident, relevant-to-incident, include retired, limit, total), and `relevant_count_for_incident`
+- [x] "Relevant to an incident" is entries linked to the incident, to its target's group (through `Scope`/`IncidentTarget`, never the raw columns), or to a check among its issues' check names
+- [x] Add `database::memory::index(group, window_days)`: current entries in compact form; checks and groups with the most incidents in the window with incident, published, latest, group and linked-entry counts; incidents in the window carrying non-deleted notes. Reuse the published rule and window rule `Find incidents` uses rather than restating them
+- [x] Add the audit actions and `RecordKind`s in `crates/database/src/audit.rs`
+- [x] Add `GRANT_NOTES = "notes"` to `mcp_tokens.rs` `GRANTS`
+- [x] Database tests: revision numbering and no-op save, stale refusal, backfill, one-grain CHECKs, soft delete hiding from lists, edit keeping history, memory lifecycle including restore of a retired entry, search and relevant-to-incident, index counts and the gap rows (`just test -p database <filter>`)
 
 ## Operator API (`crates/private-server`)
 
-- [ ] `fns/issues.rs` and `fns/incidents.rs`: `add_note` audited with author kind `operator`; `delete_note` soft and audited; `list_notes` takes `include_deleted`, honoured for administrators only; note data gains author kind and deleted attribution; fix the doc comments that say deletion is permanent
-- [ ] `fns/server_groups.rs`, `fns/machines.rs`, `fns/applications.rs`: change `update` (and creates) from `silent` to `audit_optional(NotesChanged)` and record on a real notes change; add `notes_history` reads for each grain
-- [ ] `fns/ansible/import.rs`: declare and record notes changed beside the import's own action
-- [ ] New `fns/memory.rs`, mounted at `/api/memory`: `list` and `get` for any tailnet user (with `total`, filters as in the spec), `record`, `amend`, `retire`, `restore` for administrators, each audited
-- [ ] `fns/mcp_tokens.rs`: accept the notes grant on minting and list it
-- [ ] Update `ERRORS.md` if any new error variant is added; prefer the existing conflict variant
-- [ ] `just gen-openapi`, commit `private-web/openapi.json` and `api-types.ts`
-- [ ] Endpoint tests in `tests/it/` (`notes.rs` extended, new `memory.rs`): admin-only writes, non-admin reads, audit entries present with no text in detail, soft delete, history reads. Add a debug-shortcut-free denial case following `admin_auth.rs`
+- [x] `fns/issues.rs` and `fns/incidents.rs`: `add_note` audited with author kind `operator`; `delete_note` soft and audited; `list_notes` takes `include_deleted`, honoured for administrators only; note data gains author kind and deleted attribution; fix the doc comments that say deletion is permanent
+- [x] `fns/server_groups.rs`, `fns/machines.rs`, `fns/applications.rs`: change `update` (and creates) from `silent` to `audit_optional(NotesChanged)` and record on a real notes change; add `notes_history` reads for each grain
+- [x] `fns/ansible/import.rs`: declare and record notes changed beside the import's own action
+- [x] New `fns/memory.rs`, mounted at `/api/memory`: `list` and `get` for any tailnet user (with `total`, filters as in the spec), `record`, `amend`, `retire`, `restore` for administrators, each audited
+- [x] `fns/mcp_tokens.rs`: accept the notes grant on minting and list it
+- [x] Update `ERRORS.md` if any new error variant is added; prefer the existing conflict variant
+- [x] `just gen-openapi`, commit `private-web/openapi.json` and `api-types.ts`
+- [x] Endpoint tests in `tests/it/` (`notes.rs` extended, new `memory.rs`): admin-only writes, non-admin reads, audit entries present with no text in detail, soft delete, history reads. Add a debug-shortcut-free denial case following `admin_auth.rs`
 
 ## MCP (`crates/canopy-mcp`)
 
-- [ ] `caller.rs`: `may_note()` beside `may_triage()`, an administrator on the operator path, the notes grant on the token path
-- [ ] New `notes.rs` module: `add_issue_note`, `add_incident_note` (author kind `agent` for a token, `operator` for an operator caller), `edit_note`, `delete_note` (refused for an operator-written note, naming the reason), `replace_notes`, `get_notes_history`; stale revisions return the current text and revision
-- [ ] `get_group`, `get_machine`, `get_application` return notes with their revision; `get_issue` and `get_incident` return notes with author, author kind, revision and time, never deleted ones (`groups.rs`, `machines.rs`, `applications.rs`, `incidents.rs`)
-- [ ] New `memory.rs` module: `find_memory`, `get_memory_entry`, `get_memory_index`, `record_memory_entry`, `amend_memory_entry`, `retire_memory_entry`, `restore_memory_entry`; describe the index's lists and the gap rows in the tool descriptions so a client reads what it is for
-- [ ] Add the new write tools to `AUDITED_TOOLS` in `lib.rs`, register both routers in `CanopyMcp::new`, and update the module docs, which say only the three triage tools write
-- [ ] Update the token mint dialog and token list so the notes grant is chosen and shown (`private-web/src/routes/McpTokens.tsx`)
-- [ ] Tests: grant gating on both paths, each tool's refusal cases (stale revision, operator-written note, over-length title or body, retired entry), the audited-tool test still holding, and the index's counts against seeded incidents
+- [x] `caller.rs`: `may_note()` beside `may_triage()`, an administrator on the operator path, the notes grant on the token path
+- [x] New `notes.rs` module: `add_issue_note`, `add_incident_note` (author kind `agent` for a token, `operator` for an operator caller), `edit_note`, `delete_note` (refused for an operator-written note, naming the reason), `replace_notes`, `get_notes_history`; stale revisions return the current text and revision
+- [x] `get_group`, `get_machine`, `get_application` return notes with their revision; `get_issue` and `get_incident` return notes with author, author kind, revision and time, never deleted ones (`groups.rs`, `machines.rs`, `applications.rs`, `incidents.rs`)
+- [x] New `memory.rs` module: `find_memory`, `get_memory_entry`, `get_memory_index`, `record_memory_entry`, `amend_memory_entry`, `retire_memory_entry`, `restore_memory_entry`; describe the index's lists and the gap rows in the tool descriptions so a client reads what it is for
+- [x] Add the new write tools to `AUDITED_TOOLS` in `lib.rs`, register both routers in `CanopyMcp::new`, and update the module docs, which say only the three triage tools write
+- [x] Update the token mint dialog and token list so the notes grant is chosen and shown (`private-web/src/routes/McpTokens.tsx`)
+- [x] Tests: grant gating on both paths, each tool's refusal cases (stale revision, operator-written note, over-length title or body, retired entry), the audited-tool test still holding, and the index's counts against seeded incidents
 
 ## Operator UI (`private-web`)
 
-- [ ] Notes history on group, machine and application pages: a history view newest first showing each revision's text, author, how, and when (`GroupDetail.tsx`, `MachineDetail.tsx`, `ServerDetail.tsx`); the edit forms keep working unchanged
-- [ ] `NotesList.tsx`: administrators get a show-deleted toggle; deleted notes render with who and when; agent-written notes are marked as such
-- [ ] New memory page under the Incidents navigation: search box, link kind and group/check/incident filters, include-retired toggle, all held in the query string; entry detail with resolved link and history; administrators get record, amend, retire and restore (`routes/Memory.tsx`, route in `App.tsx`)
-- [ ] `IncidentDetail.tsx`: relevant-entries count linking to the memory page with the `relevant to incident` filter in the query string
-- [ ] Playwright: `memory.spec.ts` (list, search, filters from the address, admin-only controls, retire and restore), notes history specs added to `groups.spec.ts` and `machines.spec.ts`, deleted notes in `issues.spec.ts` or `incident-*`, the notes grant in `mcp-tokens.spec.ts`; extend `e2e/seed.ts` for memory entries and revisions. Run individual spec files only
-- [ ] `just typecheck`
+- [x] Notes history on group, machine and application pages: a history view newest first showing each revision's text, author, how, and when (`GroupDetail.tsx`, `MachineDetail.tsx`, `ServerDetail.tsx`); the edit forms keep working unchanged
+- [x] `NotesList.tsx`: administrators get a show-deleted toggle; deleted notes render with who and when; agent-written notes are marked as such
+- [x] New memory page under the Incidents navigation: search box, link kind and group/check/incident filters, include-retired toggle, all held in the query string; entry detail with resolved link and history; administrators get record, amend, retire and restore (`routes/Memory.tsx`, route in `App.tsx`)
+- [x] `IncidentDetail.tsx`: relevant-entries count linking to the memory page with the `relevant to incident` filter in the query string
+- [x] Playwright: `memory.spec.ts` (list, search, filters from the address, admin-only controls, retire and restore), notes history specs added to `groups.spec.ts` and `machines.spec.ts`, deleted notes in `issues.spec.ts` or `incident-*`, the notes grant in `mcp-tokens.spec.ts`; extend `e2e/seed.ts` for memory entries and revisions. Run individual spec files only
+- [x] `just typecheck`
 
 ## Wrap-up
 
-- [ ] `cargo fmt`, `just check`, no warnings in tests or main code
-- [ ] `grep -rin deployment` over the touched specs and code stays clean
+- [x] `cargo fmt`, `just check`, no warnings in tests or main code
+- [x] `grep -rin deployment` over the touched specs and code stays clean
 - [ ] Delete this plan in an `unplan:` commit once the work has shipped
