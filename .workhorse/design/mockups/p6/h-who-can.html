@@ -1,0 +1,140 @@
+<!-- spec: platform/auth-control-plane.md -->
+<!doctype html>
+<html lang="en-AU"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Who can consume restore replicas in group harbour</title><style>
+*{box-sizing:border-box}
+html{-webkit-font-smoothing:antialiased}
+body{margin:0;font-family:"Roboto","Helvetica","Arial",sans-serif;font-size:1rem;line-height:1.5;letter-spacing:.00938em;color:rgba(0,0,0,.87);background:#fff}
+.app{display:flex;min-height:100vh}
+aside{width:240px;flex-shrink:0;background:#f5f5f5;border-right:1px solid rgba(0,0,0,.12);position:sticky;top:0;height:100vh;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:8px;padding:12px 24px;color:#388e3c;font-size:1.25rem;font-weight:500;line-height:1.6;letter-spacing:.0075em}
+.brand svg{width:24px;height:24px}
+nav{flex:1;min-height:0;overflow-y:auto;padding:8px}
+nav ul{list-style:none;margin:0;padding:0}
+.sec{display:flex;align-items:center;justify-content:space-between;border-radius:4px;padding:6px 8px 6px 16px;color:rgba(0,0,0,.6);font-weight:500;font-size:1rem;text-decoration:none}
+.sec.cur{color:#32669a}
+.sec svg{width:20px;height:20px;fill:rgba(0,0,0,.54)}
+.pages{padding-left:12px;margin:2px 0 8px}
+.pages h3{margin:0;padding:12px 16px 2px;font-size:.6875rem;font-weight:500;line-height:1.66;letter-spacing:.08333em;text-transform:uppercase;color:rgba(0,0,0,.6)}
+.pages h3.first{padding-top:4px}
+.pg{display:block;border-radius:4px;padding:4px 16px;margin-top:2px;font-size:.875rem;line-height:1.43;color:rgba(0,0,0,.87);text-decoration:none}
+.pg.sel{background:rgba(50,102,154,.08);color:#388e3c;font-weight:500}
+.ext{display:flex;align-items:center;gap:4px;padding:6px 16px;color:rgba(0,0,0,.6);font-weight:500;text-decoration:none}
+.ext svg{width:1em;height:1em;fill:rgba(0,0,0,.54)}
+.band{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 16px 0 24px;border-top:1px solid rgba(0,0,0,.12);font-size:.875rem;font-weight:500;text-transform:none;color:rgba(0,0,0,.6)}
+.band .dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+.band .grow{flex:1}
+.band svg{width:20px;height:20px;fill:currentColor}
+.band.write{background-color:#ed6c02;background-image:repeating-linear-gradient(135deg,rgba(255,152,0,.5),rgba(255,152,0,.5) 6px,rgba(255,152,0,0) 6px,rgba(255,152,0,0) 12px);color:#fff;border-top-color:#ed6c02}
+.band .t{opacity:.75;font-variant-numeric:tabular-nums}
+main{flex:1;min-width:0}
+.container{max-width:1200px;margin:0 auto;padding:24px}
+.stack>*+*{margin-top:24px}
+h1,h2,h3,h4,h5,h6,p{margin:0}
+.h4{font-size:2.125rem;font-weight:400;line-height:1.235;letter-spacing:.00735em}
+.h6{font-size:1.25rem;font-weight:500;line-height:1.6;letter-spacing:.0075em}
+.sub2{font-size:.875rem;font-weight:500;line-height:1.57;letter-spacing:.00714em}
+.gut{margin-bottom:.35em}
+.body2{font-size:.875rem;line-height:1.43;letter-spacing:.01071em}
+.cap{font-size:.75rem;line-height:1.66;letter-spacing:.03333em;color:rgba(0,0,0,.6)}
+.sec2{color:rgba(0,0,0,.6)}
+.mono{font-family:monospace}
+a{color:#32669a;text-decoration:none}
+a:hover{text-decoration:underline}
+.paper{border:1px solid rgba(0,0,0,.12);border-radius:4px;background:#fff;padding:16px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:6px 16px;font-size:.875rem;line-height:1.43;letter-spacing:.01071em;border-bottom:1px solid rgba(224,224,224,1);vertical-align:middle}
+th{font-weight:500;line-height:1.5rem}
+table.top td{vertical-align:top;padding-top:10px;padding-bottom:10px}
+tbody tr:hover{background:rgba(0,0,0,.04)}
+td.r,th.r{text-align:right}
+.paper table th:first-child,.paper table td:first-child{padding-left:0}
+.paper table th:last-child,.paper table td:last-child{padding-right:0}
+tr.off td{color:rgba(0,0,0,.6)}
+tr.sunk td{background:rgba(0,0,0,.02)}
+.chip{display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:16px;font-size:.8125rem;line-height:1.2;white-space:nowrap;background:rgba(0,0,0,.08);color:rgba(0,0,0,.87);vertical-align:middle}
+.chip.o{background:transparent;border:1px solid rgba(0,0,0,.23)}
+.chip.success{background:#2e7d32;color:#fff}
+.chip.warning{background:#ed6c02;color:#fff}
+.chip.error{background:#d32f2f;color:#fff}
+.chip.eo{background:transparent;border:1px solid #d32f2f;color:#d32f2f}
+.chip.x{text-decoration:line-through;color:rgba(0,0,0,.6)}
+.chip svg{width:14px;height:14px;margin:0 4px 0 -2px;fill:currentColor;opacity:.7}
+.chip .rm{width:16px;height:16px;margin:0 -4px 0 4px;fill:rgba(0,0,0,.26);opacity:1}
+.chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.cell-cap{display:block;margin-top:2px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.row.top{align-items:flex-start}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:6px 16px;border-radius:4px;border:1px solid transparent;background:none;font:inherit;font-size:.875rem;font-weight:500;line-height:1.75;letter-spacing:.02857em;text-transform:uppercase;white-space:nowrap;color:#388e3c;cursor:pointer}
+.btn.c{background:#388e3c;color:#fff;box-shadow:0 3px 1px -2px rgba(0,0,0,.2),0 2px 2px 0 rgba(0,0,0,.14),0 1px 5px 0 rgba(0,0,0,.12)}
+.btn.o{border-color:rgba(56,142,60,.5)}
+.btn.oe{color:#d32f2f;border-color:rgba(211,47,47,.5)}
+.btn.s{padding:3px 9px;font-size:.8125rem;line-height:1.69}
+.btn.d{color:rgba(0,0,0,.26);border-color:rgba(0,0,0,.12)}
+.btn svg{width:18px;height:18px;fill:currentColor}
+.field{position:relative;display:inline-block;vertical-align:top}
+.field .box{display:flex;align-items:center;gap:4px;height:40px;width:100%;min-width:0;padding:0 14px;border:1px solid rgba(0,0,0,.23);border-radius:4px;font-size:1rem;color:rgba(0,0,0,.87);background:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.field .box.ph{color:rgba(0,0,0,.38)}
+.field .box.mono{font-size:.9rem}
+.field label{position:absolute;top:-9px;left:10px;padding:0 4px;background:#fff;font-size:.75rem;line-height:1.4;color:rgba(0,0,0,.6);z-index:1}
+.field .box svg.car{width:24px;height:24px;fill:rgba(0,0,0,.54);margin-left:auto;margin-right:-8px;flex-shrink:0}
+.field.fw{flex:1;min-width:160px}
+.field .box .chip{height:24px}
+.iconbtn{display:inline-flex;padding:6px;border-radius:50%;vertical-align:middle}
+.iconbtn svg{width:20px;height:20px;fill:rgba(0,0,0,.54)}
+.iconbtn.big{padding:8px}.iconbtn.big svg{width:24px;height:24px}
+.alert{display:flex;gap:12px;padding:6px 16px;border-radius:4px;font-size:.875rem;line-height:1.43}
+.alert svg{width:22px;height:22px;flex-shrink:0;margin:7px 0}
+.alert .msg{padding:8px 0}
+.alert.info{background:rgb(229,246,253);color:rgb(1,67,97)}
+.alert.info svg{fill:#0288d1}
+.alert.warning{background:rgb(255,244,229);color:rgb(102,60,0)}
+.alert.warning svg{fill:#ed6c02}
+.facts{display:flex;flex-wrap:wrap;gap:8px 32px}
+.facts div{display:flex;flex-direction:column}
+.facts .cap{line-height:1.66}
+.claims{display:grid;grid-template-columns:max-content 1fr;gap:2px 16px;margin:0}
+.claims dt{color:rgba(0,0,0,.6)}
+.claims dd{margin:0;font-family:monospace;font-size:.8125rem;line-height:1.7}
+.backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10}
+.dialog{width:600px;max-width:calc(100% - 64px);background:#fff;border-radius:4px;box-shadow:0 11px 15px -7px rgba(0,0,0,.2),0 24px 38px 3px rgba(0,0,0,.14),0 9px 46px 8px rgba(0,0,0,.12)}
+.dialog h2{font-size:1.25rem;font-weight:500;line-height:1.6;padding:16px 24px}
+.dialog .content{padding:0 24px 20px}
+.dialog .actions{display:flex;justify-content:flex-end;padding:8px}
+.dialog .secret{display:flex;align-items:center;gap:8px;margin-top:16px}
+.dialog .secret .box{flex:1;display:flex;align-items:center;height:40px;padding:0 14px;border:1px solid rgba(0,0,0,.23);border-radius:4px;font-family:monospace;font-size:.9rem;overflow:hidden;white-space:nowrap}
+
+.hdr{display:flex;align-items:center;gap:8px;margin-bottom:.35em}
+.hdr .grow{flex:1}
+.crumb{display:inline-flex;align-items:center;gap:4px;font-size:.875rem;color:rgba(0,0,0,.6)}
+.crumb svg{width:18px;height:18px;fill:rgba(0,0,0,.54)}
+.title{display:flex;align-items:center;gap:12px}
+.title .h4{font-family:monospace;font-size:1.75rem}
+tr.sect td{background:rgba(0,0,0,.03);padding-top:4px;padding-bottom:4px;font-size:.75rem;font-weight:500;line-height:1.66;letter-spacing:.08333em;text-transform:uppercase;color:rgba(0,0,0,.6)}
+tr.sect td .cap{text-transform:none;letter-spacing:.03333em;font-weight:400;margin-left:8px}
+tr.fleet td{background:rgba(0,0,0,.02)}
+.chip.role{font-family:monospace;font-size:.75rem}
+.chip.role .sc{font-family:"Roboto","Helvetica","Arial",sans-serif;color:rgba(0,0,0,.6);margin-left:6px}
+.chip.role.x .sc{text-decoration:line-through}
+.chip.bi{height:20px;font-size:.6875rem;padding:0 6px;background:transparent;border:1px solid rgba(0,0,0,.23);color:rgba(0,0,0,.6)}
+.matrix th,.matrix td{padding:0 8px;height:32px}
+.matrix th{height:40px}
+.matrix td.noun{white-space:nowrap}
+.matrix th.verb,.matrix td.cell{text-align:center;width:72px}
+.matrix td.cell svg{width:20px;height:20px;vertical-align:middle}
+.matrix td.cell svg.on{fill:#ed6c02}
+.matrix td.cell svg.off{fill:rgba(0,0,0,.38)}
+.matrix td.scope{width:200px}
+.matrix td.scope .field{width:180px}
+.matrix td.scope .field .box{height:28px;font-size:.8125rem;padding:0 10px}
+.matrix tr.sect td{height:26px}
+.matrix tr.muted td.noun{color:rgba(0,0,0,.6)}
+.dialog ul{margin:8px 0 0;padding-left:20px;font-size:.875rem;line-height:1.7}
+.dialog .d-text{font-size:1rem;color:rgba(0,0,0,.6);margin:0}
+.check{display:flex;align-items:center;gap:4px;margin-top:12px;font-size:.875rem}
+.check svg{width:24px;height:24px;fill:rgba(0,0,0,.6)}
+.check svg.on{fill:#ed6c02}
+.under{filter:none}
+.q{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
+</style></head><body><div class="app"><aside><div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="#388e3c" stroke-width="2.5"/><path d="M10.4 6h3.2v4.4H18v3.2h-4.4V18h-3.2v-4.4H6v-3.2h4.4z" fill="#32669a"/></svg><span>Canopy</span></div><nav><ul><li><a class="sec" href="#">Status</a></li><li><a class="sec" href="#">Incidents<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></a></li><li><a class="sec" href="#">Fleet<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></a></li><li><a class="sec" href="#">Versions</a></li><li><a class="sec" href="#">Upgrades</a></li><li><a class="sec" href="#">Vulnerabilities<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></a></li><li><a class="sec" href="#">Maintenance</a></li><li><a class="sec" href="#">Devices<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></a></li><li><a class="sec" href="#">Bestool</a></li><li><a class="sec cur" href="#">Settings<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg></a><div class="pages" role="group" aria-label="Settings pages"><h3 class="first">Access</h3><a class="pg sel" href="#" aria-current="page">Principals</a><a class="pg" href="#">Roles</a><a class="pg" href="#">Certificate authority</a><a class="pg" href="#">Identity provider</a><a class="pg" href="#">Audit log</a><h3>Monitoring</h3><a class="pg" href="#">Healthchecks</a><a class="pg" href="#">Clusters</a><h3>Backups</h3><a class="pg" href="#">Backup defaults</a><a class="pg" href="#">Recovery vault</a><a class="pg" href="#">Restore consumers</a></div></li><li><a class="sec" href="#">SQL</a></li><li><a class="ext" style="margin-top:8px" href="#">Public<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg></a></li><li><a class="ext" href="#">Server Versions<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg></a></li></ul></nav><div class="band write"><span class="dot"></span><span class="grow">Write</span><span class="t">9:12</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg></div></aside><main><div class="container stack">
+<div><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>Principals</span></div><div class="paper"><div class="q"><div class="field" style="width:160px"><label>Verb</label><div class="box">Consume<svg class="car" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg></div></div><div class="field" style="width:240px"><label>Noun</label><div class="box">Restore replicas<svg class="car" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg></div></div><div class="field" style="width:220px"><label>Scope</label><div class="box">Group harbour<svg class="car" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg></div></div><span class="btn c">Check</span></div></div><div><div class="hdr"><h2 class="h6">5 principals can consume restore replicas in harbour</h2><span class="grow"></span></div><table><thead><tr><th style="width:260px">Principal</th><th style="width:240px">Role</th><th>Through</th><th style="width:150px">Scope matched</th><th style="width:170px">Last matched</th></tr></thead><tbody><tr><td><a class="mono" href="#">pgro-harbour</a><span class="cap cell-cap">Restore consumer</span></td><td><div class="chips"><span class="chip role">restore-consumer<span class="sc">own group</span></span></div></td><td>Tailnet tag<span class="cap cell-cap">tag:restore-consumer</span></td><td>harbour</td><td>1 hour ago</td></tr><tr><td><a class="mono" href="#">mei.tanaka@example.org</a><span class="cap cell-cap">Operator</span></td><td><div class="chips"><span class="chip role">admin</span></div></td><td>Allow-list</td><td>all groups</td><td>never</td></tr><tr><td><a class="mono" href="#">sofia.alvarez@example.org</a><span class="cap cell-cap">Operator</span></td><td><div class="chips"><span class="chip role">admin</span></div></td><td>Allow-list</td><td>all groups</td><td>never</td></tr><tr><td><a class="mono" href="#">rahul.verma@example.org</a><span class="cap cell-cap">Operator</span></td><td><div class="chips"><span class="chip role"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>admin</span></div></td><td>Tailscale policy</td><td>all groups</td><td>never</td></tr><tr><td><a class="mono" href="#">ci-deploy-runner</a><span class="cap cell-cap">Automation</span></td><td><div class="chips"><span class="chip role">admin</span></div></td><td>Direct</td><td>all groups</td><td>never</td></tr><tr class="off"><td><a class="mono" href="#">tomas.wiremu@example.org</a><span class="cap cell-cap">Operator</span></td><td><div class="chips"><span class="chip role x"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>admin</span></div></td><td>Tailscale policy</td><td><span class="sec2">none</span></td><td><span class="chip ">suspended</span></td></tr><tr class="sect"><td colspan="5">Fleet machines<span class="cap">412 in 14 groups</span></td></tr><tr class="fleet"><td><span class="sec2">none of 412</span></td><td><div class="chips"><span class="chip role">fleet-machine<span class="sc">own group</span></span></div></td><td>Enrolled key</td><td><span class="sec2">none</span></td><td></td></tr></tbody></table></div>
+</div></main></div></body></html>
