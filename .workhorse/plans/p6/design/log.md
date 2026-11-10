@@ -27,21 +27,57 @@ The Playwright e2e fixture is the rig: it spawns a private-server and Vite pair 
 
 The app's own shipped surfaces are the consistency reference, captured in `shots/current/`: the five Access pages, restore consumers, the device listing, search and detail. There is no `.workhorse/design/` in this repository, so there is no design system document or snapshot to start from; the MUI composition in `private-web/src/routes/` is the baseline.
 
-A product reference has been asked for in prose and not yet answered. The directions are briefed to the app's own language in the meantime, so an answer can be folded in without rework.
+The user named the references (2026-11-10), for their models rather than their screens unless noted:
+
+- Tailscale's grants, as a data model. Its UI is not the reference.
+- Tamanu's permission system: verb on noun with an optional object id, attached to roles, allow-only, edited as a matrix.
+- Firewall rule tables, for expressiveness that stays human-parseable. iptables syntax is the cautionary tale.
+- Tailscale's and crates.io's trust credentials UIs. These are UI references as well as model references.
+- AWS IAM for the API and model. Its UI is the cautionary tale.
+
+They are written into `direction-brief.md`, with what each is taken for.
 
 ## Step 2 — three directions
 
-The card asks whether the work can reach rung 1, something between, or the unified control plane. Rather than park the run on that question, the three directions span the ladder, so the side-by-side critique answers the scope question with evidence instead of a guess:
+### Scope decided by the user
 
-- **A, the rule table.** One new page, a flat table of matcher to API scope, in the shape of the existing Admins page. The five Access pages are untouched.
-- **B, the grants layer.** The credential pages stay; a shared named-capability concept threads through all of them, with one grant-centric index.
-- **C, one principal list.** The Access section is replaced by a single list of every principal, human and machine, each with its credentials and permissions on one detail page.
+Design for the full unified control plane (rung 3), then judge what is realistic and useful from there. The first round's spread across the scope ladder is withdrawn. Of the old directions:
 
-Each was briefed from `direction-brief.md` and `inventory.md`, with six hard cases every direction must show: a policy-granted admin Canopy cannot edit, a principal with no permissions, a list long enough to test density, a secret shown once, something revoked beside live entries, and a permission scoped to a group rather than global.
+- A's rung-1 rule table is kept in `superseded/` and `superseded-direction-a-rung1.md` for the record, out of the critique.
+- B left nothing.
+- C's partial principals screen is handed to its successor.
+
+### Fleet noise decided by the user
+
+Default views and filters leave out the authentication of fleet machines, which are the boxes enrolled in groups. That traffic would drown everything else. It stays fully in the model, appears in any "who can do this" answer, and is one step away as a count or a filter. A fleet machine behaving unlike the fleet still surfaces by default. This is written into the brief as a rule binding every direction.
+
+### The round as re-run
+
+Three structurally different shapes of the same rung-3 control plane, each organised around a different primary entity:
+
+- **P, principals first.** One list of every principal, and a detail page with its credentials and effective permissions. The model comes from IAM, the credential shapes from trust credentials.
+- **G, grants first.** One ordered table of grants, each readable as a sentence, with hit counts and last match. The model comes from Tailscale grants and firewall tables, the evaluation from IAM. Principals are secondary.
+- **R, roles first.** Named roles as bundles of verb-on-noun permissions, edited as a matrix. Principals are members of roles, or are trusted into them by class. The model comes from Tamanu and IAM assumption. The fleet is one built-in role, collapsed.
+
+There are ten hard cases. The first six are carried over:
+
+1. A policy-granted admin Canopy cannot edit.
+2. A principal with no permissions.
+3. A list long enough to test density.
+4. A secret shown once.
+5. Something revoked beside live entries.
+6. A scoped permission.
+
+The four new ones:
+
+7. The fleet held back, with its drill-down.
+8. A trust credential for a releaser.
+9. Taking access away in a hurry, by deny or otherwise.
+10. A "who can do this" answer that names each principal and its source.
 
 ## In flight
 
-Three direction agents, writing into `.workhorse/design/mockups/p6/` and `direction-{a,b,c}.md`.
+Three direction agents (P, G, R), writing `p-`, `g-` and `r-` files into `.workhorse/design/mockups/p6/` and `direction-{p,g,r}.md`.
 
 ## Next
 
@@ -50,12 +86,15 @@ Three direction agents, writing into `.workhorse/design/mockups/p6/` and `direct
 
 ## Open questions
 
-- Whether a product does this well and should be the reference.
-- Which rung to build to. The critique is meant to answer this; the user's own call overrides it.
+- What is realistic to build. This is judged after a direction is chosen and refined, not before.
 
 ## Taste ledger
 
-_Empty. Each entry: the call, its reason, before and after paths, the verdict._
+| Call | Reason | Before / after | Verdict |
+|---|---|---|---|
+| Withdraw the scope-ladder spread (A rung 1, B rung 2, C rung 3) | The user fixed scope at rung 3, so the spread no longer answers a live question | `superseded/a-*.html` / `p-`, `g-`, `r-` | Withdrawn by user decision |
+| Organise the three directions by primary entity (principal, grant, role) | Each reference implies a different home entity, and that choice drives every screen | n/a | Adopted for round 1 |
+| Fleet machines out of default views, one step away | User decision: they would add most of the noise | n/a | Binding on all directions |
 
 ## Differences from the reference
 
