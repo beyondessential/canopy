@@ -90,6 +90,11 @@ An application is offered to end-user-facing clients only when its type is eligi
 An operator is offered the public name field only for an application whose type makes it eligible.
 A public name already set is kept when an application stops being eligible, and takes effect again if the application becomes eligible once more.
 
+Clients read the listing from the device API at `GET /servers`, without authentication, and it is the only unauthenticated listing of applications the device API serves.
+
+> [!NOTE]
+> The path keeps its name from before applications and machines were separate, because the Tamanu mobile app reads it to offer a user the servers they can connect to.
+
 ## Billing attribution
 
 Each grain's billing labels carry what that grain knows, and nothing inferred from what sits inside it.
