@@ -36,9 +36,10 @@ use crate::state::AppState;
 /// presents it.
 pub const SESSION_HEADER: &str = "x-canopy-session";
 
-/// A header every browser adds to the requests it makes and no page can
-/// remove, so the operator interface is known even where it names no session.
-const BROWSER_HEADER: &str = "sec-fetch-site";
+/// The request header a command or a script names itself with. It has no
+/// session to raise, so saying what it is stands in for raising one. The
+/// operator interface never sends it.
+pub const CLIENT_HEADER: &str = "x-canopy-client";
 
 /// How long a session's last-seen may go unwritten.
 ///
@@ -206,9 +207,9 @@ async fn touch(safety: &SafetyState, id: Uuid, login: &str) -> Result<()> {
 /// Read-only-graded requests are answered without a session, so a client can
 /// read before it has one. Anything higher is decided against the session named
 /// by [`SESSION_HEADER`]: an unknown, expired, or someone else's session all
-/// read as read-only rather than being refused outright. A request that names
-/// no session and comes from no browser is not the operator interface's, and
-/// is left to the handler to allow on the caller's standing.
+/// read as read-only rather than being refused outright. A request naming
+/// itself with [`CLIENT_HEADER`] is a command's or a script's, and is left to
+/// the handler to allow on the caller's standing.
 pub async fn enforce(
 	State(safety): State<SafetyState>,
 	request: Request,
@@ -249,15 +250,6 @@ pub async fn enforce(
 		)));
 	};
 
-	// A command or a script has no mode to raise. The browser's own header is
-	// what tells it from the operator interface having lost its session, which
-	// stays read-only.
-	if !parts.headers.contains_key(SESSION_HEADER) && !parts.headers.contains_key(BROWSER_HEADER) {
-		return Ok(next
-			.run(axum::extract::Request::from_parts(parts, body))
-			.await);
-	}
-
 	let session_id = parts
 		.headers
 		.get(SESSION_HEADER)
@@ -287,6 +279,14 @@ pub async fn enforce(
 	let user =
 		<TailscaleUser as FromRequestParts<AppState>>::from_request_parts(&mut parts, &safety.app)
 			.await?;
+
+	// Only a request that says so is exempt, so one that names nothing at all
+	// stays read-only like any other the boundary cannot place.
+	if parts.headers.contains_key(CLIENT_HEADER) {
+		return Ok(next
+			.run(axum::extract::Request::from_parts(parts, body))
+			.await);
+	}
 
 	// Scoped so the connection goes back to the pool before the handler runs:
 	// held across it, every graded request would take two, and a busy server

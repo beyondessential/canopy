@@ -12,6 +12,7 @@ use serde_json::json;
 
 const TRUST_HEADERS: &str = "CANOPY_TRUST_TAILSCALE_HEADERS";
 const SESSION_HEADER: &str = "x-canopy-session";
+const CLIENT_HEADER: &str = "x-canopy-client";
 
 const OPERATOR: &str = "operator@example.com";
 const OTHER: &str = "other@example.com";
@@ -784,11 +785,11 @@ async fn backup_schedules_are_write_and_clearing_retention_is_danger() {
 	.await;
 }
 
-/// A run is a command, with no session to raise, so the modes do not gate it:
-/// it takes, extends and gives back a lease on its operator's standing.
+/// A run is a command, with no session to raise. Naming itself as one lifts
+/// every grade, and leaves the caller's standing to decide.
 // spec: SAFE
 #[tokio::test(flavor = "multi_thread")]
-async fn a_request_from_outside_the_operator_interface_is_not_gated() {
+async fn a_command_that_names_itself_is_not_gated() {
 	use super::audit::{GROUP, seed};
 
 	trust_headers();
@@ -809,13 +810,12 @@ async fn a_request_from_outside_the_operator_interface_is_not_gated() {
 			.await;
 		assert!(problem_type(&gated.json()).ends_with("safety-mode-too-low"));
 
-		// So is one from a browser that names no session, so the operator
+		// So is one that names neither a session nor itself, so the operator
 		// interface losing its session does not lift the modes.
 		let gated = private
 			.post("/api/ansible/take_lease")
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
-			.add_header("Sec-Fetch-Site", "same-origin")
 			.json(&take)
 			.await;
 		assert!(problem_type(&gated.json()).ends_with("safety-mode-too-low"));
@@ -824,27 +824,44 @@ async fn a_request_from_outside_the_operator_interface_is_not_gated() {
 			.post("/api/ansible/take_lease")
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
+			.add_header(CLIENT_HEADER, "ansible")
 			.json(&take)
 			.await;
 		lease.assert_status_ok();
 		let lease: serde_json::Value = lease.json();
 		let body = json!({ "lease_id": lease["id"] });
 
-		let as_run = async |login: &str, path: &str| {
+		let as_run = async |login: &str, path: &str, body: &serde_json::Value| {
 			private
 				.post(path)
 				.add_header("Tailscale-User-Login", login)
-				.add_header("Tailscale-User-Name", "Operator")
-				.json(&body)
+				.add_header("Tailscale-User-Name", login)
+				.add_header(CLIENT_HEADER, "ansible")
+				.json(body)
 				.await
 				.status_code()
 		};
 
-		assert_eq!(as_run(OPERATOR, "/api/ansible/extend_lease").await, 200);
-		assert_eq!(as_run(OPERATOR, "/api/ansible/release_lease").await, 200);
+		assert_eq!(
+			as_run(OPERATOR, "/api/ansible/extend_lease", &body).await,
+			200
+		);
+		assert_eq!(
+			as_run(OPERATOR, "/api/ansible/release_lease", &body).await,
+			200
+		);
+
+		// Every grade is lifted, danger included: this names nothing that
+		// exists, so the handler answers rather than the boundary.
+		let nobody = "00000000-0000-0000-0000-000000000000";
+		let clear = json!({"server_group_id": nobody, "type": "files"});
+		assert_ne!(
+			as_run(OPERATOR, "/api/backups/clear_retention", &clear).await,
+			403
+		);
 
 		// Standing still decides: someone who is not an administrator is refused.
-		assert_eq!(as_run(OTHER, "/api/ansible/take_lease").await, 403);
+		assert_eq!(as_run(OTHER, "/api/ansible/take_lease", &take).await, 403);
 	})
 	.await
 }
