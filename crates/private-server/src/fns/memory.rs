@@ -20,7 +20,6 @@ use database::{
 	},
 	notes_log::{Author, Via},
 };
-use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -42,7 +41,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 
 /// What to list. Everything is optional; the filters narrow together.
 #[derive(Deserialize, ToSchema)]
-pub struct ListArgs {
+pub struct MemoryListArgs {
 	/// Free text matched against titles and bodies.
 	#[serde(default)]
 	pub text: Option<String>,
@@ -92,7 +91,7 @@ pub struct MemoryList {
 	operation_id = "memory_list",
 	tag = "memory",
 	security(("tailscale-user" = [])),
-	request_body = ListArgs,
+	request_body = MemoryListArgs,
 	responses(
 		(status = 200, body = MemoryList),
 		(status = 401, body = ProblemDetailsSchema),
@@ -101,7 +100,7 @@ pub struct MemoryList {
 pub async fn list(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-	Json(args): Json<ListArgs>,
+	Json(args): Json<MemoryListArgs>,
 ) -> Result<Json<MemoryList>> {
 	let mut conn = state.db_read.get().await?;
 	let found = memory::find(
@@ -126,7 +125,7 @@ pub async fn list(
 
 /// Identifies an entry.
 #[derive(Deserialize, ToSchema)]
-pub struct EntryIdArgs {
+pub struct MemoryEntryIdArgs {
 	pub id: Uuid,
 }
 
@@ -145,7 +144,7 @@ pub struct MemoryEntryDetail {
 	operation_id = "memory_get",
 	tag = "memory",
 	security(("tailscale-user" = [])),
-	request_body = EntryIdArgs,
+	request_body = MemoryEntryIdArgs,
 	responses(
 		(status = 200, body = MemoryEntryDetail),
 		(status = 404, body = ProblemDetailsSchema),
@@ -154,7 +153,7 @@ pub struct MemoryEntryDetail {
 pub async fn get(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-	Json(args): Json<EntryIdArgs>,
+	Json(args): Json<MemoryEntryIdArgs>,
 ) -> Result<Json<MemoryEntryDetail>> {
 	let mut conn = state.db_read.get().await?;
 	let entry = memory::get(&mut conn, args.id).await?;
@@ -201,7 +200,7 @@ pub async fn record(
 
 /// An amendment, against the revision the caller read.
 #[derive(Deserialize, ToSchema)]
-pub struct AmendArgs {
+pub struct MemoryAmendArgs {
 	pub id: Uuid,
 	/// The revision of the entry the caller read.
 	pub revision: i64,
@@ -223,7 +222,7 @@ pub struct AmendArgs {
 	operation_id = "memory_amend",
 	tag = "memory",
 	security(("tailscale-admin" = [])),
-	request_body = AmendArgs,
+	request_body = MemoryAmendArgs,
 	responses(
 		(status = 200, body = MemoryEntryData),
 		(status = 400, body = ProblemDetailsSchema),
@@ -234,7 +233,7 @@ pub struct AmendArgs {
 pub async fn amend(
 	audit: Audit,
 	admin: TailscaleAdmin,
-	Json(args): Json<AmendArgs>,
+	Json(args): Json<MemoryAmendArgs>,
 ) -> Result<Json<MemoryEntryData>> {
 	let mut conn = audit.begin().await?;
 	let outcome = memory::amend(
@@ -268,7 +267,7 @@ pub async fn amend(
 
 /// Retiring an entry.
 #[derive(Deserialize, ToSchema)]
-pub struct RetireArgs {
+pub struct MemoryRetireArgs {
 	pub id: Uuid,
 	/// Why the entry no longer holds.
 	pub reason: String,
@@ -285,7 +284,7 @@ pub struct RetireArgs {
 	operation_id = "memory_retire",
 	tag = "memory",
 	security(("tailscale-admin" = [])),
-	request_body = RetireArgs,
+	request_body = MemoryRetireArgs,
 	responses(
 		(status = 200, body = MemoryEntryData),
 		(status = 400, body = ProblemDetailsSchema),
@@ -296,7 +295,7 @@ pub struct RetireArgs {
 pub async fn retire(
 	audit: Audit,
 	admin: TailscaleAdmin,
-	Json(args): Json<RetireArgs>,
+	Json(args): Json<MemoryRetireArgs>,
 ) -> Result<Json<MemoryEntryData>> {
 	let mut conn = audit.begin().await?;
 	let entry = memory::retire(
@@ -319,7 +318,7 @@ pub async fn retire(
 
 /// Restoring an entry to an earlier version of itself.
 #[derive(Deserialize, ToSchema)]
-pub struct RestoreArgs {
+pub struct MemoryRestoreArgs {
 	pub id: Uuid,
 	/// The revision of the entry the caller read.
 	pub revision: i64,
@@ -338,7 +337,7 @@ pub struct RestoreArgs {
 	operation_id = "memory_restore",
 	tag = "memory",
 	security(("tailscale-admin" = [])),
-	request_body = RestoreArgs,
+	request_body = MemoryRestoreArgs,
 	responses(
 		(status = 200, body = MemoryEntryData),
 		(status = 404, body = ProblemDetailsSchema),
@@ -348,7 +347,7 @@ pub struct RestoreArgs {
 pub async fn restore(
 	audit: Audit,
 	admin: TailscaleAdmin,
-	Json(args): Json<RestoreArgs>,
+	Json(args): Json<MemoryRestoreArgs>,
 ) -> Result<Json<MemoryEntryData>> {
 	let mut conn = audit.begin().await?;
 	let outcome = memory::restore(

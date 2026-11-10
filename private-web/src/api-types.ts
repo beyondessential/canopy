@@ -2586,6 +2586,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fleet/applications/notes_history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * An application's notes revision log.
+         * @description Every change to the application's notes with who made it, how, and when,
+         *     newest first.
+         */
+        post: operations["applications_notes_history"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet/applications/restore": {
         parameters: {
             query?: never;
@@ -2779,6 +2800,27 @@ export interface paths {
          *     restored. The request body is ignored; send an empty JSON object.
          */
         post: operations["server_groups_list_archived"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/groups/notes_history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A group's notes revision log.
+         * @description Every change to the group's notes with who made it, how, and when, newest
+         *     first.
+         */
+        post: operations["server_groups_notes_history"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3071,6 +3113,27 @@ export interface paths {
          *     invalidates any prior token. Fails if the server is archived.
          */
         post: operations["mint_enrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/machines/notes_history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A machine's notes revision log.
+         * @description Every change to the machine's notes with who made it, how, and when,
+         *     newest first.
+         */
+        post: operations["machines_notes_history"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3556,9 +3619,10 @@ export interface paths {
         put?: never;
         /**
          * Delete an incident note.
-         * @description Permanently removes the note. Notes cannot be edited in place; to change
-         *     one, delete it and add a replacement. Requires the caller to be on the
-         *     admin allow-list.
+         * @description The note leaves the incident's notes but is kept, with who deleted it and
+         *     when, and administrators can list deleted notes. Deleting a note that
+         *     doesn't exist or is already deleted succeeds without effect. Requires the
+         *     caller to be on the admin allow-list.
          */
         post: operations["incident_delete_note"];
         delete?: never;
@@ -3665,7 +3729,8 @@ export interface paths {
         /**
          * List notes on an incident.
          * @description Returns notes written on the incident itself; notes on its contributing
-         *     issues are not included.
+         *     issues are not included. Deleted notes are left out, unless an
+         *     administrator asks for them.
          */
         post: operations["incident_list_notes"];
         delete?: never;
@@ -3749,9 +3814,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Permanently delete a note from an issue.
-         * @description The note is removed outright; there is no undo. Deleting a note that
-         *     doesn't exist succeeds without effect.
+         * Delete a note from an issue.
+         * @description The note leaves the issue's notes but is kept, with who deleted it and
+         *     when, and administrators can list deleted notes. Deleting a note that
+         *     doesn't exist or is already deleted succeeds without effect.
          */
         post: operations["issue_delete_note"];
         delete?: never;
@@ -3838,7 +3904,8 @@ export interface paths {
         /**
          * List the notes left on a specific issue.
          * @description Returns the issue's notes, most recent first, each with its author and
-         *     creation time.
+         *     creation time. Deleted notes are left out, unless an administrator asks for
+         *     them.
          */
         post: operations["issue_list_notes"];
         delete?: never;
@@ -4300,6 +4367,130 @@ export interface paths {
          *     anything further. Returns 404 if no token with that id exists.
          */
         post: operations["mcp_tokens_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/amend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Amend an incident memory entry's title, body or link.
+         * @description Requires the caller to be an administrator. Responds 409 if the entry has
+         *     changed since the revision given.
+         */
+        post: operations["memory_amend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get an incident memory entry with its history. */
+        post: operations["memory_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List incident memory entries.
+         * @description Newest amended first, narrowed by free text, link, and relevance to an
+         *     incident, and widened to retired entries on request.
+         */
+        post: operations["memory_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/record": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a new incident memory entry.
+         * @description Requires the caller to be an administrator. Responds 400 if the title or
+         *     body is over its limit or the link names nothing.
+         */
+        post: operations["memory_record"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore an incident memory entry to an earlier version.
+         * @description The restoration is a new version, and makes a retired entry current again.
+         *     Requires the caller to be an administrator. Responds 409 if the entry has
+         *     changed since the revision given.
+         */
+        post: operations["memory_restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retire an incident memory entry.
+         * @description The entry is kept in full, with its history, and is left out of lists
+         *     unless retired entries are asked for. Requires the caller to be an
+         *     administrator.
+         */
+        post: operations["memory_retire"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6334,7 +6525,10 @@ export interface components {
             name_management_paused_at?: string | null;
             /** @description Who paused it. `None` when Canopy paused it itself on a revocation. */
             name_management_paused_by?: string | null;
-            /** @description Free-form operator notes about this server. */
+            /**
+             * @description Free-form operator notes about this server. Held in the application's
+             *     notes log from [`Application::create_by`], not inserted with the row.
+             */
             notes?: string;
             /**
              * @description If set, the server is listed publicly under this name (used by
@@ -6584,6 +6778,11 @@ export interface components {
              */
             since?: string | null;
         };
+        /**
+         * @description Whether a person or an agent wrote a note.
+         * @enum {string}
+         */
+        AuthorKind: "operator" | "agent";
         /** @description The certificate authority Canopy is configured to use, and whether it works. */
         AuthorityView: {
             /**
@@ -9318,20 +9517,25 @@ export interface components {
              */
             incident_id: string;
             /**
+             * @description Include deleted notes, which are otherwise left out. Honoured for
+             *     administrators only.
+             */
+            include_deleted?: boolean;
+            /**
              * Format: int64
              * @description Maximum number of notes to return; defaults to 100.
              */
             limit?: number | null;
         };
-        /**
-         * @description A note attached to an incident.
-         *
-         *     Notes are immutable once written; to change one, delete it and add a
-         *     replacement.
-         */
+        /** @description A note attached to an incident, written by an operator or an agent. */
         IncidentNoteData: {
-            /** @description Login of the operator who wrote the note. */
+            /**
+             * @description Login of the operator who wrote the note, or the name of the access
+             *     token an agent wrote it through.
+             */
             author: string;
+            /** @description Whether an operator or an agent wrote the note. */
+            author_kind: components["schemas"]["AuthorKind"];
             /** @description The note text. */
             body: string;
             /**
@@ -9339,6 +9543,14 @@ export interface components {
              * @description When the note was written.
              */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description When the note was deleted. Only present when deleted notes were asked
+             *     for.
+             */
+            deleted_at?: string | null;
+            /** @description Who deleted the note. */
+            deleted_by?: string | null;
             /**
              * Format: uuid
              * @description Unique identifier of the note.
@@ -9349,6 +9561,11 @@ export interface components {
              * @description Identifier of the incident the note is attached to.
              */
             incident_id: string;
+            /**
+             * Format: int64
+             * @description How many times the text has been edited, plus one.
+             */
+            revision: number;
         };
         /** @description An incident together with every issue that has contributed to it. */
         IncidentWithIssues: {
@@ -9663,6 +9880,11 @@ export interface components {
         /** @description Identifies the issue whose notes to list. */
         IssueListNotesArgs: {
             /**
+             * @description Include deleted notes, which are otherwise left out. Honoured for
+             *     administrators only.
+             */
+            include_deleted?: boolean;
+            /**
              * Format: uuid
              * @description Id of the issue whose notes to list.
              */
@@ -9674,12 +9896,17 @@ export interface components {
             limit?: number | null;
         };
         /**
-         * @description A free-text note left by an operator on an issue, for handoff and
-         *     context that doesn't belong in the issue's own message.
+         * @description A free-text note left by an operator or an agent on an issue, for handoff
+         *     and context that doesn't belong in the issue's own message.
          */
         IssueNoteData: {
-            /** @description Login of the operator who wrote the note. */
+            /**
+             * @description Login of the operator who wrote the note, or the name of the access
+             *     token an agent wrote it through.
+             */
             author: string;
+            /** @description Whether an operator or an agent wrote the note. */
+            author_kind: components["schemas"]["AuthorKind"];
             /** @description Text of the note. */
             body: string;
             /**
@@ -9687,6 +9914,14 @@ export interface components {
              * @description When the note was created.
              */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description When the note was deleted. Only present when deleted notes were asked
+             *     for.
+             */
+            deleted_at?: string | null;
+            /** @description Who deleted the note. */
+            deleted_by?: string | null;
             /**
              * Format: uuid
              * @description Unique identifier for this note.
@@ -9697,6 +9932,11 @@ export interface components {
              * @description Id of the issue this note is attached to.
              */
             issue_id: string;
+            /**
+             * Format: int64
+             * @description How many times the text has been edited, plus one.
+             */
+            revision: number;
         };
         /** @description Identifies an issue to resolve, with the reason for resolving it. */
         IssueResolveArgs: {
@@ -9895,6 +10135,28 @@ export interface components {
             /** @description The limit as an Ansible host pattern. */
             limit: string;
         };
+        /** @description What an entry is about. An entry with none applies to the fleet as a whole. */
+        Link: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "group";
+        } | {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "incident";
+        } | {
+            /** @enum {string} */
+            kind: "check";
+            name: string;
+            source: string;
+        };
+        /**
+         * @description A kind of link, for narrowing a find. `Fleet` is an entry with no link.
+         * @enum {string}
+         */
+        LinkKind: "fleet" | "group" | "check" | "incident";
         /** @description Filters for listing open incidents. */
         ListActiveArgs: {
             /**
@@ -10831,6 +11093,140 @@ export interface components {
              */
             revoked_at?: string | null;
         };
+        /** @description An amendment, against the revision the caller read. */
+        MemoryAmendArgs: {
+            body?: string | null;
+            /** Format: uuid */
+            id: string;
+            link?: null | components["schemas"]["Link"];
+            /**
+             * Format: int64
+             * @description The revision of the entry the caller read.
+             */
+            revision: number;
+            title?: string | null;
+        };
+        /** @description A memory entry, with what it links to resolved to a name. */
+        MemoryEntryData: {
+            body: string;
+            /** Format: date-time */
+            created_at: string;
+            created_by: string;
+            /** Format: uuid */
+            id: string;
+            link?: null | components["schemas"]["ResolvedLink"];
+            /** Format: date-time */
+            retired_at?: string | null;
+            retired_by?: string | null;
+            retired_reason?: string | null;
+            /**
+             * Format: int64
+             * @description Changes whenever the entry does; writes state the revision they read.
+             */
+            revision: number;
+            title: string;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by: string;
+        };
+        /** @description An entry with every version it has had. */
+        MemoryEntryDetail: {
+            entry: components["schemas"]["MemoryEntryData"];
+            /** @description Newest first. */
+            history: components["schemas"]["MemoryRevision"][];
+        };
+        /** @description Identifies an entry. */
+        MemoryEntryIdArgs: {
+            /** Format: uuid */
+            id: string;
+        };
+        /** @description The entries that matched. */
+        MemoryList: {
+            /** @description Newest amended first. */
+            entries: components["schemas"]["MemoryEntryData"][];
+            /**
+             * Format: int64
+             * @description How many entries matched in all, which exceeds `entries` when the list
+             *     was cut short.
+             */
+            total: number;
+        };
+        /** @description What to list. Everything is optional; the filters narrow together. */
+        MemoryListArgs: {
+            check_name?: string | null;
+            /** @description Only entries linked to the check with this source and name. */
+            check_source?: string | null;
+            /**
+             * Format: uuid
+             * @description Only entries linked to this group.
+             */
+            group_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Only entries linked to this incident.
+             */
+            incident_id?: string | null;
+            /** @description Include retired entries, which are otherwise left out. */
+            include_retired?: boolean;
+            /**
+             * Format: int64
+             * @description The most entries to return. Defaults to 100.
+             */
+            limit?: number | null;
+            link_kind?: null | components["schemas"]["LinkKind"];
+            /**
+             * Format: uuid
+             * @description Only entries relevant to this incident: linked to it, to its target's
+             *     group, or to a check among its issues.
+             */
+            relevant_to_incident?: string | null;
+            /** @description Free text matched against titles and bodies. */
+            text?: string | null;
+        };
+        /** @description Restoring an entry to an earlier version of itself. */
+        MemoryRestoreArgs: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: int64
+             * @description The revision of the entry the caller read.
+             */
+            revision: number;
+            /**
+             * Format: int64
+             * @description The earlier version to restore.
+             */
+            to_revision: number;
+        };
+        /** @description Retiring an entry. */
+        MemoryRetireArgs: {
+            /** Format: uuid */
+            id: string;
+            /** @description Why the entry no longer holds. */
+            reason: string;
+        };
+        /** @description One version of an entry: what it held after a change, and who made it. */
+        MemoryRevision: {
+            /** @description Who made the change: an operator's login or a token's name. */
+            actor: string;
+            body: string;
+            /** Format: date-time */
+            created_at: string;
+            kind: components["schemas"]["RevisionKind"];
+            link?: null | components["schemas"]["Link"];
+            /** @description Why, for a retirement. */
+            reason?: string | null;
+            /**
+             * Format: int64
+             * @description For a restoration, the version it restored.
+             */
+            restored_from?: number | null;
+            /** Format: int64 */
+            revision: number;
+            title: string;
+            /** @description How it was made: `operator` or `token`. */
+            via: string;
+        };
         /** @description Request to merge two device records into one. */
         MergeIntoArgs: {
             /**
@@ -10992,6 +11388,12 @@ export interface components {
              */
             subject?: string | null;
         };
+        /** @description A new entry. */
+        NewEntry: {
+            body: string;
+            link?: null | components["schemas"]["Link"];
+            title: string;
+        };
         /** @description When a machine's next backup of a type is expected. */
         NextBackup: {
             /** @enum {string} */
@@ -11018,6 +11420,21 @@ export interface components {
         } | {
             /** @enum {string} */
             kind: "unreadable";
+        };
+        /** @description One entry in a record's revision log. */
+        NotesRevision: {
+            /**
+             * @description Who made the change. Absent for the revision a record's notes were given
+             *     when the log began.
+             */
+            author?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** @description The text the notes held after this change. */
+            notes: string;
+            /** Format: int64 */
+            revision: number;
+            via?: string | null;
         };
         /**
          * @description An open window with the target it covers, named so a fleet-wide view
@@ -11360,7 +11777,10 @@ export interface components {
         PartialServerGroup: {
             /** @description New display name for the group. */
             name?: string | null;
-            /** @description New free-form operator notes for the group. */
+            /**
+             * @description New free-form operator notes for the group, applied through the group's
+             *     notes log by [`ServerGroup::update_by`] rather than as a column update.
+             */
             notes?: string | null;
             /**
              * Format: int64
@@ -11896,7 +12316,7 @@ export interface components {
          * @description The kinds of record an action can act on.
          * @enum {string}
          */
-        RecordKind: "machine" | "group" | "application" | "device" | "maintenance_window" | "upgrade_plan" | "restore_replica" | "reporting_schema" | "check" | "cluster" | "credential" | "variable" | "lease" | "version" | "artifact" | "name" | "certificate" | "relying_party" | "advisory" | "source";
+        RecordKind: "machine" | "group" | "application" | "device" | "maintenance_window" | "upgrade_plan" | "restore_replica" | "reporting_schema" | "check" | "cluster" | "credential" | "variable" | "lease" | "version" | "artifact" | "name" | "certificate" | "relying_party" | "advisory" | "source" | "issue" | "incident" | "note" | "memory_entry";
         /** @description A freshly issued recovery-verification challenge. */
         RecoveryChallengeResponse: {
             /**
@@ -12230,6 +12650,14 @@ export interface components {
         /** @description Result of resolving a Tailscale identifier. */
         ResolveTailnetIdentifierResponse: {
             matched?: null | components["schemas"]["TailnetLiveInfo"];
+        };
+        /** @description A link with what it names, as it is now. */
+        ResolvedLink: components["schemas"]["Link"] & {
+            /**
+             * @description The group's name, the incident's target and when it opened, or the
+             *     check's name.
+             */
+            name: string;
         };
         /**
          * @description Reason an issue or incident was resolved by an operator.
@@ -12711,6 +13139,11 @@ export interface components {
              */
             keep_weekly: number;
         };
+        /**
+         * @description What kind of change a version of an entry was.
+         * @enum {string}
+         */
+        RevisionKind: "recorded" | "amended" | "retired" | "restored";
         /**
          * @description Why a certificate was revoked. The names are the RFC 5280 reasons an
          *     authority accepts; Canopy offers the few an operator would actually reach
@@ -19185,6 +19618,37 @@ export interface operations {
             };
         };
     };
+    applications_notes_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdOnlyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotesRevision"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     restore: {
         parameters: {
             query?: never;
@@ -19446,6 +19910,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerGroup"][];
+                };
+            };
+        };
+    };
+    server_groups_notes_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotesRevision"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };
@@ -19878,6 +20373,37 @@ export interface operations {
                 };
             };
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machines_notes_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotesRevision"][];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -21617,6 +22143,232 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    memory_amend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryAmendArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryEntryData"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    memory_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryEntryIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryEntryDetail"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    memory_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryListArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryList"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    memory_record: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewEntry"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryEntryData"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    memory_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryRestoreArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryEntryData"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    memory_retire: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryRetireArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryEntryData"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
