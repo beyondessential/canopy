@@ -11356,8 +11356,9 @@ export interface components {
         MintArgs: {
             /**
              * @description What the token may do beyond reading: `triage` to record, withdraw and
-             *     edit vulnerability triage decisions. A token minted with none only reads,
-             *     and cannot gain a grant afterwards.
+             *     edit vulnerability triage decisions, and `notes` to write notes and
+             *     incident memory. A token minted with none only reads, and cannot gain a
+             *     grant afterwards.
              */
             grants?: string[];
             /**

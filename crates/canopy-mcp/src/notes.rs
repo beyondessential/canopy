@@ -115,7 +115,7 @@ pub struct ReplaceNotesArgs {
 	/// The new notes, replacing what is there.
 	pub notes: String,
 	/// The revision of the notes you read, from `get_group`, `get_machine` or
-	/// `get_application`.
+	/// `get_server`.
 	pub revision: i64,
 }
 
@@ -535,7 +535,7 @@ impl CanopyMcp {
 		),
 		description = "Replace the notes of a group, machine or application with `notes`, stating \
 		               the `revision` you read (from `get_group`, `get_machine` or \
-		               `get_application`). The notes are one piece of free text kept by operators: \
+		               `get_server`). The notes are one piece of free text kept by operators: \
 		               read them first and send the whole text you want them to become, so what is \
 		               there is not lost. Every change is kept in the revision log \
 		               (`get_notes_history`), recorded as made through this interface. If the \

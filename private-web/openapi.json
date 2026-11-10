@@ -8970,7 +8970,7 @@
         "description": "Request body for minting a new MCP access token.",
         "properties": {
           "grants": {
-            "description": "What the token may do beyond reading: `triage` to record, withdraw and\nedit vulnerability triage decisions. A token minted with none only reads,\nand cannot gain a grant afterwards.",
+            "description": "What the token may do beyond reading: `triage` to record, withdraw and\nedit vulnerability triage decisions, and `notes` to write notes and\nincident memory. A token minted with none only reads, and cannot gain a\ngrant afterwards.",
             "items": {
               "type": "string"
             },
