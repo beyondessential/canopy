@@ -6109,6 +6109,7 @@ impl Incident {
 				.group_by(incident_notes::incident_id)
 				.select((incident_notes::incident_id, count_star()))
 				.filter(incident_notes::incident_id.eq_any(&ids))
+				.filter(incident_notes::deleted_at.is_null())
 				.load::<(Uuid, i64)>(&mut c)
 				.await
 				.map_err(AppError::from)
@@ -6122,6 +6123,7 @@ impl Incident {
 				.group_by(issue_notes::issue_id)
 				.select((issue_notes::issue_id, count_star()))
 				.filter(issue_notes::issue_id.eq_any(&unique_issue_ids))
+				.filter(issue_notes::deleted_at.is_null())
 				.load::<(Uuid, i64)>(&mut c)
 				.await
 				.map_err(AppError::from)

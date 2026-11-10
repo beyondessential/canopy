@@ -2,7 +2,10 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
+use commons_servers::{
+	audit::Audit,
+	tailscale_auth::{TailscaleAdmin, TailscaleUser},
+};
 use commons_types::{
 	Uuid,
 	issue::ResolvedReason,
@@ -14,7 +17,8 @@ use database::issues::{
 	CheckFiling, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters, MANUAL_SOURCE,
 	Scope, file_check,
 };
-use database::notes::IssueNote;
+use database::audit::{Action, Record};
+use database::notes::{AuthorKind, IssueNote};
 use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -354,9 +358,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(write, silent: unresolve))
 		.routes(routes!(write, silent: snooze))
 		.routes(routes!(write, silent: unsnooze))
-		.routes(routes!(write, silent: add_note))
+		.routes(routes!(write, audit(IssueNoteAdded): add_note))
 		.routes(routes!(read_only, silent: list_notes))
-		.routes(routes!(write, silent: delete_note))
+		.routes(routes!(write, audit(NoteDeleted): delete_note))
 }
 
 fn filter_from(active_only: Option<bool>) -> IssueFilter {
@@ -731,20 +735,30 @@ pub async fn unsnooze(
 	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
-/// A free-text note left by an operator on an issue, for handoff and
-/// context that doesn't belong in the issue's own message.
+/// A free-text note left by an operator or an agent on an issue, for handoff
+/// and context that doesn't belong in the issue's own message.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IssueNoteData {
 	/// Unique identifier for this note.
 	pub id: Uuid,
 	/// Id of the issue this note is attached to.
 	pub issue_id: Uuid,
-	/// Login of the operator who wrote the note.
+	/// Login of the operator who wrote the note, or the name of the access
+	/// token an agent wrote it through.
 	pub author: String,
+	/// Whether an operator or an agent wrote the note.
+	pub author_kind: AuthorKind,
 	/// Text of the note.
 	pub body: String,
 	/// When the note was created.
 	pub created_at: Timestamp,
+	/// How many times the text has been edited, plus one.
+	pub revision: i64,
+	/// When the note was deleted. Only present when deleted notes were asked
+	/// for.
+	pub deleted_at: Option<Timestamp>,
+	/// Who deleted the note.
+	pub deleted_by: Option<String>,
 }
 
 impl From<IssueNote> for IssueNoteData {
@@ -753,8 +767,12 @@ impl From<IssueNote> for IssueNoteData {
 			id: n.id,
 			issue_id: n.issue_id,
 			author: n.author,
+			author_kind: n.author_kind,
 			body: n.body,
 			created_at: n.created_at,
+			revision: n.revision,
+			deleted_at: n.deleted_at,
+			deleted_by: n.deleted_by,
 		}
 	}
 }
@@ -785,15 +803,29 @@ pub struct IssueAddNoteArgs {
 	),
 )]
 pub async fn add_note(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<IssueAddNoteArgs>,
 ) -> Result<Json<IssueNoteData>> {
 	if args.body.trim().is_empty() {
 		return Err(AppError::BadRequest("note body is required".into()));
 	}
-	let mut conn = state.db.get().await?;
-	let note = IssueNote::add(&mut conn, args.issue_id, &admin.0.login, &args.body).await?;
+	let mut conn = audit.begin().await?;
+	let note = IssueNote::add(
+		&mut conn,
+		args.issue_id,
+		&admin.0.login,
+		AuthorKind::Operator,
+		&args.body,
+	)
+	.await?;
+	let issue = Record::issue(&mut conn, note.issue_id).await?;
+	conn.record(Action::IssueNoteAdded {
+		issue,
+		note: Record::note(note.id, &note.author),
+		author_kind: note.author_kind.as_str().to_owned(),
+	})
+	.await?;
 	Ok(Json(IssueNoteData::from(note)))
 }
 
@@ -805,12 +837,17 @@ pub struct IssueListNotesArgs {
 	/// Maximum number of notes to return. Defaults to 100 when omitted.
 	#[serde(default)]
 	pub limit: Option<i64>,
+	/// Include deleted notes, which are otherwise left out. Honoured for
+	/// administrators only.
+	#[serde(default)]
+	pub include_deleted: bool,
 }
 
 /// List the notes left on a specific issue.
 ///
 /// Returns the issue's notes, most recent first, each with its author and
-/// creation time.
+/// creation time. Deleted notes are left out, unless an administrator asks for
+/// them.
 #[utoipa::path(
 	post,
 	path = "/list_notes",
@@ -825,13 +862,16 @@ pub struct IssueListNotesArgs {
 pub async fn list_notes(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
+	admin: std::result::Result<TailscaleAdmin, AppError>,
 	Json(args): Json<IssueListNotesArgs>,
 ) -> Result<Json<Vec<IssueNoteData>>> {
+	let include_deleted = args.include_deleted && crate::fns::commons::admin_probe_answer(admin)?;
 	let mut conn = state.db_read.get().await?;
 	let notes = IssueNote::list_for_issue(
 		&mut conn,
 		args.issue_id,
 		args.limit.unwrap_or(DEFAULT_LIMIT),
+		include_deleted,
 	)
 	.await?;
 	Ok(Json(notes.into_iter().map(IssueNoteData::from).collect()))
@@ -844,10 +884,11 @@ pub struct IssueDeleteNoteArgs {
 	pub note_id: Uuid,
 }
 
-/// Permanently delete a note from an issue.
+/// Delete a note from an issue.
 ///
-/// The note is removed outright; there is no undo. Deleting a note that
-/// doesn't exist succeeds without effect.
+/// The note leaves the issue's notes but is kept, with who deleted it and
+/// when, and administrators can list deleted notes. Deleting a note that
+/// doesn't exist or is already deleted succeeds without effect.
 #[utoipa::path(
 	post,
 	path = "/delete_note",
@@ -860,11 +901,21 @@ pub struct IssueDeleteNoteArgs {
 	),
 )]
 pub async fn delete_note(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	audit: Audit,
+	admin: TailscaleAdmin,
 	Json(args): Json<IssueDeleteNoteArgs>,
 ) -> Result<Json<()>> {
-	let mut conn = state.db.get().await?;
-	IssueNote::delete(&mut conn, args.note_id).await?;
+	let mut conn = audit.begin().await?;
+	let Some(note) = IssueNote::delete(&mut conn, args.note_id, &admin.0.login).await? else {
+		audit.unchanged();
+		return Ok(Json(()));
+	};
+	let target = Record::issue(&mut conn, note.issue_id).await?;
+	conn.record(Action::NoteDeleted {
+		target,
+		note: Record::note(note.id, &note.author),
+		author_kind: note.author_kind.as_str().to_owned(),
+	})
+	.await?;
 	Ok(Json(()))
 }

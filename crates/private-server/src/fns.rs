@@ -21,6 +21,7 @@ pub mod issues;
 pub mod kubernetes_clusters;
 pub mod machines;
 pub mod maintenance;
+pub mod memory;
 pub mod mcp_tokens;
 pub mod migration_tests;
 pub mod reporting_schemas;
@@ -34,6 +35,37 @@ pub mod statuses;
 pub mod upgrade_plans;
 pub mod versions;
 pub mod vulnerabilities;
+
+/// Record a change to a record's notes, if its log moved past `before`, the
+/// revision it was at when the handler began.
+// spec: FLT#notes
+pub(crate) async fn audit_notes_change(
+	conn: &mut commons_servers::audit::AuditTx<'_>,
+	record: database::notes_log::NotesRecord,
+	via: database::notes_log::Via,
+	before: i64,
+) -> commons_errors::Result<()> {
+	use database::{
+		audit::{Action, Record},
+		notes_log,
+	};
+	let after = notes_log::current(conn, record).await?.revision;
+	if after == before {
+		return Ok(());
+	}
+	let named = match record {
+		notes_log::NotesRecord::Group(id) => Record::group(conn, id).await?,
+		notes_log::NotesRecord::Machine(id) => Record::machine(conn, id).await?,
+		notes_log::NotesRecord::Application(id) => Record::application(conn, id).await?,
+	};
+	conn.record(Action::NotesChanged {
+		record: named,
+		revision: after,
+		via: via.as_str().to_owned(),
+	})
+	.await?;
+	Ok(())
+}
 
 /// A single page of a paginated list response.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -158,6 +190,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/issues", issues::routes())
 			.nest("/kubernetes_clusters", kubernetes_clusters::routes())
 			.nest("/mcp_tokens", mcp_tokens::routes())
+			.nest("/memory", memory::routes())
 			.nest("/migration_tests", migration_tests::routes())
 			.nest("/reporting_schemas", reporting_schemas::routes())
 			.nest("/restore_replicas", restore_replicas::routes())

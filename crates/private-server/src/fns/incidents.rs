@@ -2,10 +2,14 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
+use commons_servers::{
+	audit::Audit,
+	tailscale_auth::{TailscaleAdmin, TailscaleUser},
+};
 use commons_types::{Uuid, issue::ResolvedReason, server::rank::ServerRank};
 use database::issues::{Incident, IncidentIssue, IncidentStats};
-use database::notes::IncidentNote;
+use database::audit::{Action, Record};
+use database::notes::{AuthorKind, IncidentNote};
 use database::server_groups::ServerGroup;
 use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
 use jiff::Timestamp;
@@ -221,9 +225,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only, silent: get_incident))
 		.routes(routes!(write, silent: resolve))
 		.routes(routes!(write, silent: unresolve))
-		.routes(routes!(write, silent: add_note))
+		.routes(routes!(write, audit(IncidentNoteAdded): add_note))
 		.routes(routes!(read_only, silent: list_notes))
-		.routes(routes!(write, silent: delete_note))
+		.routes(routes!(write, audit(NoteDeleted): delete_note))
 }
 
 /// Filters for listing incidents that involve a server.
@@ -463,22 +467,29 @@ pub async fn unresolve(
 	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
 }
 
-/// A note attached to an incident.
-///
-/// Notes are immutable once written; to change one, delete it and add a
-/// replacement.
+/// A note attached to an incident, written by an operator or an agent.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IncidentNoteData {
 	/// Unique identifier of the note.
 	pub id: Uuid,
 	/// Identifier of the incident the note is attached to.
 	pub incident_id: Uuid,
-	/// Login of the operator who wrote the note.
+	/// Login of the operator who wrote the note, or the name of the access
+	/// token an agent wrote it through.
 	pub author: String,
+	/// Whether an operator or an agent wrote the note.
+	pub author_kind: AuthorKind,
 	/// The note text.
 	pub body: String,
 	/// When the note was written.
 	pub created_at: Timestamp,
+	/// How many times the text has been edited, plus one.
+	pub revision: i64,
+	/// When the note was deleted. Only present when deleted notes were asked
+	/// for.
+	pub deleted_at: Option<Timestamp>,
+	/// Who deleted the note.
+	pub deleted_by: Option<String>,
 }
 
 impl From<IncidentNote> for IncidentNoteData {
@@ -487,8 +498,12 @@ impl From<IncidentNote> for IncidentNoteData {
 			id: n.id,
 			incident_id: n.incident_id,
 			author: n.author,
+			author_kind: n.author_kind,
 			body: n.body,
 			created_at: n.created_at,
+			revision: n.revision,
+			deleted_at: n.deleted_at,
+			deleted_by: n.deleted_by,
 		}
 	}
 }
@@ -520,15 +535,29 @@ pub struct IncidentAddNoteArgs {
 	),
 )]
 pub async fn add_note(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<IncidentAddNoteArgs>,
 ) -> Result<Json<IncidentNoteData>> {
 	if args.body.trim().is_empty() {
 		return Err(AppError::BadRequest("note body is required".into()));
 	}
-	let mut conn = state.db.get().await?;
-	let note = IncidentNote::add(&mut conn, args.incident_id, &admin.0.login, &args.body).await?;
+	let mut conn = audit.begin().await?;
+	let note = IncidentNote::add(
+		&mut conn,
+		args.incident_id,
+		&admin.0.login,
+		AuthorKind::Operator,
+		&args.body,
+	)
+	.await?;
+	let incident = Record::incident(&mut conn, note.incident_id).await?;
+	conn.record(Action::IncidentNoteAdded {
+		incident,
+		note: Record::note(note.id, &note.author),
+		author_kind: note.author_kind.as_str().to_owned(),
+	})
+	.await?;
 	Ok(Json(IncidentNoteData::from(note)))
 }
 
@@ -540,12 +569,17 @@ pub struct IncidentListNotesArgs {
 	/// Maximum number of notes to return; defaults to 100.
 	#[serde(default)]
 	pub limit: Option<i64>,
+	/// Include deleted notes, which are otherwise left out. Honoured for
+	/// administrators only.
+	#[serde(default)]
+	pub include_deleted: bool,
 }
 
 /// List notes on an incident.
 ///
 /// Returns notes written on the incident itself; notes on its contributing
-/// issues are not included.
+/// issues are not included. Deleted notes are left out, unless an
+/// administrator asks for them.
 #[utoipa::path(
 	post,
 	path = "/list_notes",
@@ -560,13 +594,16 @@ pub struct IncidentListNotesArgs {
 pub async fn list_notes(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
+	admin: std::result::Result<TailscaleAdmin, AppError>,
 	Json(args): Json<IncidentListNotesArgs>,
 ) -> Result<Json<Vec<IncidentNoteData>>> {
+	let include_deleted = args.include_deleted && crate::fns::commons::admin_probe_answer(admin)?;
 	let mut conn = state.db_read.get().await?;
 	let notes = IncidentNote::list_for_incident(
 		&mut conn,
 		args.incident_id,
 		args.limit.unwrap_or(DEFAULT_LIMIT),
+		include_deleted,
 	)
 	.await?;
 	Ok(Json(
@@ -583,9 +620,10 @@ pub struct IncidentDeleteNoteArgs {
 
 /// Delete an incident note.
 ///
-/// Permanently removes the note. Notes cannot be edited in place; to change
-/// one, delete it and add a replacement. Requires the caller to be on the
-/// admin allow-list.
+/// The note leaves the incident's notes but is kept, with who deleted it and
+/// when, and administrators can list deleted notes. Deleting a note that
+/// doesn't exist or is already deleted succeeds without effect. Requires the
+/// caller to be on the admin allow-list.
 #[utoipa::path(
 	post,
 	path = "/delete_note",
@@ -598,11 +636,21 @@ pub struct IncidentDeleteNoteArgs {
 	),
 )]
 pub async fn delete_note(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	audit: Audit,
+	admin: TailscaleAdmin,
 	Json(args): Json<IncidentDeleteNoteArgs>,
 ) -> Result<Json<()>> {
-	let mut conn = state.db.get().await?;
-	IncidentNote::delete(&mut conn, args.note_id).await?;
+	let mut conn = audit.begin().await?;
+	let Some(note) = IncidentNote::delete(&mut conn, args.note_id, &admin.0.login).await? else {
+		audit.unchanged();
+		return Ok(Json(()));
+	};
+	let target = Record::incident(&mut conn, note.incident_id).await?;
+	conn.record(Action::NoteDeleted {
+		target,
+		note: Record::note(note.id, &note.author),
+		author_kind: note.author_kind.as_str().to_owned(),
+	})
+	.await?;
 	Ok(Json(()))
 }

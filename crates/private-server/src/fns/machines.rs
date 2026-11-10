@@ -14,6 +14,7 @@ use base64::Engine;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{
+	audit::Audit,
 	backup_jobs::BillingLabels,
 	tailscale_auth::{TailscaleAdmin, TailscaleUser},
 };
@@ -31,6 +32,7 @@ use jiff::Timestamp;
 use database::machine_enrollment_tokens::MachineEnrollmentToken;
 use database::machines::{Machine, MachineAddition, MachineUpdate, NewMachine};
 use database::maintenance_windows::MaintenanceWindow;
+use database::notes_log::{self, Author, NotesRecord, NotesRevision, Via};
 use database::pg_duration::PgDuration;
 use database::reported_detail::MachineReportedDetail;
 use database::server_groups::ServerGroup;
@@ -38,6 +40,7 @@ use database::statuses::MergedDetail;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::fns::audit_notes_change;
 use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -45,8 +48,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only, silent: list))
 		.routes(routes!(read_only, silent: get))
 		.routes(routes!(read_only, silent: get_detail))
-		.routes(routes!(write, silent: create))
-		.routes(routes!(write, silent: update))
+		.routes(routes!(write, audit_optional(NotesChanged): create))
+		.routes(routes!(write, audit_optional(NotesChanged): update))
+		.routes(routes!(read_only, silent: notes_history))
 		.routes(routes!(danger(invalidates), silent: archive))
 		.routes(routes!(read_only, silent: list_archived))
 		.routes(routes!(write, silent: restore))
@@ -413,12 +417,13 @@ pub struct MachineCreateArgs {
 )]
 pub async fn create(
 	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<MachineCreateArgs>,
 ) -> Result<Json<Uuid>> {
 	// Refused before the tailnet bind, so a blank name leaves nothing behind.
 	let name = database::machines::normalise_name(&args.name)?;
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 
 	// Resolve the tailnet node first, so a node that cannot be bound leaves
 	// no machine behind; the addition itself is one transaction.
@@ -452,6 +457,7 @@ pub async fn create(
 		},
 	)
 	.await?;
+	audit_notes_change(&mut conn, NotesRecord::Machine(machine.id), Via::Operator, 0).await?;
 
 	Ok(Json(machine.id))
 }
@@ -508,11 +514,13 @@ pub struct MachineUpdateArgs {
 	),
 )]
 pub async fn update(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<MachineUpdateArgs>,
 ) -> Result<Json<Machine>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
+	let notes_record = NotesRecord::Machine(args.machine_id);
+	let notes_before = notes_log::current(&mut conn, notes_record).await?.revision;
 	// A refused rank is refused before anything is written, so it leaves the
 	// whole edit unapplied.
 	// spec: GRP#environments
@@ -531,7 +539,7 @@ pub async fn update(
 		}
 		None => None,
 	};
-	let updated = Machine::update(
+	let updated = Machine::update_by(
 		&mut conn,
 		args.machine_id,
 		MachineUpdate {
@@ -546,13 +554,43 @@ pub async fn update(
 			notes: args.notes,
 			tags: args.tags,
 		},
+		Some(Author::operator(&admin.0.login)),
 	)
 	.await?;
+	audit_notes_change(&mut conn, notes_record, Via::Operator, notes_before).await?;
 	let Some(rank) = rank else {
 		return Ok(Json(updated));
 	};
 	Ok(Json(
 		Machine::set_rank(&mut conn, args.machine_id, rank, Some(&admin.0.login)).await?,
+	))
+}
+
+/// A machine's notes revision log.
+///
+/// Every change to the machine's notes with who made it, how, and when,
+/// newest first.
+#[utoipa::path(
+	post,
+	path = "/notes_history",
+	operation_id = "machines_notes_history",
+	tag = "machines",
+	security(("tailscale-user" = [])),
+	request_body = MachineIdArgs,
+	responses(
+		(status = 200, body = Vec<NotesRevision>),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn notes_history(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<MachineIdArgs>,
+) -> Result<Json<Vec<NotesRevision>>> {
+	let mut conn = state.db_read.get().await?;
+	Machine::get_by_id(&mut conn, args.machine_id).await?;
+	Ok(Json(
+		notes_log::history(&mut conn, NotesRecord::Machine(args.machine_id)).await?,
 	))
 }
 

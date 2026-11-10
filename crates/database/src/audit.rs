@@ -89,6 +89,14 @@ pub enum RecordKind {
 	Advisory,
 	/// A vulnerability source, by its name.
 	Source,
+	/// An issue, by its check or message.
+	Issue,
+	/// An incident, by its target and when it opened.
+	Incident,
+	/// A note on an issue or an incident, by its author.
+	Note,
+	/// An incident memory entry, by its title.
+	MemoryEntry,
 }
 
 /// A record an action acted on: its identifier, and its name as it was when the
@@ -154,6 +162,65 @@ impl Record {
 			id,
 			application.display_name(),
 		))
+	}
+
+	/// An issue, named by its title, else its check, else its message.
+	pub async fn issue(conn: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
+		let issue = crate::issues::Issue::get_by_id(conn, id).await?;
+		let name = issue
+			.title
+			.or(issue.check_name)
+			.unwrap_or(issue.message)
+			.chars()
+			.take(80)
+			.collect::<String>();
+		Ok(Self::new(RecordKind::Issue, id, name))
+	}
+
+	/// An incident, named by its target and when it opened.
+	pub async fn incident(conn: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
+		use crate::memory::{Link, resolve_links};
+		let link = Link::Incident { id };
+		let name = resolve_links(conn, [link.clone()])
+			.await?
+			.remove(&link)
+			.unwrap_or_default();
+		Ok(Self::new(RecordKind::Incident, id, name))
+	}
+
+	/// A note, named by who wrote it.
+	pub fn note(id: Uuid, author: &str) -> Self {
+		Self::new(RecordKind::Note, id, format!("note by {author}"))
+	}
+
+	/// A memory entry, named by its title.
+	pub fn memory_entry(entry: &crate::memory::MemoryEntry) -> Self {
+		Self::new(RecordKind::MemoryEntry, entry.id, entry.title.clone())
+	}
+
+	/// What a memory entry is linked to, as a record: a group, an incident, or
+	/// a check, none for a fleet-wide entry.
+	pub async fn memory_link(
+		conn: &mut AsyncPgConnection,
+		entry: &crate::memory::MemoryEntry,
+	) -> Result<Option<Self>> {
+		use crate::memory::Link;
+		Ok(match entry.link() {
+			None => None,
+			Some(Link::Group { id }) => Some(Self::group(conn, id).await?),
+			Some(Link::Incident { id }) => Some(Self::incident(conn, id).await?),
+			Some(Link::Check { source, name }) => {
+				use crate::schema::check_policies::dsl;
+				let id: Uuid = dsl::check_policies
+					.filter(dsl::source.eq(&source))
+					.filter(dsl::check_name.eq(&name))
+					.select(dsl::id)
+					.first(conn)
+					.await
+					.map_err(AppError::from)?;
+				Some(Self::new(RecordKind::Check, id, name))
+			}
+		})
 	}
 
 	/// A cluster, named as it is now.
@@ -766,6 +833,71 @@ actions! {
 	VulnerabilityReopened = "vulnerability_reopened", "Vulnerability decision lapsed" {
 		records { advisory: Record }
 		detail { source: String, why: String }
+	}
+
+	/// The notes of a group, machine or application changed, by an operator, an
+	/// Ansible import or a fleet query access token. The text is in the record's
+	/// revision log, not here.
+	// spec: FLT#notes
+	NotesChanged = "notes_changed", "Change notes" {
+		records { record: Record }
+		detail { revision: i64, via: String }
+	}
+
+	/// A note was added to an issue, by an operator or an agent.
+	// spec: CHK#state-handling
+	IssueNoteAdded = "issue_note_added", "Add issue note" {
+		records { issue: Record, note: Record }
+		detail { author_kind: String }
+	}
+
+	/// A note was added to an incident, by an operator or an agent.
+	// spec: INC#resolution
+	IncidentNoteAdded = "incident_note_added", "Add incident note" {
+		records { incident: Record, note: Record }
+		detail { author_kind: String }
+	}
+
+	/// A note on an issue or incident was edited, the text it replaced being
+	/// kept with the note.
+	NoteEdited = "note_edited", "Edit note" {
+		records { target: Record, note: Record }
+		detail { revision: i64 }
+	}
+
+	/// A note on an issue or incident was deleted, and kept as deleted.
+	NoteDeleted = "note_deleted", "Delete note" {
+		records { target: Record, note: Record }
+		detail { author_kind: String }
+	}
+
+	/// An incident memory entry was recorded. The text is in the entry's
+	/// history, not here.
+	// spec: MEM#changing-entries
+	MemoryEntryRecorded = "memory_entry_recorded", "Record memory entry" {
+		records { entry: Record, link: Option<Record> }
+		detail { revision: i64, via: String }
+	}
+
+	/// An incident memory entry's title, body or link was amended.
+	// spec: MEM#changing-entries
+	MemoryEntryAmended = "memory_entry_amended", "Amend memory entry" {
+		records { entry: Record, link: Option<Record> }
+		detail { revision: i64, via: String }
+	}
+
+	/// An incident memory entry was retired.
+	// spec: MEM#changing-entries
+	MemoryEntryRetired = "memory_entry_retired", "Retire memory entry" {
+		records { entry: Record, link: Option<Record> }
+		detail { revision: i64, via: String }
+	}
+
+	/// An incident memory entry was restored to an earlier version of itself.
+	// spec: MEM#changing-entries
+	MemoryEntryRestored = "memory_entry_restored", "Restore memory entry" {
+		records { entry: Record, link: Option<Record> }
+		detail { revision: i64, restored_from: i64, via: String }
 	}
 
 	/// A machine reported a changed list of installed packages. Pushed whenever a

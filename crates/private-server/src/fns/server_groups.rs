@@ -2,26 +2,29 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
-use commons_servers::{backup_jobs::BillingLabels, tailscale_auth::TailscaleAdmin};
+use commons_servers::{audit::Audit, backup_jobs::BillingLabels, tailscale_auth::TailscaleAdmin};
 use commons_types::{
 	Uuid,
 	server::{TagMap, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 };
+use database::notes_log::{self, Author, NotesRecord, NotesRevision, Via};
 use database::server_groups::{NewServerGroup, PartialServerGroup, ServerGroup};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use commons_servers::tailscale_auth::TailscaleUser;
 
+use crate::fns::audit_notes_change;
 use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(read_only, silent: list))
 		.routes(routes!(read_only, silent: get))
-		.routes(routes!(write, silent: create))
-		.routes(routes!(write, silent: update))
+		.routes(routes!(write, audit_optional(NotesChanged): create))
+		.routes(routes!(write, audit_optional(NotesChanged): update))
+		.routes(routes!(read_only, silent: notes_history))
 		.routes(routes!(write, silent: delete))
 		.routes(routes!(write, silent: restore))
 		.routes(routes!(read_only, silent: list_archived))
@@ -421,12 +424,12 @@ pub struct ServerGroupsCreateArgs {
 	),
 )]
 pub async fn create(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	audit: Audit,
+	admin: TailscaleAdmin,
 	Json(args): Json<ServerGroupsCreateArgs>,
 ) -> Result<Json<ServerGroup>> {
-	let mut conn = state.db.get().await?;
-	let group = ServerGroup::create(
+	let mut conn = audit.begin().await?;
+	let group = ServerGroup::create_by(
 		&mut conn,
 		NewServerGroup {
 			name: args.name,
@@ -435,8 +438,10 @@ pub async fn create(
 			slack_open_delay: args.slack_open_delay,
 			slack_close_delay: args.slack_close_delay,
 		},
+		Some(Author::operator(&admin.0.login)),
 	)
 	.await?;
+	audit_notes_change(&mut conn, NotesRecord::Group(group.id), Via::Operator, 0).await?;
 	Ok(Json(group))
 }
 
@@ -469,13 +474,50 @@ pub struct ServerGroupsUpdateArgs {
 	),
 )]
 pub async fn update(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	audit: Audit,
+	admin: TailscaleAdmin,
 	Json(args): Json<ServerGroupsUpdateArgs>,
 ) -> Result<Json<ServerGroup>> {
-	let mut conn = state.db.get().await?;
-	let group = ServerGroup::update(&mut conn, args.server_group_id, args.data).await?;
+	let mut conn = audit.begin().await?;
+	let record = NotesRecord::Group(args.server_group_id);
+	let before = notes_log::current(&mut conn, record).await?.revision;
+	let group = ServerGroup::update_by(
+		&mut conn,
+		args.server_group_id,
+		args.data,
+		Some(Author::operator(&admin.0.login)),
+	)
+	.await?;
+	audit_notes_change(&mut conn, record, Via::Operator, before).await?;
 	Ok(Json(group))
+}
+
+/// A group's notes revision log.
+///
+/// Every change to the group's notes with who made it, how, and when, newest
+/// first.
+#[utoipa::path(
+	post,
+	path = "/notes_history",
+	operation_id = "server_groups_notes_history",
+	tag = "server_groups",
+	security(("tailscale-user" = [])),
+	request_body = GroupIdArgs,
+	responses(
+		(status = 200, body = Vec<NotesRevision>),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn notes_history(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<GroupIdArgs>,
+) -> Result<Json<Vec<NotesRevision>>> {
+	let mut conn = state.db_read.get().await?;
+	ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
+	Ok(Json(
+		notes_log::history(&mut conn, NotesRecord::Group(args.server_group_id)).await?,
+	))
 }
 
 /// Archive a server group.

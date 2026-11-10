@@ -179,7 +179,7 @@ pub async fn is_current_user_admin(
 /// a real admin looking at a read-only app with no admin controls and no
 /// explanation. Only a definite authorization outcome is an answer; everything
 /// else propagates so the caller knows to retry.
-fn admin_probe_answer(admin: std::result::Result<TailscaleAdmin, AppError>) -> Result<bool> {
+pub(crate) fn admin_probe_answer(admin: std::result::Result<TailscaleAdmin, AppError>) -> Result<bool> {
 	match admin {
 		Ok(_) => Ok(true),
 		Err(
