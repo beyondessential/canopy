@@ -1148,6 +1148,10 @@ async fn seed_issues_and_incidents(
 		message: &str,
 		occurred_at: Timestamp,
 	) -> Result<Issue> {
+		// A real status push registers every check it reports in the catalogue.
+		let application = Application::get_by_id(conn, server_id).await?;
+		let namespace = Namespace::of(source, Some(&application.r#type));
+		CheckPolicy::upsert_default(conn, source, &namespace, r#ref).await?;
 		let stamp = database::issues::CheckStateStamp {
 			check: r#ref.to_string(),
 			observed: result,
