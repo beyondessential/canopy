@@ -1,0 +1,199 @@
+<!-- spec: platform/auth-control-plane.md -->
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Who can: consume restore replicas for group tamanu-prod</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-font-smoothing:antialiased}
+body{margin:0;font-family:"Roboto","Helvetica","Arial",sans-serif;font-size:1rem;line-height:1.5;letter-spacing:.00938em;color:rgba(0,0,0,.87);background:#fff}
+.app{display:flex;min-height:100vh;position:relative}
+.main{flex:1;min-width:0}
+.container{max-width:1200px;margin:0 auto;padding:24px}
+.icon{display:inline-block;flex:none;fill:currentColor;user-select:none}
+.mono{font-family:monospace}
+code{font-family:monospace;font-size:.875em}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;border:0;background:none;padding:0;margin:0;cursor:pointer}
+
+/* drawer */
+.drawer{width:240px;flex:none;position:sticky;top:0;height:100vh;background:#f5f5f5;border-right:1px solid rgba(0,0,0,.12);display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:8px;padding:12px 24px;color:#388e3c}
+.brand-name{font-size:1.25rem;font-weight:500;line-height:1.6;letter-spacing:.0075em}
+.nav{flex:1;min-height:0;overflow-y:auto;padding:8px}
+.nav ul{list-style:none;margin:0;padding:0}
+.sec{position:relative;display:flex;align-items:center}
+.sec-link{flex:1;display:block;padding:6px 48px 6px 16px;border-radius:4px;color:rgba(0,0,0,.6);font-weight:500}
+.sec-link.current{color:#32669a}
+.sec-exp{position:absolute;right:16px;top:50%;transform:translateY(-50%);display:flex;padding:5px;margin-right:-5px;color:rgba(0,0,0,.54)}
+.pages{padding-left:12px;margin-top:2px;margin-bottom:8px}
+.overline{margin:0;display:block;padding:12px 16px 2px;font-size:.6875rem;font-weight:500;line-height:1.66;letter-spacing:.08333em;text-transform:uppercase;color:rgba(0,0,0,.6)}
+.overline.first{padding-top:4px}
+.plist{padding:0}
+.page{display:block;margin-top:2px;padding:4px 16px;border-radius:4px;font-size:.875rem;line-height:1.43;letter-spacing:.01071em}
+.page.selected{background:rgba(56,142,60,.08);color:#388e3c;font-weight:500}
+.band{flex:none;min-height:48px;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;border-top:1px solid rgba(0,0,0,.12);color:rgba(0,0,0,.6);font-size:.875rem;font-weight:500;line-height:1.75;letter-spacing:.02857em}
+.band .dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
+.band-name{flex:1}
+.band.write{background-color:#ed6c02;color:#fff;border-top:0;background-image:repeating-linear-gradient(135deg,rgba(255,152,0,.5),rgba(255,152,0,.5) 6px,rgba(255,152,0,0) 6px,rgba(255,152,0,0) 12px)}
+.band-time{font-variant-numeric:tabular-nums;opacity:.75}
+
+/* layout helpers */
+.stack{display:flex;flex-direction:column}
+.stack-3>*+*{margin-top:24px}
+.stack-2>*+*{margin-top:16px}
+.stack-1>*+*{margin-top:8px}
+.row{display:flex;align-items:center}
+.row.top{align-items:flex-start}
+.gap1{gap:8px}.gap2{gap:16px}.gap4{gap:32px}.gap05{gap:4px}
+.grow{flex:1;min-width:0}
+.between{justify-content:space-between}
+.end{justify-content:flex-end}
+.wrap{flex-wrap:wrap}
+
+/* typography */
+.h4{margin:0;font-size:2.125rem;font-weight:400;line-height:1.235;letter-spacing:.00735em}
+.h6{margin:0 0 .35em;font-size:1.25rem;font-weight:500;line-height:1.6;letter-spacing:.0075em}
+.h6.flush{margin:0}
+.body2{font-size:.875rem;line-height:1.43;letter-spacing:.01071em}
+.caption{font-size:.75rem;line-height:1.66;letter-spacing:.03333em}
+.sub2{font-size:.875rem;font-weight:500;line-height:1.57;letter-spacing:.00714em}
+.sec-t{color:rgba(0,0,0,.6)}
+.dis-t{color:rgba(0,0,0,.38)}
+.err-t{color:#d32f2f}
+.nowrap{white-space:nowrap}
+
+/* paper */
+.paper{border:1px solid rgba(0,0,0,.12);border-radius:4px;background:#fff;padding:16px}
+.paper.flush{padding:0}
+.paper.p1{padding:12px}
+
+/* tables */
+table{width:100%;border-collapse:collapse;border-spacing:0;font-size:.875rem;line-height:1.43;letter-spacing:.01071em}
+th,td{padding:6px 16px;text-align:left;vertical-align:middle;border-bottom:1px solid rgba(224,224,224,1)}
+th{font-weight:500;line-height:1.5rem;color:rgba(0,0,0,.87)}
+td{font-weight:400}
+tr.hov:hover td{background:rgba(0,0,0,.04)}
+td.r,th.r{text-align:right}
+td.tight,th.tight{width:1%;white-space:nowrap}
+.paper table th:first-child,.paper table td:first-child{padding-left:16px}
+tr.dim td{color:rgba(0,0,0,.38)}
+tr.dim .chip{opacity:.7}
+tr.subrow td{background:rgba(0,0,0,.025);padding-top:4px;padding-bottom:4px}
+tr.sectionrow td{background:rgba(0,0,0,.03);font-weight:500;padding-top:4px;padding-bottom:4px;font-size:.75rem;line-height:1.66;letter-spacing:.08333em;text-transform:uppercase;color:rgba(0,0,0,.6)}
+.chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.lnk{color:#388e3c;text-decoration:underline}
+.sub{display:block;font-size:.75rem;line-height:1.5;letter-spacing:.03333em;color:rgba(0,0,0,.6);margin-top:1px}
+tr.dim .sub{color:rgba(0,0,0,.38)}
+
+/* chip */
+.chip{display:inline-flex;align-items:center;justify-content:center;height:24px;max-width:100%;padding:0 8px;border-radius:16px;font-size:.8125rem;line-height:1.5;letter-spacing:.01786em;white-space:nowrap;background:rgba(0,0,0,.08);color:rgba(0,0,0,.87);vertical-align:middle}
+.chip.mono{font-family:monospace}
+.chip-label{padding:0}
+.chip.outlined{background:transparent;border:1px solid #bdbdbd;padding:0 7px}
+.chip.success{background:#2e7d32;color:#fff}
+.chip.warning{background:#ed6c02;color:#fff}
+.chip.error{background:#d32f2f;color:#fff}
+.chip.outlined.success{background:transparent;border-color:#2e7d32;color:#2e7d32}
+.chip.outlined.warning{background:transparent;border-color:#ed6c02;color:#ed6c02}
+.chip.outlined.error{background:transparent;border-color:#d32f2f;color:#d32f2f}
+.chip.outlined.info{background:transparent;border-color:#0288d1;color:#0288d1}
+.chip.outlined.primary{background:transparent;border-color:#388e3c;color:#388e3c}
+.chip.outlined.secondary{background:transparent;border-color:#32669a;color:#32669a}
+.chip .chip-icon{margin-left:-2px;margin-right:4px;color:inherit;opacity:.7}
+.chip.outlined .chip-icon{margin-left:-1px}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;min-width:64px;padding:6px 16px;border-radius:4px;font-size:.875rem;font-weight:500;line-height:1.75;letter-spacing:.02857em;text-transform:uppercase;white-space:nowrap;position:relative}
+.btn .start{display:inherit;margin-left:-4px;margin-right:8px}
+.btn.contained{background:#388e3c;color:#fff;box-shadow:0 3px 1px -2px rgba(0,0,0,.2),0 2px 2px 0 rgba(0,0,0,.14),0 1px 5px 0 rgba(0,0,0,.12)}
+.btn.outlined{border:1px solid rgba(56,142,60,.5);color:#388e3c;padding:5px 15px}
+.btn.text{color:#388e3c;padding:6px 8px;min-width:0}
+.btn.small{font-size:.8125rem;line-height:1.75;letter-spacing:.02857em}
+.btn.small.contained{padding:4px 10px}
+.btn.small.outlined{padding:3px 9px}
+.btn.small.text{padding:4px 5px}
+.btn.g-write.contained{background:#ed6c02}
+.btn.g-write.outlined{border-color:rgba(237,108,2,.5);color:#ed6c02}
+.btn.g-write.text{color:#ed6c02}
+.btn.c-error.outlined{border-color:rgba(211,47,47,.5);color:#d32f2f}
+.btn.c-error.contained{background:#d32f2f}
+.btn.g-danger.contained{background:#d32f2f}
+.btn.g-danger.outlined{border-color:rgba(211,47,47,.5);color:#d32f2f}
+.blocked-write{background-image:repeating-linear-gradient(135deg,rgba(255,152,0,.24),rgba(255,152,0,.24) 6px,rgba(255,152,0,.07) 6px,rgba(255,152,0,.07) 12px);filter:grayscale(.8);cursor:pointer}
+.blocked-danger{background-image:repeating-linear-gradient(45deg,rgba(239,83,80,.24),rgba(239,83,80,.24) 6px,rgba(239,83,80,.07) 6px,rgba(239,83,80,.07) 12px);filter:grayscale(.8);cursor:pointer}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;padding:5px;border-radius:50%;color:rgba(0,0,0,.54)}
+.iconbtn.bare{padding:4px}
+
+/* checkbox */
+.cb{display:inline-flex;padding:4px;color:rgba(0,0,0,.6);vertical-align:middle}
+.cb.on{color:#388e3c}
+.mode-write .cb.on{color:#ed6c02}
+.cb.dis{color:rgba(0,0,0,.26)}
+
+/* text fields */
+.field{position:relative;min-width:0}
+.field-in{display:flex;align-items:center;height:40px;padding:0 14px;border:1px solid rgba(0,0,0,.23);border-radius:4px;background:#fff;font-size:1rem;line-height:1.4375em;letter-spacing:.00938em}
+.field-in .val{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.field-in .ph{flex:1;color:rgba(0,0,0,.6);opacity:0}
+.field-label{position:absolute;left:9px;top:-9px;padding:0 5px;background:#fff;color:rgba(0,0,0,.6);font-size:.75rem;line-height:1.4375em;letter-spacing:.00938em}
+.field-in .sel-arrow{margin-right:-8px;color:rgba(0,0,0,.54);display:flex}
+.field.empty .field-label{left:14px;top:8px;padding:0;background:none;font-size:1rem}
+
+/* alert */
+.alert{display:flex;padding:6px 16px;border-radius:4px;font-size:.875rem;line-height:1.43;letter-spacing:.01071em}
+.alert .a-icon{margin-right:12px;padding:7px 0;display:flex;opacity:.9}
+.alert .a-msg{padding:8px 0;flex:1}
+.alert .a-act{margin-left:auto;padding:4px 0 0 16px;display:flex;align-items:flex-start}
+.alert.info{background:rgb(229,246,253);color:rgb(1,67,97)}.alert.info .a-icon{color:#0288d1}
+.alert.warning{background:rgb(255,244,229);color:rgb(102,60,0)}.alert.warning .a-icon{color:#ed6c02}
+.alert-title{font-weight:500;margin-top:-2px}
+
+/* info box */
+.facts{display:flex;flex-wrap:wrap;gap:16px 32px}
+.fact{display:flex;flex-direction:column;gap:2px}
+.fact .k{font-size:.75rem;line-height:1.66;letter-spacing:.03333em;color:rgba(0,0,0,.6)}
+.fact .v{font-size:.875rem;line-height:1.43;letter-spacing:.01071em}
+
+/* matrix */
+.matrix th,.matrix td{padding:0 8px;height:32px}
+.matrix th{height:40px}
+.matrix td.noun{padding-left:16px;white-space:nowrap}
+.matrix th.verb{text-align:center}
+.matrix td.cell{text-align:center;white-space:nowrap;padding:0 4px}
+.matrix td.cell .cellin{display:inline-flex;align-items:center;gap:2px}
+.matrix td.cell .chip{height:20px;font-size:.6875rem;padding:0 6px}
+.matrix td.cell .chip.outlined{padding:0 5px}
+.matrix td.cell .cb{padding:4px 2px}
+.matrix td.scopes{color:rgba(0,0,0,.6);font-size:.8125rem;white-space:nowrap}
+.matrix tr.sectionrow td{height:26px;padding-left:16px}
+.matrix th.scopeh{}
+
+/* dialog */
+.backdrop{position:absolute;inset:0;background:rgba(0,0,0,.5);z-index:10}
+.dialog{position:absolute;z-index:11;left:50%;top:140px;transform:translateX(-50%);width:600px;background:#fff;border-radius:4px;box-shadow:0 11px 15px -7px rgba(0,0,0,.2),0 24px 38px 3px rgba(0,0,0,.14),0 9px 46px 8px rgba(0,0,0,.12)}
+.dialog .d-title{padding:16px 24px;font-size:1.25rem;font-weight:500;line-height:1.6;letter-spacing:.0075em;margin:0}
+.dialog .d-content{padding:0 24px 20px}
+.dialog .d-actions{display:flex;justify-content:flex-end;padding:8px}
+.dialog .d-text{font-size:1rem;line-height:1.5;letter-spacing:.00938em;color:rgba(0,0,0,.6);margin:0 0 16px}
+</style>
+</head>
+<body class="mode-read-only">
+<div class="app">
+<aside class="drawer"><div class="brand"><svg viewBox="0 0 100 100" style="width:24px;height:24px" aria-hidden="true"><rect x="0" y="0" width="100" height="100" rx="10" ry="10" fill="#32669A"/><circle cx="50" cy="50" r="36" fill="white"/><rect x="42" y="26" width="16" height="48" fill="#388E3C"/><rect x="26" y="42" width="48" height="16" fill="#388E3C"/></svg><span class="brand-name">Canopy</span></div><nav class="nav" aria-label="Main"><ul><li><div class="sec"><a class="sec-link">Status</a></div></li><li><div class="sec"><a class="sec-link">Incidents</a><span class="sec-exp"><svg class="icon " style="width:20px;height:20px" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></div></li><li><div class="sec"><a class="sec-link">Fleet</a><span class="sec-exp"><svg class="icon " style="width:20px;height:20px" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></div></li><li><div class="sec"><a class="sec-link">Versions</a></div></li><li><div class="sec"><a class="sec-link">Upgrades</a></div></li><li><div class="sec"><a class="sec-link">Vulnerabilities</a><span class="sec-exp"><svg class="icon " style="width:20px;height:20px" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></div></li><li><div class="sec"><a class="sec-link">Maintenance</a></div></li><li><div class="sec"><a class="sec-link">Devices</a><span class="sec-exp"><svg class="icon " style="width:20px;height:20px" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></div></li><li><div class="sec"><a class="sec-link">Bestool</a></div></li><li><div class="sec"><a class="sec-link current">Settings</a><span class="sec-exp"><svg class="icon " style="width:20px;height:20px" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 8-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg></span></div><div class="pages"><h3 class="overline first">Access</h3><ul class="plist"><li><a class="page">Roles</a></li><li><a class="page selected">Who can do this</a></li><li><a class="page">Certificate authority</a></li><li><a class="page">Identity provider</a></li><li><a class="page">Audit log</a></li></ul><h3 class="overline">Monitoring</h3><ul class="plist"><li><a class="page">Healthchecks</a></li><li><a class="page">Clusters</a></li></ul><h3 class="overline">Backups</h3><ul class="plist"><li><a class="page">Backup defaults</a></li><li><a class="page">Recovery vault</a></li><li><a class="page">Restore consumers</a></li></ul></div></li><li><div class="sec"><a class="sec-link">SQL</a></div></li></ul></nav><div class="band"><span class="dot"></span><span class="band-name">Read-only</span><svg class="icon " style="width:20px;height:20px" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 8-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg></div></aside>
+<div class="main"><main class="container">
+<div class="stack stack-3">
+  <div class="paper" style="padding-top:20px"><div class="row gap2 top" style="align-items:center"><div class="field" style="width:220px"><div class="field-in"><span class="val">Restore replicas</span><span class="sel-arrow"><svg class="icon " style="width:24px;height:24px" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></div><span class="field-label">Noun</span></div><div class="field" style="width:150px"><div class="field-in"><span class="val">consume</span><span class="sel-arrow"><svg class="icon " style="width:24px;height:24px" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></div><span class="field-label">Verb</span></div><div class="field" style="width:240px"><div class="field-in"><span class="val">Group tamanu-prod</span><span class="sel-arrow"><svg class="icon " style="width:24px;height:24px" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></div><span class="field-label">Scope</span></div><span class="row" style="gap:0"><span class="cb  "><svg class="icon " style="width:20px;height:20px" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5v14H5V5zm0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2"/></svg></span><span class="body2">Include fleet machines</span></span><span class="grow"></span><button class="btn contained">Check</button></div></div>
+  <div>
+    <h2 class="h6">Can consume restore replicas for group tamanu-prod (8)</h2>
+    <table><colgroup><col style="width:26%"><col style="width:11%"><col style="width:27%"><col style="width:18%"><col style="width:18%"></colgroup><thead><tr><th>Principal</th><th>Kind</th><th>Through</th><th>Scope held</th><th>State</th></tr></thead><tbody><tr class="hov"><td><span class="mono">pgro-restore-operator</span></td><td>device</td><td><div class="chips"><span class="chip outlined mono"><span class="chip-label">restore-consumer</span></span><span class="chip outlined mono"><span class="chip-label">tag:restore-consumer</span></span></div></td><td><div class="chips"><span class="chip outlined secondary"><span class="chip-label">tamanu-prod</span></span><span class="chip outlined secondary"><span class="chip-label">tamanu-staging</span></span></div></td><td></td></tr><tr class="hov"><td><span class="mono">restore-drill-2</span></td><td>device</td><td><div class="chips"><span class="chip outlined mono"><span class="chip-label">restore-consumer</span></span><span class="sec-t">direct</span></div></td><td><div class="chips"><span class="chip outlined secondary"><span class="chip-label">tamanu-prod</span></span></div></td><td></td></tr><tr class="hov dim"><td><span class="mono">backup-runner-syd</span></td><td>fleet machine</td><td><div class="chips"><span class="chip outlined mono"><span class="chip-label">restore-consumer</span></span><span class="sec-t">direct</span></div></td><td><div class="chips"><span class="chip outlined secondary"><span class="chip-label">tamanu-prod</span></span></div></td><td><span class="chip"><span class="chip-label">suspended</span></span><span class="sub">14:02 today by k.tahana@example.invalid</span></td></tr><tr class="hov"><td><span class="mono">ana.whitford@example.invalid</span></td><td>operator</td><td><div class="chips"><span class="chip outlined mono"><span class="chip-label">admin</span></span><span class="sec-t">direct</span></div></td><td><div class="chips"><span class="chip outlined secondary"><span class="chip-label">all groups</span></span></div></td><td></td></tr><tr class="hov"><td><span class="mono">dev.ops@example.invalid</span></td><td>operator</td><td><div class="chips"><span class="chip outlined mono"><span class="chip-label">admin</span></span><span class="sec-t">direct</span></div></td><td><div class="chips"><span class="chip outlined secondary"><span class="chip-label">all groups</span></span></div></td><td></td></tr><tr class="hov"><td><span class="mono">j.marsh@example.invalid</span></td><td>operator</td><td><div class="chips"><span class="chip outlined mono"><span class="chip-label">admin</span></span><span title="Set in the tailnet policy file, read only here" class="chip outlined"><svg class="icon chip-icon" style="width:18px;height:18px" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2m-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2m3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1z"/></svg><span class="chip-label">tailnet policy</span></span></div></td><td><div class="chips"><span class="chip outlined secondary"><span class="chip-label">all groups</span></span></div></td><td></td></tr><tr class="hov"><td><span class="mono">k.tahana@example.invalid</span></td><td>operator</td><td><div class="chips"><span class="chip outlined mono"><span class="chip-label">admin</span></span><span title="Set in the tailnet policy file, read only here" class="chip outlined"><svg class="icon chip-icon" style="width:18px;height:18px" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2m-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2m3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1z"/></svg><span class="chip-label">tailnet policy</span></span></div></td><td><div class="chips"><span class="chip outlined secondary"><span class="chip-label">all groups</span></span></div></td><td></td></tr><tr class="hov"><td><span class="mono">support.lead@example.invalid</span></td><td>operator</td><td><div class="chips"><span class="chip outlined mono"><span class="chip-label">admin</span></span><span title="Set in the tailnet policy file, read only here" class="chip outlined"><svg class="icon chip-icon" style="width:18px;height:18px" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2m-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2m3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1z"/></svg><span class="chip-label">tailnet policy</span></span></div></td><td><div class="chips"><span class="chip outlined secondary"><span class="chip-label">all groups</span></span></div></td><td></td></tr></tbody></table>
+    <p class="body2 sec-t" style="margin:12px 16px 0">Fleet machines: 1 of 412 hold this, listed above. None hold it through <code>fleet-machine</code>.</p>
+  </div>
+</div>
+</main></div>
+
+</div>
+</body>
+</html>

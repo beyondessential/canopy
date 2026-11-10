@@ -1,0 +1,223 @@
+<!-- spec: platform/auth-control-plane.md -->
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add grant, trust credential, write mode</title>
+<style>
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:1rem;line-height:1.5;letter-spacing:.00938em;color:rgba(0,0,0,.87);background:#fff;-webkit-font-smoothing:antialiased}
+a{color:#388e3c}
+h1,h2,h3,h4,h6,p,ul,ol,dl,dd{margin:0}
+ul{padding:0;list-style:none}
+code{font-family:monospace}
+.mono{font-family:monospace}
+.h4{font-size:2.125rem;line-height:1.235;font-weight:400;letter-spacing:.00735em}
+.h6{font-size:1.25rem;line-height:1.6;font-weight:500;letter-spacing:.0075em}
+.sub2{font-size:.875rem;line-height:1.57;font-weight:500;letter-spacing:.00714em}
+.body2{font-size:.875rem;line-height:1.43;letter-spacing:.01071em}
+.cap{font-size:.75rem;line-height:1.66;letter-spacing:.03333em;color:rgba(0,0,0,.6)}
+.sec2{color:rgba(0,0,0,.6)}
+.dis{color:rgba(0,0,0,.38)}
+.ic{fill:currentColor;flex:none;display:inline-block;vertical-align:middle}
+
+/* layout */
+.app{display:flex;min-height:100vh;position:relative}
+.drawer{width:240px;flex:none;background:#f5f5f5;border-right:1px solid rgba(0,0,0,.12)}
+.drawer-in{position:sticky;top:0;height:100vh;display:flex;flex-direction:column}
+.content{flex:1;min-width:0}
+.container{max-width:1200px;margin:0 auto;padding:24px}
+.stack{display:flex;flex-direction:column}
+.s1{gap:8px}.s2{gap:16px}.s3{gap:24px}
+
+/* sidebar */
+.brand{padding:12px 24px}
+.brand a{display:flex;align-items:center;gap:8px;color:#388e3c;text-decoration:none}
+.brand img,.brand svg{width:24px;height:24px}
+nav.main{flex:1;min-height:0;overflow-y:auto;padding:8px}
+nav.main li{list-style:none}
+.li{position:relative;display:flex}
+a.sec{flex:1;display:flex;align-items:center;padding:6px 48px 6px 16px;border-radius:4px;color:rgba(0,0,0,.6);font-weight:500;text-decoration:none;font-size:1rem;line-height:1.5;letter-spacing:.00938em}
+a.sec.cur{color:#32669a}
+.exp{position:absolute;right:16px;top:50%;transform:translateY(-50%);width:30px;height:30px;display:flex;align-items:center;justify-content:center;color:rgba(0,0,0,.54)}
+.pages{padding-left:12px;margin:2px 0 8px}
+.pages h3{display:block;padding:12px 16px 2px;font-size:.6875rem;font-weight:500;line-height:1.66;letter-spacing:.08333em;text-transform:uppercase;color:rgba(0,0,0,.6)}
+.pages h3.first{padding-top:4px}
+.pages a{display:block;border-radius:4px;padding:4px 16px;margin-top:2px;font-size:.875rem;line-height:1.43;letter-spacing:.01071em;color:rgba(0,0,0,.87);text-decoration:none}
+.pages a.cur{background:rgba(56,142,60,.08);color:#388e3c;font-weight:500}
+.band{flex:none;display:flex;align-items:center;gap:8px;min-height:48px;padding:0 16px 0 24px;border-top:1px solid rgba(0,0,0,.12);font-size:.875rem;font-weight:500;letter-spacing:.02857em;line-height:1.75;color:rgba(0,0,0,.6)}
+.band .dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
+.band .lbl{flex:1}
+.band.write{background-color:#ed6c02;color:#fff;background-image:repeating-linear-gradient(135deg,rgba(255,152,0,.5),rgba(255,152,0,.5) 6px,rgba(255,152,0,0) 6px,rgba(255,152,0,0) 12px)}
+.band .left{opacity:.75;font-variant-numeric:tabular-nums}
+
+/* paper, table */
+.paper{background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:4px}
+.pad2{padding:16px}.pad3{padding:24px}
+table{width:100%;border-collapse:collapse;border-spacing:0}
+th,td{padding:6px 16px;border-bottom:1px solid rgba(224,224,224,1);font-size:.875rem;line-height:1.43;letter-spacing:.01071em;text-align:left;vertical-align:middle}
+th{font-weight:500;line-height:1.5;color:rgba(0,0,0,.87)}
+td.r,th.r{text-align:right}
+tr:last-child>td{border-bottom:0}
+.paper>table tr:last-child>td{border-bottom:0}
+tr.muted td>*{opacity:.6}
+tr.new td{background:rgba(56,142,60,.08)}
+tr.bandrow td{background:#fafafa;color:rgba(0,0,0,.6)}
+tr.bandrow td>*{opacity:1}
+.bandrow .row{display:flex;align-items:center;gap:16px}
+.bandrow .grow{flex:1}
+
+/* chips */
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chip{display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:16px;font-size:.8125rem;line-height:1.5;letter-spacing:.01071em;white-space:nowrap;background:rgba(0,0,0,.08);color:rgba(0,0,0,.87)}
+.chip.out{background:transparent;border:1px solid #bdbdbd}
+.chip.deny{background:#d32f2f;color:#fff}
+.chip.err{background:#d32f2f;color:#fff}
+.chip.warn{background:#ed6c02;color:#fff}
+.chip.ok{background:#2e7d32;color:#fff}
+.chip.out.err{background:transparent;color:#d32f2f;border:1px solid rgba(211,47,47,.7)}
+.chip.out.warn{background:transparent;color:#ed6c02;border:1px solid rgba(237,108,2,.7)}
+.chip.out.ok{background:transparent;color:#2e7d32;border:1px solid rgba(46,125,50,.7)}
+.chip.out.info{background:transparent;color:#0288d1;border:1px solid rgba(2,136,209,.7)}
+.chip.out.pr{background:transparent;color:#32669a;border:1px solid rgba(50,102,154,.7)}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:4px;padding:6px 16px;font:inherit;font-size:.875rem;font-weight:500;line-height:1.75;letter-spacing:.02857em;text-transform:uppercase;text-decoration:none;white-space:nowrap;cursor:pointer;background:transparent;color:#388e3c;min-width:64px}
+.btn.contained{background:#388e3c;color:#fff;box-shadow:0 3px 1px -2px rgba(0,0,0,.2),0 2px 2px 0 rgba(0,0,0,.14),0 1px 5px 0 rgba(0,0,0,.12)}
+.btn.contained.warning{background:#ed6c02}
+.btn.outlined.warning{color:#ed6c02;border-color:rgba(237,108,2,.5)}
+.btn.text.warning{color:#ed6c02}
+.btn.outlined{border:1px solid rgba(56,142,60,.5);padding:5px 15px}
+.btn.small{font-size:.8125rem;padding:4px 10px;line-height:1.69}
+.btn.small.outlined{padding:3px 9px}
+.btn.text.small{padding:4px 5px}
+.btn.start .ic{margin-left:-4px;margin-right:0}
+.btn.blocked,.ib.blocked{background-image:repeating-linear-gradient(135deg,rgba(255,152,0,.24),rgba(255,152,0,.24) 6px,rgba(255,152,0,.07) 6px,rgba(255,152,0,.07) 12px);filter:grayscale(.8)}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;color:rgba(0,0,0,.54);flex:none}
+.ib.warning{color:#ed6c02}
+.acts{display:flex;align-items:center;justify-content:flex-end;gap:2px}
+
+/* fields */
+.tf{position:relative;display:inline-flex;flex-direction:column;min-width:0}
+.tf .in{display:flex;align-items:center;gap:8px;height:40px;border:1px solid rgba(0,0,0,.23);border-radius:4px;padding:0 14px;font-size:1rem;line-height:1.4375em;letter-spacing:.00938em;color:rgba(0,0,0,.87);background:#fff}
+.tf .in.ph{color:rgba(0,0,0,.38)}
+.tf .in .grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tf .in .ic{color:rgba(0,0,0,.54);margin-right:-8px}
+.tf .in.sel{padding-right:8px}
+.tf label{position:absolute;left:10px;top:-9px;padding:0 5px;background:#fff;font-size:.75rem;line-height:1.4375;color:rgba(0,0,0,.6);letter-spacing:.00938em;z-index:1}
+.tf .help{font-size:.75rem;line-height:1.66;letter-spacing:.03333em;color:rgba(0,0,0,.6);margin:3px 14px 0}
+.tf.multi .in{height:auto;min-height:40px;padding:5px 14px;flex-wrap:wrap}
+.row-inline{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.fcl{display:inline-flex;align-items:center;gap:0;font-size:1rem}
+.fcl .ic{color:rgba(0,0,0,.6);margin:9px}
+.fcl .ic.on{color:#388e3c}
+.tbg{display:inline-flex}
+.tb{padding:7px 11px;border:1px solid rgba(0,0,0,.12);font-size:.875rem;font-weight:500;line-height:1.75;letter-spacing:.02857em;text-transform:uppercase;color:rgba(0,0,0,.54);white-space:nowrap}
+.tb+.tb{margin-left:-1px}
+.tb:first-child{border-radius:4px 0 0 4px}.tb:last-child{border-radius:0 4px 4px 0}
+.tb.sel{color:#388e3c;background:rgba(56,142,60,.08)}
+
+/* alert */
+.alert{display:flex;padding:6px 16px;border-radius:4px;font-size:.875rem;line-height:1.43;letter-spacing:.01071em}
+.alert .ai{padding:7px 0;margin-right:12px;display:flex}
+.alert .am{padding:8px 0;flex:1;min-width:0}
+.alert.info{background:rgb(229,246,253);color:rgb(1,67,97)}
+.alert.info .ai{color:#0288d1}
+.alert.warning{background:rgb(255,244,229);color:rgb(102,60,0)}
+.alert.warning .ai{color:#ed6c02}
+.alert.error{background:rgb(253,237,237);color:rgb(95,33,32)}
+.alert.error .ai{color:#d32f2f}
+.alert.success{background:rgb(237,247,237);color:rgb(30,70,32)}
+
+/* dialog */
+.backdrop{position:absolute;inset:0;background:rgba(0,0,0,.5);z-index:10}
+.dialog{position:absolute;top:140px;left:50%;transform:translateX(-50%);width:600px;max-width:calc(100% - 64px);background:#fff;border-radius:4px;box-shadow:0 11px 15px -7px rgba(0,0,0,.2),0 24px 38px 3px rgba(0,0,0,.14),0 9px 46px 8px rgba(0,0,0,.12);z-index:11}
+.dialog .dt{padding:16px 24px;font-size:1.25rem;line-height:1.6;font-weight:500;letter-spacing:.0075em}
+.dialog .dc{padding:0 24px 20px}
+.dialog .da{display:flex;justify-content:flex-end;gap:8px;padding:8px}
+
+.bc{display:flex;align-items:center;font-size:1rem;line-height:1.5;letter-spacing:.00938em}
+.bc a{color:inherit;text-decoration:none}
+.bc .sep{margin:0 8px;color:rgba(0,0,0,.6)}
+.dl{display:grid;grid-template-columns:140px 1fr;gap:0}
+.dl>*{padding:8px 16px;border-bottom:1px solid rgba(224,224,224,1);font-size:.875rem;line-height:1.43}
+.dl dt{font-weight:500}
+.dl>*:nth-last-child(-n+2){border-bottom:0}
+.fgrid{display:grid;grid-template-columns:120px 1fr;gap:16px 24px;align-items:start}
+.fgrid>.lab{padding-top:9px;font-weight:500;font-size:.875rem;line-height:1.43}
+.sentence{font-size:1rem;line-height:1.75}
+.sentence b{font-weight:500}
+hr.div{border:0;border-top:1px solid rgba(0,0,0,.12);margin:0}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="drawer"><div class="drawer-in"><div class="brand"><a href="#"><svg viewBox="0 0 100 100" aria-hidden="true"><rect x="0" y="0" width="100" height="100" rx="10" ry="10" fill="#32669A"/><circle cx="50" cy="50" r="36" fill="white"/><rect x="42" y="26" width="16" height="48" fill="#388E3C"/><rect x="26" y="42" width="48" height="16" fill="#388E3C"/></svg><span class="h6">Canopy</span></a></div><nav class="main" aria-label="Main"><ul><li><div class="li"><a class="sec" href="#">Status</a></div></li><li><div class="li"><a class="sec" href="#">Incidents</a><span class="exp"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></div></li><li><div class="li"><a class="sec" href="#">Fleet</a><span class="exp"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></div></li><li><div class="li"><a class="sec" href="#">Versions</a></div></li><li><div class="li"><a class="sec" href="#">Upgrades</a></div></li><li><div class="li"><a class="sec" href="#">Vulnerabilities</a><span class="exp"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></div></li><li><div class="li"><a class="sec" href="#">Maintenance</a></div></li><li><div class="li"><a class="sec" href="#">Devices</a><span class="exp"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></div></li><li><div class="li"><a class="sec" href="#">Bestool</a></div></li><li><div class="li"><a class="sec cur" href="#">Settings</a><span class="exp"><svg class="ic " width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 8-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg></span></div><div class="pages"><div><h3 class="first">Access</h3><a href="g-grants.html" class=cur>Grants</a><a href="g-evaluate.html">Evaluate access</a><a href="#">Certificate authority</a><a href="#">Identity provider</a><a href="#">Audit log</a></div><div><h3 class="">Monitoring</h3><a href="#">Healthchecks</a><a href="#">Clusters</a></div><div><h3 class="">Backups</h3><a href="#">Backup defaults</a><a href="#">Recovery vault</a><a href="#">Restore consumers</a></div></div></li><li><div class="li"><a class="sec" href="#">SQL</a></div></li></ul></nav><div class="band write"><span class="dot"></span><span class="lbl">Write</span><span class="left">8:52</span><svg class="ic " width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 8-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg></div></div></aside>
+<main class="content"><div class="container">
+<div class="stack s3">
+  <div>
+    <a class="body2" href="g-grants.html" style="text-decoration:none">&lsaquo; Back to Grants</a>
+    <h1 class="h4" style="margin-top:4px">Add grant</h1>
+  </div>
+  <div class="paper pad3">
+    <div class="fgrid">
+      <div class="lab">Effect</div>
+      <div style="display:flex;gap:16px"><span class="fcl"><svg class="ic on" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5m0-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8"/></svg>Allow</span><span class="fcl"><svg class="ic " width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8"/></svg>Deny</span></div>
+
+      <div class="lab">Who</div>
+      <div class="stack s2">
+        <div class="tbg" style="flex-wrap:wrap"><span class="tb">Person</span><span class="tb">Tailnet group</span><span class="tb">Tag</span><span class="tb">Role</span><span class="tb">Token</span><span class="tb sel">Trust credential</span><span class="tb">Fleet machines</span></div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px 16px;max-width:720px">
+          <div class="tf"><label>Issuer</label><div class="in sel"><span class="grow">GitHub Actions</span><svg class="ic " width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg></div><div class="help">https://token.actions.githubusercontent.com</div></div>
+          <div class="tf"><label>Name</label><div class="in"><span class="grow">infra-ansible</span></div></div>
+          <div class="tf"><label>Repository</label><div class="in"><span class="grow">beyondessential/infra</span></div></div>
+          <div class="tf"><label>Workflow file</label><div class="in"><span class="grow">ansible.yml</span></div></div>
+          <div class="tf"><label>Environment</label><div class="in"><span class="grow">production</span></div><div class="help">Optional. Left empty, any environment matches.</div></div>
+        </div>
+        <div class="body2 sec2" style="max-width:720px">Matches a run of <span class="mono">ansible.yml</span> in <span class="mono">beyondessential/infra</span> in the <span class="mono">production</span> environment. Subject <span class="mono">repo:beyondessential/infra:environment:production</span>.</div>
+      </div>
+
+      <div class="lab">May</div>
+      <div style="max-width:720px"><div class="tf multi"><label>Actions</label><div class="in sel"><span class="chip out">Run Ansible</span><span class="chip out">Read fleet</span><span class="grow"></span><svg class="ic " width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg></div></div></div>
+
+      <div class="lab">On</div>
+      <div class="stack s2" style="max-width:720px">
+        <div class="tf"><label>Resource</label><div class="in sel"><span class="grow">Ansible runs</span><svg class="ic " width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg></div><div class="help">Ansible runs can be limited to groups and ranks.</div></div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px">
+          <div class="tf multi"><label>Groups</label><div class="in sel"><span class="chip out">harbour</span><span class="chip out">kauri</span><span class="grow"></span><svg class="ic " width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg></div></div>
+          <div class="tf"><label>Ranks</label><div class="in sel"><span class="grow">Any</span><svg class="ic " width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg></div></div>
+        </div>
+      </div>
+
+      <div class="lab">Until</div>
+      <div style="max-width:720px"><div class="tf" style="width:240px"><label>Expires</label><div class="in ph"><span class="grow">No expiry</span></div><div class="help">Optional.</div></div></div>
+
+      <div class="lab">Note</div>
+      <div style="max-width:720px"><div class="tf"><label>Why</label><div class="in"><span class="grow">Nightly configuration runs from infra CI</span></div></div></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="h6" style="margin-bottom:8px">Read as</div>
+    <div class="paper pad2 sentence">Allow the trust credential <b class="mono">infra-ansible</b> to <b>Run Ansible</b> and <b>Read fleet</b> on <b>Ansible runs</b> in groups <b>harbour</b> and <b>kauri</b>, with no expiry.</div>
+  </div>
+
+  <div>
+    <div class="h6" style="margin-bottom:8px">Against current grants</div>
+    <div class="paper"><table><tbody>
+      <tr><td style="width:200px;font-weight:500">Adds access for</td><td>1 trust credential, not yet seen. No key is issued.</td></tr>
+      <tr><td style="font-weight:500">Overlaps</td><td><span class="mono">g14</span> already lets <span class="mono">tag:ansible-runner</span> run Ansible on Ansible runs. This adds a second way in.</td></tr>
+      <tr><td style="font-weight:500">Read fleet</td><td>Already allowed to anyone on the tailnet by <span class="mono">g07</span>. Covered, so it adds nothing for this credential.</td></tr>
+      <tr><td style="font-weight:500">Overridden by</td><td>No deny.</td></tr>
+      <tr><td style="font-weight:500">Breadth</td><td>2 actions, 2 groups, any rank. Narrower than g14, which covers every group.</td></tr>
+    </tbody></table></div>
+  </div>
+
+  <div style="display:flex;gap:8px"><span class="btn contained warning ">Add grant</span><span class="btn text ">Cancel</span></div>
+</div>
+</div></main>
+</div>
+</body>
+</html>
