@@ -835,4 +835,30 @@ test.describe("group Ansible", () => {
 		await dialog.getByTestId("run-hold-confirm").click();
 		await expect(dialog.getByTestId("run-held")).toBeVisible();
 	});
+
+	// A run that died without giving its lease back leaves the holder shut out
+	// of their own environment until the lease expires.
+	// spec: ANSRUN#presentation
+	test("lets the holder release the lease of a run that has started", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedRunnable(sql);
+
+		await startRun(page, group);
+		await readAsPlugin(page, sql);
+
+		const production = await productionEnvironment(page, group);
+		await expect(production.getByTestId("run-install")).toBeDisabled();
+
+		page.once("dialog", (dialog) => dialog.accept());
+		await production.getByTestId("run-release").click();
+
+		await expect(production.getByTestId("run-holder")).toHaveCount(0);
+		await expect(production.getByTestId("run-install")).toBeEnabled();
+		const [{ n }] = await sql.query<{ n: string }>(
+			"SELECT COUNT(*)::text AS n FROM maintenance_windows WHERE ended_at IS NULL",
+		);
+		expect(n).toBe("0");
+	});
 });

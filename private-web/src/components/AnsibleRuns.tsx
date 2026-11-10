@@ -8,7 +8,7 @@ import {
 	Typography,
 } from "@mui/material";
 import { useState } from "react";
-import { useApi } from "../api";
+import { ApiError, useApi, useApiAction } from "../api";
 import type {
 	AnsibleLease,
 	CatalogueView,
@@ -100,6 +100,25 @@ export default function AnsibleRuns({
 		onChanged();
 	};
 	const available = catalogue !== null && !held;
+
+	const release = useApiAction("ansible", "release_lease");
+	const onRelease = async () => {
+		if (
+			!lease ||
+			!globalThis.confirm(
+				"Release this lease? Do this only once the run has ended. Another run can then start on this environment, and the maintenance the run declared ends.",
+			)
+		)
+			return;
+		try {
+			await release.call({ lease_id: lease.id });
+		} catch (error) {
+			// Already gone, which is what was asked for.
+			if (!(error instanceof ApiError && error.status === 404)) return;
+			release.reset();
+		}
+		changed();
+	};
 
 	const button = (label: string, preset: "install" | "upgrade" | null, enabled: boolean) => (
 		<GradedAction calls="ansible/take_lease" action={`${label} on ${groupName} ${rank}`}>
@@ -197,7 +216,25 @@ export default function AnsibleRuns({
 							</span>
 						</Tooltip>
 					)}
+					{lease?.started_at && leaseIsYours && (
+						<GradedAction calls="ansible/release_lease" action="Release the lease">
+							<Button
+								size="small"
+								disabled={release.pending}
+								onClick={onRelease}
+								data-testid="run-release"
+							>
+								Release lease
+							</Button>
+						</GradedAction>
+					)}
 				</Stack>
+			)}
+
+			{release.error && (
+				<Alert severity="warning" sx={{ mt: 1 }}>
+					{release.error.message}
+				</Alert>
 			)}
 
 			{catalogue !== null && dialog !== null && (
