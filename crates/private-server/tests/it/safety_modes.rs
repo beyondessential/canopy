@@ -788,7 +788,7 @@ async fn backup_schedules_are_write_and_clearing_retention_is_danger() {
 /// it takes, extends and gives back a lease on its operator's standing.
 // spec: SAFE
 #[tokio::test(flavor = "multi_thread")]
-async fn a_request_naming_no_session_is_not_gated() {
+async fn a_request_from_outside_the_operator_interface_is_not_gated() {
 	use super::audit::{GROUP, seed};
 
 	trust_headers();
@@ -805,6 +805,17 @@ async fn a_request_naming_no_session_is_not_gated() {
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
 			.add_header(SESSION_HEADER, &id)
+			.json(&take)
+			.await;
+		assert!(problem_type(&gated.json()).ends_with("safety-mode-too-low"));
+
+		// So is one from a browser that names no session, so the operator
+		// interface losing its session does not lift the modes.
+		let gated = private
+			.post("/api/ansible/take_lease")
+			.add_header("Tailscale-User-Login", OPERATOR)
+			.add_header("Tailscale-User-Name", "Operator")
+			.add_header("Sec-Fetch-Site", "same-origin")
 			.json(&take)
 			.await;
 		assert!(problem_type(&gated.json()).ends_with("safety-mode-too-low"));

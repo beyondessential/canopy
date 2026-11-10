@@ -36,6 +36,10 @@ use crate::state::AppState;
 /// presents it.
 pub const SESSION_HEADER: &str = "x-canopy-session";
 
+/// A header every browser adds to the requests it makes and no page can
+/// remove, so the operator interface is known even where it names no session.
+const BROWSER_HEADER: &str = "sec-fetch-site";
+
 /// How long a session's last-seen may go unwritten.
 ///
 /// A day's grace before the sweep retires a session, so a quarter of an hour is
@@ -202,9 +206,9 @@ async fn touch(safety: &SafetyState, id: Uuid, login: &str) -> Result<()> {
 /// Read-only-graded requests are answered without a session, so a client can
 /// read before it has one. Anything higher is decided against the session named
 /// by [`SESSION_HEADER`]: an unknown, expired, or someone else's session all
-/// read as read-only rather than being refused outright. A request naming no
-/// session is not the operator interface's, and is left to the handler to
-/// allow on the caller's standing.
+/// read as read-only rather than being refused outright. A request that names
+/// no session and comes from no browser is not the operator interface's, and
+/// is left to the handler to allow on the caller's standing.
 pub async fn enforce(
 	State(safety): State<SafetyState>,
 	request: Request,
@@ -245,9 +249,10 @@ pub async fn enforce(
 		)));
 	};
 
-	// The operator interface names its session on every request, so one that
-	// names none comes from a command or a script, which has no mode to raise.
-	if !parts.headers.contains_key(SESSION_HEADER) {
+	// A command or a script has no mode to raise. The browser's own header is
+	// what tells it from the operator interface having lost its session, which
+	// stays read-only.
+	if !parts.headers.contains_key(SESSION_HEADER) && !parts.headers.contains_key(BROWSER_HEADER) {
 		return Ok(next
 			.run(axum::extract::Request::from_parts(parts, body))
 			.await);

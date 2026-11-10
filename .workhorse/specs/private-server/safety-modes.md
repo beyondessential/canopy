@@ -65,8 +65,8 @@ A client that has lost its record of its own mode is read-only, so doubt resolve
 A request presenting a session identifier that is unknown or has expired is treated as read-only rather than refused outright.
 A session is usable only by the login it belongs to.
 A read-only-graded request needs no session at all, so a client can read before it has one.
-The operator interface names its session on every request it makes.
-A request naming no session comes from a command or a script rather than from that interface, which has no mode to raise, so it is not graded and is allowed by the caller's standing alone: an Ansible run takes, extends and releases its lease this way (see [ANSRUN](ansible/runs.md), "Run leases").
+A request that names no session and was not made by a browser comes from a command or a script rather than from the operator interface, which has no mode to raise, so it is not graded and is allowed by the caller's standing alone: an Ansible run takes, extends and releases its lease this way (see [ANSRUN](ansible/runs.md), "Run leases").
+A request a browser made is graded whether or not it names a session, so the operator interface losing its session does not lift the modes.
 
 A session that has not been seen for some time is retired.
 
