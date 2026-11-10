@@ -4,7 +4,7 @@ Rigour: Standard. Round cap 6. Stop rule: two clean rounds, the second by fresh 
 
 ## Where the run is
 
-Step 2, direction. Round 1 is closed with a direction chosen (see the taste ledger); round 2 refines it. The card has no specs, no plan and no commits, so there is no build to polish. Step 3 waits on an implementation.
+Step 2, direction. Round 1 closed with a direction chosen (see the taste ledger). Round 2 built and fixed the hybrid; round 3 judges it with fresh eyes. The card has no specs, no plan and no commits, so there is no build to polish. Step 3 waits on an implementation.
 
 ## Step 0 — does the card need design
 
@@ -83,13 +83,29 @@ The fresh-eyes critic could not run: every spawn (Opus, Opus inherited, Fable) f
 
 The brief is wrong about the chrome: at 1440px the app has a permanent left sidebar with the safety-mode band at its foot, not a top bar. G and R followed the React source. The brief should say so before any later round.
 
+## Round 2 — the hybrid
+
+Direction H, seven mockups in `h-*.html`, built by the main session with `build/build_h.py` after the build agent again failed to start. Write-up in `direction-h.md`, renders in `shots/r2/`.
+
+The main session's critique found 2 criticals, 7 suggestions and 4 nits, filed on the card:
+
+- Credential names drifted between screens ("Client certificate", "enrolled key", "Tailnet tag"). Now "Enrolled key" throughout, with the tag as the key's qualifier; only the refused unknown caller reads "Tailnet node".
+- The Suspend dialog listed fewer permissions than the roles grant. It now lists all of them.
+- Principal kinds that echoed role names (Releaser, Restore consumer, Relay) are now CI workflow and Service.
+- Rows needing attention sort first, the new principal appears behind the minted-token dialog, both principal pages share one Credentials table, scope chips omit "all groups" everywhere, and the data mismatches (a nine-machine "exception", a suspended role with an unlisted member, the releaser's read scope) are reconciled.
+
+Twelve fixed in one pass. The Restore consumers sidebar entry was skipped: it is the operational roster of registered intents, and how it points at the restore-consumer role is for the specs.
+
+Round 2 is not clean, so it does not count towards the stop rule.
+
 ## Next
 
-- Round 2: build the P and R hybrid as one set of mockups. The home screen is P's principals list. Permissions are R's roles, edited with R's matrix, with R's own-group scope and dated exceptions. Suspend is the cut-off. Borrow G's last-matched column and its "who can do X" checker. Hard cases 1 to 10 still apply.
-- Fix the brief's chrome section first: a left sidebar with the safety-mode band at its foot, not a top bar.
-- Judge round 2 with fresh eyes from a session where subagents start.
+- Round 3: a fresh-eyes critique of the fixed `h-*` set, by an agent that has not seen this conversation. If subagents still fail to start, the user runs it from a new session.
+- Then the open questions below, what to build first, and specs.
 
 ## Open questions
+
+- Carried from `direction-h.md`: whether a suspended policy admin reads Suspended or Policy first; whether list rows say what last matched; how a role says Read everywhere and Consume in its own group on the same noun.
 
 - What is realistic to build. This is judged after the direction is refined, not before.
 - Whether Canopy can resolve tailnet group membership. Role trusts by tailnet group depend on it; the inventory does not say it can.
