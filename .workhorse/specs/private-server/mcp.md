@@ -174,7 +174,7 @@ The prompt tells the agent that the model's suggestions were made without source
 
 **Add issue note** and **Add incident note** take an issue or incident identifier and the note's text, and add a note attributed to the caller (see [CHK](../monitoring/checks.md), "Notes", and [INC](../monitoring/incidents.md), "Resolution").
 **Edit note** takes a note's identifier, the revision of the note the caller read, and the new text, and **Delete note** takes a note's identifier.
-Both are refused for a note an operator wrote, naming that as the reason, and **Edit note** is refused if the note has changed since the revision given.
+Both are refused for a note an operator wrote, naming that as the reason, unless the caller is that operator on the operator surface, and **Edit note** is refused if the note has changed since the revision given.
 **Get issue** and **Get incident** return the notes, newest first, each with its author, whether an agent or an operator wrote it, its revision, and its time.
 
 **Get group**, **Get machine** and **Get application** return the record's notes with their revision (see [FLT](../servers/overview.md), "Notes").

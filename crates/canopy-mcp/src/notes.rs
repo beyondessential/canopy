@@ -232,13 +232,17 @@ impl AnyNote {
 	}
 }
 
-/// Why a note cannot be changed here, if it cannot.
-fn unchangeable(note: &AnyNote) -> Option<&'static str> {
+/// Why a note cannot be changed here by `caller`, if it cannot. An agent's
+/// note can be changed by any caller who may write notes; an operator's only
+/// by that operator, on the operator surface.
+fn unchangeable(note: &AnyNote, caller: &Caller) -> Option<&'static str> {
 	if note.deleted() {
 		return Some("the note was deleted");
 	}
-	(note.author_kind() == AuthorKind::Operator).then_some(
-		"the note was written by an operator, and only a note an agent wrote can be changed here",
+	let own = matches!(caller, Caller::Operator { login, .. } if *login == note.author());
+	(note.author_kind() == AuthorKind::Operator && !own).then_some(
+		"the note was written by an operator, and only a note an agent wrote, or one you wrote \
+		 yourself on the operator surface, can be changed here",
 	)
 }
 
@@ -377,7 +381,8 @@ impl CanopyMcp {
 		),
 		description = "Edit the text of a note on an issue or an incident, stating the `revision` \
 		               you read. The text it replaces is kept. Only a note an agent wrote can be \
-		               edited: one an operator wrote is refused, naming that. If the note changed \
+		               edited, or on the operator surface one the caller wrote: one another \
+		               operator wrote is refused, naming that. If the note changed \
 		               since the revision you read, the edit is refused and the result carries \
 		               the note as it stands. Refused, with no effect, unless the caller is an \
 		               administrator (on the operator surface) or holds a token with the notes \
@@ -398,7 +403,7 @@ impl CanopyMcp {
 				let Some(held) = AnyNote::find(conn, note_id).await? else {
 					return Ok(Err(not_found(format!("no note with id {note_id}"))));
 				};
-				if let Some(reason) = unchangeable(&held) {
+				if let Some(reason) = unchangeable(&held, &caller) {
 					return Ok(Err(refusal(
 						format!("the note cannot be edited: {reason}"),
 						json!({ "note_id": note_id }),
@@ -456,7 +461,8 @@ impl CanopyMcp {
 		),
 		description = "Delete a note on an issue or an incident. The note leaves the notes but is \
 		               kept, recording who deleted it. Only a note an agent wrote can be \
-		               deleted: one an operator wrote is refused, naming that. Refused, with no \
+		               deleted, or on the operator surface one the caller wrote: one another \
+		               operator wrote is refused, naming that. Refused, with no \
 		               effect, unless the caller is an administrator (on the operator surface) \
 		               or holds a token with the notes grant."
 	)]
@@ -477,7 +483,7 @@ impl CanopyMcp {
 				if held.deleted() {
 					return Ok(Err(not_found(format!("note {note_id} is already deleted"))));
 				}
-				if let Some(reason) = unchangeable(&held) {
+				if let Some(reason) = unchangeable(&held, &caller) {
 					return Ok(Err(refusal(
 						format!("the note cannot be deleted: {reason}"),
 						json!({ "note_id": note_id }),
