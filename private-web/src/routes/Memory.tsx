@@ -16,11 +16,12 @@ import {
 	TextField,
 	Typography,
 } from "@mui/material";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { callApi, useApi } from "../api";
 import { GradedAction } from "../components/GradedAction";
 import TimeAgo from "../components/TimeAgo";
+import { useDebounced } from "../hooks/useDebounced";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
@@ -85,6 +86,20 @@ export default function Memory() {
 			{ replace: true },
 		);
 
+	// The search box types ahead of the address, which follows once typing
+	// pauses, so the list is queried once per settled term.
+	const [typed, setTyped] = useState(text);
+	const settled = useDebounced(typed, 250);
+	useEffect(() => {
+		if (settled.trim() !== text) set("q", settled.trim());
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [settled]);
+	// A term that arrives from the address, rather than from typing, is shown.
+	useEffect(() => {
+		if (text !== typed.trim() && text !== settled.trim()) setTyped(text);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [text]);
+
 	const groups = useApi("fleet/groups", "list", {}, []);
 	const list = useApi(
 		"memory",
@@ -127,8 +142,8 @@ export default function Memory() {
 					<TextField
 						size="small"
 						label="Search"
-						value={text}
-						onChange={(e) => set("q", e.target.value)}
+						value={typed}
+						onChange={(e) => setTyped(e.target.value)}
 						sx={{ minWidth: 240 }}
 					/>
 					<TextField
