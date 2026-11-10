@@ -39,7 +39,7 @@ Each token records when it was last used, so idle tokens are visible.
 
 A token carries the grants chosen when it is minted, which cannot be changed afterwards; a token minted without one never gains it.
 The **triage grant** allows the token to record, withdraw and edit vulnerability triage decisions.
-The **notes grant** allows the token to add notes to issues and incidents, to replace the notes of a group, machine or application, and to record, amend and retire [incident memory](../monitoring/incident-memory.md) entries.
+The **notes grant** allows the token to add notes to issues and incidents and to edit and delete the notes agents wrote, to replace the notes of a group, machine or application, and to record, amend, retire and restore [incident memory](../monitoring/incident-memory.md) entries.
 A token is minted with no grants unless the administrator chooses one, so every token reads only unless minted to write.
 The token list shows each token's grants.
 
@@ -173,7 +173,9 @@ The prompt tells the agent that the model's suggestions were made without source
 ### Notes
 
 **Add issue note** and **Add incident note** take an issue or incident identifier and the note's text, and add a note attributed to the caller (see [CHK](../monitoring/checks.md), "Notes", and [INC](../monitoring/incidents.md), "Resolution").
-**Get issue** and **Get incident** return the notes, newest first, each with its author and time, and an option to include deleted notes.
+**Edit note** takes a note's identifier, the revision of the note the caller read, and the new text, and **Delete note** takes a note's identifier.
+Both are refused for a note an operator wrote, naming that as the reason, and **Edit note** is refused if the note has changed since the revision given.
+**Get issue** and **Get incident** return the notes, newest first, each with its author, whether an agent or an operator wrote it, its revision, and its time.
 
 **Get group**, **Get machine** and **Get application** return the record's notes with their revision (see [FLT](../servers/overview.md), "Notes").
 **Replace notes** takes a group, machine or application identifier, the new text, and the revision the caller read, and replaces the record's notes with the text.
@@ -205,7 +207,8 @@ Incident counts follow the same rule as **Find incidents**, counting published i
 **Record memory entry** takes a title, a body and optionally a link, and returns the entry.
 **Amend memory entry** takes an identifier, the revision read, and any of title, body and link to change, and is refused as **Replace notes** is when the entry has changed since.
 **Retire memory entry** takes an identifier and a reason.
-All three are held by the notes grant, and each is audited as the action it takes (see [AUD](../platform/audit-log.md)).
+**Restore memory entry** takes an identifier, the revision read, and the earlier version to restore, and is refused as an amendment is when the entry has changed since.
+All four are held by the notes grant, and each is audited as the action it takes (see [AUD](../platform/audit-log.md)).
 
 ### Audit log
 
