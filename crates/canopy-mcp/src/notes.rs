@@ -28,7 +28,7 @@ use serde_json::json;
 use crate::{
 	CanopyMcp,
 	caller::{self, Caller},
-	util::{mcp_err, not_found, ok_json, parse_uuid},
+	util::{is_not_found, mcp_err, not_found, ok_json, parse_uuid},
 };
 
 /// The most notes an issue or incident read returns.
@@ -172,12 +172,12 @@ impl AnyNote {
 	async fn find(conn: &mut AsyncPgConnection, id: Uuid) -> Result<Option<Self>, AppError> {
 		match IssueNote::get(conn, id).await {
 			Ok(note) => return Ok(Some(Self::Issue(note))),
-			Err(AppError::NotFound(_)) => {}
+			Err(error) if is_not_found(&error) => {}
 			Err(error) => return Err(error),
 		}
 		match IncidentNote::get(conn, id).await {
 			Ok(note) => Ok(Some(Self::Incident(note))),
-			Err(AppError::NotFound(_)) => Ok(None),
+			Err(error) if is_not_found(&error) => Ok(None),
 			Err(error) => Err(error),
 		}
 	}
@@ -254,7 +254,7 @@ async fn notes_record(
 	] {
 		match notes_log::current(conn, record).await {
 			Ok(_) => return Ok(Some((record, kind))),
-			Err(AppError::NotFound(_)) => {}
+			Err(error) if is_not_found(&error) => {}
 			Err(error) => return Err(error),
 		}
 	}
@@ -314,7 +314,7 @@ impl CanopyMcp {
 			.await;
 		match note {
 			Ok(note) => ok_json(&NoteOut::from(note)),
-			Err(AppError::NotFound(message)) => Ok(not_found(message)),
+			Err(error) if is_not_found(&error) => Ok(not_found("no such issue or incident".into())),
 			Err(error) => Err(mcp_err(error)),
 		}
 	}
@@ -364,7 +364,7 @@ impl CanopyMcp {
 			.await;
 		match note {
 			Ok(note) => ok_json(&NoteOut::from(note)),
-			Err(AppError::NotFound(message)) => Ok(not_found(message)),
+			Err(error) if is_not_found(&error) => Ok(not_found("no such issue or incident".into())),
 			Err(error) => Err(mcp_err(error)),
 		}
 	}

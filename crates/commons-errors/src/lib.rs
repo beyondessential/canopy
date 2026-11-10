@@ -266,6 +266,15 @@ pub enum AppError {
 }
 
 impl AppError {
+	/// Whether this is a record that was not there, whether a lookup said so
+	/// or Diesel did.
+	pub fn is_not_found(&self) -> bool {
+		matches!(
+			self,
+			Self::NotFound(_) | Self::DatabaseQuery(diesel::result::Error::NotFound)
+		)
+	}
+
 	pub fn custom(err: impl ToString) -> Self {
 		Self::Custom(err.to_string())
 	}

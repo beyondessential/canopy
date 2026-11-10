@@ -25,7 +25,7 @@ use serde_json::json;
 use crate::{
 	CanopyMcp,
 	notes::{refusal, require_notes},
-	util::{mcp_err, not_found, ok_json, parse_opt_uuid, parse_uuid},
+	util::{is_not_found, mcp_err, not_found, ok_json, parse_opt_uuid, parse_uuid},
 };
 
 const DEFAULT_FIND_LIMIT: i64 = 50;
@@ -171,7 +171,9 @@ fn link_kind(kind: &str) -> Result<LinkKind, McpError> {
 fn refused(error: AppError) -> Result<CallToolResult, McpError> {
 	match error {
 		AppError::BadRequest(message) => Err(McpError::invalid_params(message, None)),
-		AppError::NotFound(message) => Ok(not_found(message)),
+		error if is_not_found(&error) => {
+			Ok(not_found("no such memory entry, group or incident".into()))
+		}
 		AppError::Conflict(message) => Ok(refusal(message, json!(null))),
 		error => Err(mcp_err(error)),
 	}

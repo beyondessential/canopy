@@ -29,6 +29,11 @@ pub(crate) fn not_found(message: String) -> CallToolResult {
 	CallToolResult::error(vec![ContentBlock::text(message)])
 }
 
+/// Whether an error is a record that was not there, however it arrived.
+pub(crate) fn is_not_found(error: &commons_errors::AppError) -> bool {
+	error.is_not_found()
+}
+
 /// Map any internal/db error into an MCP protocol error.
 pub(crate) fn mcp_err(e: impl std::fmt::Display) -> McpError {
 	McpError::internal_error(e.to_string(), None)

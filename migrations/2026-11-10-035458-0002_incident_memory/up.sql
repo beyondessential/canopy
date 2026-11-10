@@ -58,3 +58,8 @@ CREATE TABLE memory_entry_revisions (
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	PRIMARY KEY (entry_id, revision)
 );
+
+-- The notes grant lets an access token write notes and incident memory.
+ALTER TABLE mcp_tokens
+	DROP CONSTRAINT mcp_tokens_grants_known,
+	ADD CONSTRAINT mcp_tokens_grants_known CHECK (grants <@ ARRAY['triage', 'notes']);
