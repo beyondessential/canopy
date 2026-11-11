@@ -165,12 +165,12 @@ def row(cells, cls=""):
 
 
 def principals_table(added=False):
-    head = ('<thead><tr><th style="width:260px">Principal</th><th style="width:200px">Authenticates by</th>'
-            '<th>Roles</th><th style="width:190px">Last matched</th><th class="r" style="width:150px">Status</th></tr></thead>')
+    head = ('<thead><tr><th style="width:250px">Principal</th><th style="width:170px">Authenticates by</th>'
+            '<th>Roles</th><th style="width:180px">Last matched</th><th class="r" style="width:190px">Status</th></tr></thead>')
     R = []
     R.append(row([name_cell("tamanu-iti-kiosk-14", "Unknown caller"), "Tailnet node",
-                  '<span class="sec2">none</span>', "3 minutes ago" + cap("refused, 3 requests"),
-                  status("not authorised", "warning")]))
+                  '<span class="sec2">none</span>', '<span class="sec2">never</span>',
+                  status("not authorised", "warning") + cap("3 requests refused, the latest 3 minutes ago")]))
     R.append(row([name_cell("mei.tanaka@example.org", "Operator"), "Tailnet login",
                   roles(role("admin")), "4 minutes ago" + cap("declare maintenance"), ""]))
     R.append(row([name_cell("rahul.verma@example.org", "Operator"), "Tailnet login",
@@ -180,7 +180,7 @@ def principals_table(added=False):
                   roles(role("admin")), "yesterday" + cap("edit role restore-consumer"), ""]))
     R.append(row([name_cell("tomas.wiremu@example.org", "Operator"), "Tailnet login",
                   roles(role("admin", struck=True, locked=True)) + cap("Tailscale policy"),
-                  "3 Nov 2026" + cap("suspended by mei.tanaka"), status("suspended")], "off"))
+                  "2 Nov 2026" + cap("edit role operator"), TOMAS_SUSPENDED], "off"))
     R.append(row([name_cell("aroha.ngata@example.org", "Operator"), "Tailnet login",
                   roles(role("operator"), role("maintenance-planner", "harbour")),
                   "2 days ago" + cap("declare maintenance"), ""]))
@@ -194,7 +194,8 @@ def principals_table(added=False):
     R.append(row([name_cell("status-digest-bot", "MCP agent"), "Bearer token",
                   roles(role("triage")), "2 hours ago" + cap("read incidents"), status("expires in 9d", "warning")]))
     R.append(row([name_cell("vuln-review-2025", "MCP agent"), "Bearer token",
-                  roles(role("triage", struck=True)), "1 Aug 2026" + cap("read vulnerabilities"), status("revoked")], "off"))
+                  roles(role("triage", struck=True)), "1 Aug 2026" + cap("read vulnerabilities"),
+                  status("revoked") + cap("by sofia.alvarez, 2 Aug 2026")], "off"))
     R.append(row([name_cell("release-publisher", "CI workflow"), "GitHub Actions trust",
                   roles(role("releaser", "bestool")), "2 hours ago" + cap("publish version 3.4.1"), ""]))
     R.append(row([name_cell("pgro-restore-operator", "Service"), "Enrolled key",
@@ -476,7 +477,7 @@ def who_can():
          + field("Verb", "Consume", 160, caret=True) + field("Noun", "Restore replicas", 240, caret=True)
          + field("Scope", "Group harbour", 220, caret=True) + '<span class="btn c">Check</span></div></div>')
     head = ('<thead><tr><th style="width:260px">Principal</th><th style="width:240px">Role</th><th>Through</th>'
-            '<th style="width:150px">Scope matched</th><th style="width:170px">Last matched</th></tr></thead>')
+            '<th style="width:150px">Scope matched</th><th style="width:170px">Last matched for this</th></tr></thead>')
     R = [
         row([name_cell("pgro-harbour", "Service"), roles(role("restore-consumer", "own group")),
              "Enrolled key" + cap("tag:restore-consumer"), "harbour", "1 hour ago"]),
