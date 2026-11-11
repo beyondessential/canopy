@@ -284,9 +284,9 @@ def releaser_page():
               '<dt>workflow</dt><dd>.github/workflows/release.yml</dd>'
               '<dt>environment</dt><dd>release</dd></dl>')
     creds = ('<table class="top"><thead><tr><th style="width:190px">Credential</th><th>Must present</th>'
-             '<th style="width:170px">Matched through</th><th style="width:150px">Last used</th><th class="r" style="width:120px"></th></tr></thead><tbody>'
+             '<th style="width:170px">Role</th><th style="width:150px">Last matched</th><th class="r" style="width:120px"></th></tr></thead><tbody>'
              f'<tr><td>GitHub Actions trust</td><td>{claims}</td><td>{role("releaser")}</td><td>2 hours ago</td><td></td></tr>'
-             f'<tr class="off"><td>Enrolled key</td><td class="mono">SHA256:9f2c 41d7 &hellip; e41a</td><td class="sec2">direct</td>'
+             f'<tr class="off"><td>Enrolled key</td><td class="mono">SHA256:9f2c 41d7 &hellip; e41a</td><td class="sec2">none</td>'
              f'<td>41 days ago</td><td class="r">{status("disabled")}</td></tr></tbody></table>')
     held = ('<table><thead><tr><th style="width:260px">Role</th><th>Through</th><th style="width:150px">Since</th>'
             '</tr></thead><tbody>'
@@ -295,8 +295,8 @@ def releaser_page():
             '<div class="row top" style="margin-top:16px">'
             + field("Role", "Choose a role", 240, ph=True, caret=True) + field("Scope", "Software", 200, caret=True)
             + '<span class="btn o">Add role</span></div>')
-    eff = ('<table><thead><tr><th>Permission</th><th style="width:200px">Scope</th><th style="width:200px">Through</th>'
-           '<th style="width:150px">Last used</th></tr></thead><tbody>'
+    eff = ('<table><thead><tr><th>Permission</th><th style="width:200px">Scope</th><th style="width:200px">Role</th>'
+           '<th style="width:150px">Last matched</th></tr></thead><tbody>'
            f'<tr><td>Publish versions</td><td>bestool</td><td>{role("releaser")}</td><td>2 hours ago</td></tr>'
            f'<tr><td>Publish artifacts</td><td>bestool</td><td>{role("releaser")}</td><td>2 hours ago</td></tr>'
            f'<tr><td>Read artifacts</td><td>bestool</td><td>{role("releaser")}</td><td>2 hours ago</td></tr>'
@@ -315,13 +315,13 @@ def triage_page():
     f = facts([("Authenticates by", "Bearer token"), ("Last matched", "8 minutes ago, write note"),
                ("Added", "2 Feb 2026 by sofia.alvarez")])
     creds = ('<table><thead><tr><th style="width:190px">Credential</th><th>Must present</th>'
-             '<th style="width:170px">Matched through</th><th style="width:150px">Last used</th><th class="r" style="width:120px"></th></tr></thead><tbody>'
+             '<th style="width:170px">Role</th><th style="width:150px">Last matched</th><th class="r" style="width:120px"></th></tr></thead><tbody>'
              '<tr><td>Bearer token</td><td><span class="mono">canopy_mcp_7Hq2&hellip;</span>' + cap("expires 2 Feb 2027") + '</td>'
-             '<td class="sec2">direct</td><td>8 minutes ago</td>'
+             f'<td>{roles(role("triage"), role("notes"))}</td><td>8 minutes ago</td>'
              '<td class="r"><span class="btn oe s">Revoke</span></td></tr></tbody></table>')
     held = ('<table><thead><tr><th style="width:260px">Role</th><th>Through</th><th style="width:150px">Since</th></tr></thead><tbody>'
-            f'<tr><td>{role("triage")}</td><td>direct</td><td>2 Feb 2026</td></tr>'
-            f'<tr><td>{role("notes")}</td><td>direct</td><td>2 Feb 2026</td></tr></tbody></table>')
+            f'<tr><td>{role("triage")}</td><td>Direct</td><td>2 Feb 2026</td></tr>'
+            f'<tr><td>{role("notes")}</td><td>Direct</td><td>2 Feb 2026</td></tr></tbody></table>')
     return head + f + section("Credentials", creds) + section("Roles", held)
 
 
@@ -483,8 +483,8 @@ def who_can():
              "Enrolled key" + cap("tag:restore-consumer"), "harbour", "1 hour ago"]),
         row([name_cell("jonas.keller@example.org", "Operator"), roles(role("restore-drill", "harbour")),
              "Direct", "harbour", "never"]),
-        row([name_cell("mei.tanaka@example.org", "Operator"), roles(role("admin")), "Allow-list", "all groups", "never"]),
-        row([name_cell("sofia.alvarez@example.org", "Operator"), roles(role("admin")), "Allow-list", "all groups", "never"]),
+        row([name_cell("mei.tanaka@example.org", "Operator"), roles(role("admin")), "Direct", "all groups", "never"]),
+        row([name_cell("sofia.alvarez@example.org", "Operator"), roles(role("admin")), "Direct", "all groups", "never"]),
         row([name_cell("rahul.verma@example.org", "Operator"), roles(role("admin", locked=True)), "Tailscale policy", "all groups", "never"]),
         row([name_cell("tomas.wiremu@example.org", "Operator") + f'<div style="margin-top:4px">{TOMAS_SUSPENDED}</div>',
              roles(role("admin", struck=True, locked=True)), "Tailscale policy",
