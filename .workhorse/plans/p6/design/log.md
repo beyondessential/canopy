@@ -138,6 +138,7 @@ Round 3 is not clean, so it does not count towards the stop rule.
 | Suspend, not an explicit deny | Allow-only keeps "who can" a lookup with no precedence to show | G's deny rows / Suspend on principal or role | User decision, 2026-11-11 |
 | A Canopy Suspend overrides a tailnet-policy admin | An emergency cut-off must not wait on a policy-file edit | P and R as drawn | User decision, 2026-11-11 |
 | restore-consumer and backup-verifier are trusted by tailnet tag | Restore operators are tailnet nodes with no key of their own; round 2's "Enrolled key throughout" had overreached onto them | Enrolled key tagged `tag:restore-consumer` / Tailnet tag trust | User decision, 2026-11-11 |
+| A fourth scope: one named record of the noun | Tamanu's optional object id; keeps the releaser to publishing one piece of software, and makes a cluster or an application a scope | All groups, own group, a named group or environment / plus a named record | User decision, 2026-11-11 |
 
 ## Differences from the reference
 
