@@ -401,7 +401,7 @@ def roles_table():
         rr("admin", "2 on the allow-list" + cap("2 by Tailscale policy"), "Everything", "4 minutes ago", builtin=True),
         rr("operator", "3 tailnet logins", "Read everything, write notes", "2 days ago", builtin=True),
         rr("releaser", "1 by GitHub Actions trust", "Read and publish versions and artifacts" + cap("bestool"), "2 hours ago"),
-        rr("restore-consumer", "2 by enrolled key" + cap("tag:restore-consumer"), "Read backups, consume restore replicas" + cap("own group"), "6 minutes ago"),
+        rr("restore-consumer", "2 by enrolled key" + cap("tag:restore-consumer"), "Read backups; read, consume and report restore replicas" + cap("own group"), "6 minutes ago"),
         rr("relay", "1 by relay key", "Connect cluster relay" + cap("syd-1"), "1 minute ago"),
         rr("triage", "2 bearer tokens", "Read and triage incidents, read vulnerabilities", "8 minutes ago"),
         rr("notes", "1 bearer token", "Read and write notes", "8 minutes ago"),
