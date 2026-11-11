@@ -8,7 +8,7 @@ A store of short titled entries that carry what was learned from past incidents 
 
 ## What an entry holds
 
-An entry holds a title, a body of free-form text, and optionally one link.
+An entry holds a title, a body of free-form markdown, and optionally one link.
 A link names a group, a check, or an incident, and an entry with no link applies to the fleet as a whole.
 A check is named by its source and its presented name (see [CHK](checks.md), "Names"), so an entry about a check applies wherever that check is filed.
 
@@ -49,7 +49,7 @@ The operator interface offers a page under incidents that lists the entries, new
 The list can be searched by free text matched against titles and bodies, narrowed to one link kind, to one group, check, or incident, or to the entries relevant to an incident, and widened to include retired entries.
 The entries relevant to an incident are those linked to the incident, to its target's group, or to a check among its issues.
 The search and every filter are held in the page's address, so a filtered list can be linked to.
-Each entry opens to its body, its link resolved to the group, check, or incident it names, and its history.
+Each entry opens to its body, rendered as markdown (see [FLT](../servers/overview.md), "Notes"), its link resolved to the group, check, or incident it names, and its history.
 Administrators record, amend, retire, and restore from the same page.
 
 An incident's page shows how many entries are relevant to it, as a link to the memory page filtered to those entries.

@@ -123,6 +123,14 @@ A machine's name is required when a box is created and not when it is edited, so
 
 A group, a machine, and an application each carry free-form notes, for what an operator working on that record needs to know.
 
+Notes are written in markdown, and the operator interface renders them as markdown, both the current notes and every earlier revision in their history.
+A line break in the text is kept as a line break, so notes written as plain lines read as they were typed.
+Inline HTML is limited to a safe subset, and anything that would run script or embed another page is dropped.
+The same rendering applies to incident and issue notes and to incident memory entries (see [INC](../monitoring/incidents.md) and [MEM](../monitoring/incident-memory.md)).
+
+> [!NOTE]
+> Notes were long shown as preformatted text, so keeping single line breaks spares every existing note a rewrite; markdown's own rule, which joins lines into one paragraph, would run those notes together.
+
 Every change to a record's notes is kept in its revision log: the text it replaced, with who made the change, how, and when.
 How is the operator interface, an Ansible import (see [ANSIMP](../private-server/ansible/import.md)), or a fleet query access token through the fleet query interface (see [MCP](../private-server/mcp.md)).
 Notes a record is created with start its log.
