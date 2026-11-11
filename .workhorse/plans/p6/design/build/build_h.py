@@ -260,7 +260,8 @@ def principals_table(added=False):
              roles(role("fleet-machine"), role("sso-grafana")),
              "2 minutes ago" + cap("report status"), cap("also holds sso-grafana")]),
     ]
-    attention = ["tamanu-iti-kiosk-14", "tomas.wiremu", "status-digest-bot", "vuln-review-2025"]
+    # Warnings first (not authorised, expiring), then settled states (suspended, revoked).
+    attention = ["tamanu-iti-kiosk-14", "status-digest-bot", "jonas.keller", "tomas.wiremu", "vuln-review-2025"]
     first = [r for n in attention for r in R if f">{n}" in r]
     R = first + [r for r in R if r not in first]
     if added:
