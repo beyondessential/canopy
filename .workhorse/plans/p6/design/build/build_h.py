@@ -433,7 +433,7 @@ def roles_table():
         rr("backup-verifier", "1 by tailnet tag" + cap("tag:backup-verify"), "Read and report backups", "20 minutes ago" + cap("report backup verification")),
         rr("auditor", '<span class="sec2">none</span>', "Read audit log and roles", '<span class="sec2">never</span>'),
         rr("deploy-automation", "1 direct", "Write Ansible variables and maintenance windows", "11 Oct 2026" + cap("edit Ansible variable"),
-           status("suspended") + cap("12 Oct 2026"), "off"),
+           suspended_by("sofia.alvarez", "12 Oct 2026", "Deploys moved to Ansible runs"), "off"),
     ]
     exc = ('<tr class="sect"><td colspan="5"><span class="row" style="gap:4px">'
            f'<span class="iconbtn" style="padding:0">{svg("more")}</span>Exceptions'
