@@ -362,8 +362,9 @@ SUSPEND = (
     '<div class="backdrop"><div class="dialog"><h2>Suspend incident-triage-bot?</h2><div class="content">'
     '<p class="d-text">It loses these at once:</p>'
     '<ul><li>Read and triage incidents, read vulnerabilities</li><li>Read and write notes</li></ul>'
-    '<div style="margin-top:20px">' + field("Reason", "Posting incident notes in a loop", fw=True) + "</div>"
+    '<div style="margin-top:20px">' + field("Reason (optional)", "Posting incident notes in a loop", fw=True) + "</div>"
     f'<div class="check">{svg("cboff")}Also revoke its bearer token</div>'
+    '<p class="cap" style="margin:0 0 0 28px">Revoke is permanent: the agent needs a new token. Suspend alone can be lifted.</p>'
     '</div><div class="actions"><span class="btn">Cancel</span><span class="btn c" style="background:#d32f2f">Suspend</span></div></div></div>'
 )
 
