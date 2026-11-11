@@ -426,9 +426,9 @@ struct IncidentRefOut {
 #[derive(Serialize)]
 struct IssueDetail {
 	id: Uuid,
-	application_id: Option<Uuid>,
-	server_name: Option<String>,
-	group_id: Option<Uuid>,
+	/// Whose failure this is: the box, the software on it, the group, or
+	/// Canopy itself.
+	scope: IssueScopeOut,
 	source: String,
 	r#ref: String,
 	observed_result: Option<CheckResult>,
@@ -691,14 +691,8 @@ impl CanopyMcp {
 		let inc = Incident::for_issues(&mut conn, &[id])
 			.await
 			.map_err(mcp_err)?;
-		let server_name = match issue.application_id {
-			Some(sid) => Application::names_by_ids(&mut conn, &[sid])
-				.await
-				.map_err(mcp_err)?
-				.get(&sid)
-				.map(|n| n.name.clone()),
-			None => None,
-		};
+		let (applications, machines, groups, clusters) = scope_labels(&mut conn, &[&issue]).await?;
+		let scope = IssueScopeOut::of(&issue, &applications, &machines, &groups, &clusters);
 
 		let incidents = inc
 			.get(&id)
@@ -713,9 +707,7 @@ impl CanopyMcp {
 
 		ok_json(&IssueDetail {
 			id: issue.id,
-			application_id: issue.application_id,
-			server_name,
-			group_id: issue.server_group_id,
+			scope,
 			source: issue.source.clone(),
 			r#ref: issue.r#ref.clone(),
 			observed_result: issue.observed_result,

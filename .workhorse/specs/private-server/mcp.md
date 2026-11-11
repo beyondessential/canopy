@@ -122,7 +122,7 @@ So an issue about a box reads as the machine's and an issue about software as th
 **Find issues** returns issues across the fleet, filtered by active state, by effective result, by group, by machine, by application, and by recency (issues last seen within a look-back window).
 Filtering by application returns the application's own issues, matching what that application presents; its machine's are found by filtering by machine.
 
-**Get issue** takes an issue identifier and returns the issue with the incidents it is or was part of.
+**Get issue** takes an issue identifier and returns the issue, with the scope it is filed at and what that scope names, and the incidents it is or was part of.
 
 **Get check documentation** takes a source and a check's presented name and returns the check's operator-authored markdown documentation (see [CHK](../monitoring/checks.md), "Documentation"), which by convention covers what the check observes, what each result means, and how to solve a failure.
 The presented name is the one every other tool returns (see [CHK](../monitoring/checks.md), "Names"): `<type>:<check>` for an application type's check, with `<type>.<check>` accepted too, and the bare name for a machine's or Canopy's own.
