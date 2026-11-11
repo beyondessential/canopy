@@ -150,17 +150,34 @@ def field(label, value, width=None, ph=False, caret=False, mono=False, fw=False)
     return f'<div class="{cls}"{style}><label>{label}</label><div class="{box}">{value}{c}</div></div>'
 
 
-def fleet_rows(cols, outliers, total, groups, extra_cells):
-    """The fleet held back: a section row, the outliers that surfaced with their
-    reason, then the remainder as one row with Show. Reads the same everywhere."""
-    out = [f'<tr class="sect"><td colspan="{cols}">Fleet machines<span class="cap">{total} in {groups} groups</span></td></tr>']
+FLEET_TOTAL = 412
+FLEET_GROUPS = 14
+HARBOUR_FLEET = 38
+
+
+def show(n):
+    return f'<span class="btn o s">Show {n}</span>'
+
+
+def fleet_row(first, cells, n):
+    """A count of fleet machines held back as one row, ending in Show. Reads the
+    same on every page that holds the fleet back."""
+    mid = "".join(f"<td>{c}</td>" for c in cells)
+    return f'<tr class="fleet"><td>{first}</td>{mid}<td class="r">{show(n)}</td></tr>'
+
+
+def fleet_count(n, where):
+    return f'<a href="#">{n} fleet machines</a>' + cap(f"in {where}")
+
+
+def fleet_rows(cols, outliers, extra_cells):
+    """The fleet held back on the principals list: a section row, the outliers
+    that surfaced with their reason, then the remainder as one fleet row."""
+    out = [f'<tr class="sect"><td colspan="{cols}">Fleet machines'
+           f'<span class="cap">{FLEET_TOTAL} in {FLEET_GROUPS} groups</span></td></tr>']
     out += outliers
-    rest = total - len(outliers)
-    cells = "".join(f"<td>{c}</td>" for c in extra_cells)
-    out.append(
-        f'<tr class="fleet"><td><a href="#">{rest} more</a></td>{cells}'
-        f'<td class="r"><span class="btn o s">Show {rest}</span></td></tr>'
-    )
+    rest = FLEET_TOTAL - len(outliers)
+    out.append(fleet_row(fleet_count(rest, f"{FLEET_GROUPS} groups"), extra_cells, rest))
     return "".join(out)
 
 
@@ -249,7 +266,7 @@ def principals_table(added=False):
     if added:
         R.insert(len(first), row([name_cell("grafana-sidecar", "MCP agent"), "Bearer token",
                                   roles(role("triage")), '<span class="sec2">never</span>', status("new", "o")]))
-    fleet = fleet_rows(5, outliers, 412, 14, ["Enrolled key", roles(role("fleet-machine")), "1 minute ago"])
+    fleet = fleet_rows(5, outliers, ["Enrolled key", roles(role("fleet-machine")), "1 minute ago" + cap("report status")])
     return f"<table>{head}<tbody>{''.join(R)}{fleet}</tbody></table>"
 
 
@@ -383,10 +400,10 @@ def roles_table():
     exc = ('<tr class="sect"><td colspan="5"><span class="row" style="gap:4px">'
            f'<span class="iconbtn" style="padding:0">{svg("more")}</span>Exceptions'
            '<span class="cap">2 one-member roles, the next ends 25 Nov 2026</span></span></td></tr>')
-    fleet = ('<tr class="sect"><td colspan="5">Fleet machines<span class="cap">412 in 14 groups</span></td></tr>'
-             + row([f'<div class="row" style="gap:6px"><a class="mono" href="#">fleet-machine</a>{BI}</div>',
-                    "412 by enrolled key", "Report status and vulnerabilities, read Ansible variables" + cap("own group"),
-                    "1 minute ago", '<span class="btn o s">Show 412</span>'], "fleet"))
+    fleet = fleet_row(f'<div class="row" style="gap:6px"><a class="mono" href="#">fleet-machine</a>{BI}</div>',
+                      [f"{FLEET_TOTAL} by enrolled key" + cap(f"in {FLEET_GROUPS} groups"),
+                       "Report status and vulnerabilities, read Ansible variables" + cap("own group"),
+                       "1 minute ago" + cap("report status")], FLEET_TOTAL)
     return f"<table>{head}<tbody>{''.join(R)}{exc}{fleet}</tbody></table>"
 
 
@@ -505,9 +522,9 @@ def who_can():
              roles(role("admin", struck=True, locked=True)), "Tailscale policy",
              '<span class="sec2">none</span>', '<span class="sec2">never</span>'], "off"),
     ]
-    fleet = ('<tr class="sect"><td colspan="5">Fleet machines<span class="cap">412 in 14 groups</span></td></tr>'
-             + row(['<span class="sec2">none of 412</span>', roles(role("fleet-machine")),
-                    "Enrolled key", '<span class="sec2">none</span>', ""], "fleet"))
+    fleet = fleet_row(fleet_count(HARBOUR_FLEET, "harbour"),
+                      [roles(role("fleet-machine")), "Enrolled key",
+                       '<span class="sec2">none</span>' + cap("fleet-machine does not hold Consume")], HARBOUR_FLEET)
     answer = f"<table>{head}<tbody>{''.join(R)}{fleet}</tbody></table>"
     return (q + "<div>" + header("5 principals can consume restore replicas in harbour")
             + answer + "</div>")
