@@ -269,7 +269,7 @@ def principals_table(added=False):
     R = first + [r for r in R if r not in first]
     if added:
         R.insert(len(first), row([name_cell("grafana-sidecar", "MCP agent"), "Bearer token",
-                                  roles(role("triage")), '<span class="sec2">never</span>', status("new", "o")]))
+                                  roles(role("triage")), '<span class="sec2">never</span>', ""]))
     fleet = fleet_rows(5, outliers, ["Enrolled key", roles(role("fleet-machine")), "1 minute ago" + cap("report status")])
     return f"<table>{head}<tbody>{''.join(R)}{fleet}</tbody></table>"
 
@@ -583,10 +583,10 @@ page("h-who-can.html", "Who can consume restore replicas in group harbour", "Pri
 # ---- h-token-minted ------------------------------------------------------------
 
 MINTED = (
-    '<div class="backdrop"><div class="dialog"><h2>grafana-sidecar added</h2><div class="content">'
+    '<div class="backdrop"><div class="dialog"><h2><span class="mono">grafana-sidecar</span> added</h2><div class="content">'
     '<p class="d-text">Copy the token now. It is shown once and cannot be retrieved.</p>'
     '<div class="secret"><div class="box">canopy_mcp_q8Vn2LxT0cRk4Yw7Hs1Pz9MbE3uJa6Df</div>'
-    f'<span class="iconbtn big">{svg("copy")}</span></div>'
+    f'<span class="btn o" role="button" aria-label="Copy token">{svg("copy")}Copy</span></div>'
     '<div class="facts" style="margin-top:20px">'
     f'<div><span class="cap">Roles</span><span class="body2">{role("triage")}</span></div>'
     '<div><span class="cap">Expires</span><span class="body2">11 Nov 2027</span></div></div>'
