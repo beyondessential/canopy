@@ -30,7 +30,8 @@ tr.sect td .cap{text-transform:none;letter-spacing:.03333em;font-weight:400;marg
 tr.fleet td{background:rgba(0,0,0,.02)}
 .chip.role{font-family:monospace;font-size:.75rem}
 .chip.role .sc{font-family:"Roboto","Helvetica","Arial",sans-serif;color:rgba(0,0,0,.6);margin-left:6px}
-.chip.role.x .sc{text-decoration:line-through}
+.chip.role.x{background:rgba(0,0,0,.04);color:rgba(0,0,0,.38)}
+.chip.role.x .nm,.chip.role.x .sc{text-decoration:line-through;color:inherit}
 .chip.bi{height:20px;font-size:.6875rem;padding:0 6px;background:transparent;border:1px solid rgba(0,0,0,.23);color:rgba(0,0,0,.6)}
 .matrix th,.matrix td{padding:0 8px;height:32px}
 .matrix th{height:40px}
@@ -98,7 +99,7 @@ def role(name, scope="", struck=False, locked=False):
     cls = "chip role" + (" x" if struck else "")
     icon = svg("lock") if locked else ""
     sc = f'<span class="sc">{scope}</span>' if scope else ""
-    return f'<span class="{cls}">{icon}{name}{sc}</span>'
+    return f'<span class="{cls}">{icon}<span class="nm">{name}</span>{sc}</span>'
 
 
 def roles(*chips):
