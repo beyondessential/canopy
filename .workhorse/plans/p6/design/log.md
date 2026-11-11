@@ -4,7 +4,7 @@ Rigour: Standard. Round cap 6. Stop rule: two clean rounds, the second by fresh 
 
 ## Where the run is
 
-Step 2, direction. Round 1 closed with a direction chosen (see the taste ledger). Round 2 built and fixed the hybrid; round 3 judges it with fresh eyes. The card has no specs, no plan and no commits, so there is no build to polish. Step 3 waits on an implementation.
+Step 2, direction. Round 1 closed with a direction chosen (see the taste ledger). Round 2 built and fixed the hybrid. Round 3's fresh-eyes critique found it not clean, and its fixes are round 4's to judge. The card has no specs, no plan and no commits, so there is no build to polish. Step 3 waits on an implementation.
 
 ## Step 0 — does the card need design
 
@@ -98,9 +98,26 @@ Twelve fixed in one pass. The Restore consumers sidebar entry was skipped: it is
 
 Round 2 is not clean, so it does not count towards the stop rule.
 
+## Round 3 — fresh eyes
+
+Five critics, none of which had seen the conversation, ran in parallel: four took one or two screens each with the renders in `shots/r3/`, and one took all seven as text to check that the screens describe one world. They started, where round 1's could not, because each was handed text extracts of the mockups rather than the CSS-heavy HTML.
+
+They found 6 criticals, 16 suggestions and 6 nits, filed on the card with the trust decision below as 28 issues, plus one reopened from round 2:
+
+- Suspended state does not show: the strike applies only to a chip's scope, so `admin` and `deploy-automation` look live. And suspending `deploy-automation` cuts nothing, since its only member holds `admin` directly.
+- About twenty role members appear on no principal screen, while the fleet row claims the rest hold only `fleet-machine`.
+- Role summaries use verbs, nouns and scopes the matrix cannot express (triage, identity tokens, status; software, cluster, application).
+- A role held through a trust offers removal on the principal page, and who-can gives no reason for a suspension.
+- The rest is drift: Last matched holding refusals and suspensions, column names, the fleet row reading three ways, sort order, members counting, the token form, date formats.
+
+The critics' view on the open questions: nothing drawn needs two scopes on one noun, since a second role covers it as `operator` and `maintenance-planner` already do; and no one objected to a suspended policy admin reading Suspended first.
+
+Round 3 is not clean, so it does not count towards the stop rule.
+
 ## Next
 
-- Round 3: a fresh-eyes critique of the fixed `h-*` set, by an agent that has not seen this conversation. If subagents still fail to start, the user runs it from a new session.
+- Fix round 3's issues in `build/build_h.py`, re-render into `shots/r4/`, and bring `direction-h.md` up to date.
+- Round 4: fresh eyes again, run the same way.
 - Then the open questions below, what to build first, and specs.
 
 ## Open questions
@@ -120,6 +137,7 @@ Round 2 is not clean, so it does not count towards the stop rule.
 | Take P and R forward as a hybrid: principals list as home, roles as the permission unit, borrowing G's last-matched column and checker | P is strongest at "what can this principal do" and at replacing the five Access pages; R keeps permissions auditable as a few named shapes; G's table drifts towards precedence puzzles ("overrides g16") | `p-*`, `r-*`, `g-*` / round 2 | User decision, 2026-11-11 |
 | Suspend, not an explicit deny | Allow-only keeps "who can" a lookup with no precedence to show | G's deny rows / Suspend on principal or role | User decision, 2026-11-11 |
 | A Canopy Suspend overrides a tailnet-policy admin | An emergency cut-off must not wait on a policy-file edit | P and R as drawn | User decision, 2026-11-11 |
+| restore-consumer and backup-verifier are trusted by tailnet tag | Restore operators are tailnet nodes with no key of their own; round 2's "Enrolled key throughout" had overreached onto them | Enrolled key tagged `tag:restore-consumer` / Tailnet tag trust | User decision, 2026-11-11 |
 
 ## Differences from the reference
 
