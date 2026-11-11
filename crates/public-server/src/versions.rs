@@ -9,7 +9,7 @@ use axum::{
 	body::{Body, Bytes},
 	extract::{Path, State},
 	http::{StatusCode, header},
-	response::IntoResponse,
+	response::{IntoResponse, Redirect},
 	routing::{Router, get},
 };
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
@@ -64,6 +64,18 @@ async fn latest_matching_ready(
 	conn: &mut AsyncPgConnection,
 	range: node_semver::Range,
 ) -> Result<Version> {
+	ready_matching(conn, range)
+		.await?
+		.into_iter()
+		.next()
+		.ok_or(AppError::NoMatchingVersions)
+}
+
+/// Every *ready* version that satisfies `range`, newest first.
+async fn ready_matching(
+	conn: &mut AsyncPgConnection,
+	range: node_semver::Range,
+) -> Result<Vec<Version>> {
 	use database::schema::versions::*;
 
 	let floor = range.min_version().ok_or(AppError::UnusableRange)?;
@@ -82,11 +94,11 @@ async fn latest_matching_ready(
 	let ids: Vec<_> = candidates.iter().map(|v| v.id).collect();
 	let affected = VersionKnownIssue::affected_versions(conn, &ids).await?;
 
-	candidates
+	Ok(candidates
 		.into_iter()
 		.filter(|v| !affected.contains(&v.id))
-		.find(|v| range.satisfies(&v.as_semver()))
-		.ok_or(AppError::NoMatchingVersions)
+		.filter(|v| range.satisfies(&v.as_semver()))
+		.collect())
 }
 
 /// The version a read names.
@@ -122,10 +134,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
 pub fn pages() -> Router<AppState> {
 	// Streaming download proxy doesn't have a JSON wire shape; mount as a
 	// plain route so it stays out of the OpenAPI spec.
-	let pages: Router<AppState> = Router::new().route(
-		"/{version}/artifacts/{artifact_id}/download",
-		get(download_artifact),
-	);
+	let pages: Router<AppState> = Router::new()
+		.route(
+			"/{version}/artifacts/{artifact_id}/download",
+			get(download_artifact),
+		)
+		.route("/{version}/mobile/package", get(mobile_package));
 
 	#[cfg(feature = "ui")]
 	let pages = pages
@@ -615,6 +629,46 @@ async fn view_mobile_install(
 	context.insert("version", &version);
 	context.insert("artifacts", &artifacts);
 	Ok(Html(tera.render("mobile", &context)?))
+}
+
+/// Redirect to the Android package of an exact version, or of the newest
+/// version in a range.
+///
+/// This is the address central hands an out-of-date Tamanu mobile app to
+/// update itself from, so it is answered for GET and HEAD alike (axum answers
+/// HEAD from the GET handler) and points at the file's own host, which serves
+/// the length, byte ranges, and HTTPS the app's download relies on. A version
+/// or range with no package is a 404 rather than another version's package:
+/// the app installs what it is given.
+async fn mobile_package(
+	Path(version): Path<String>,
+	State(db): State<Db>,
+	headers: axum::http::HeaderMap,
+) -> Result<Redirect> {
+	let mut db = db.get().await?;
+
+	// An exact version is the release central requires its devices to run, so
+	// it is answered for itself, known issue or not: they cannot sync until
+	// they run it. A range resolves among ready versions, and since a version
+	// is published before its package is registered, the newest one carrying a
+	// package is the one to offer, not the newest version.
+	let candidates = if node_semver::Version::parse(&version).is_ok() {
+		vec![version_named(&mut db, &version).await?]
+	} else {
+		ready_matching(&mut db, VersionRange::from_str(&version)?.0).await?
+	};
+
+	for version in candidates {
+		let package = offered_artifacts(&mut db, &version, Scope::Unscoped, &headers)
+			.await?
+			.into_iter()
+			.find(|a| a.artifact_type == "mobile" && a.platform == "android");
+		if let Some(package) = package {
+			return Ok(Redirect::temporary(&package.download_url));
+		}
+	}
+
+	Err(AppError::ArtifactNotFound)
 }
 
 /// Check for available updates from a given version.
