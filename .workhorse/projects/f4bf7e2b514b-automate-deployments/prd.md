@@ -58,7 +58,7 @@ It stays up afterwards as a Seedling test site (section 3).
 
 Rollout follows recoverability, not prerequisite count.
 
-2.New 
+1. New deployments!
 3. AWS-hosted production
 4. On-prem production
 5. The Tamanu Iti `.local` class last: hardest networks and hardest rollbacks
