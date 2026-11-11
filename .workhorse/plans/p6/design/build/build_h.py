@@ -288,9 +288,9 @@ def releaser_page():
              f'<tr class="off"><td>Enrolled key</td><td class="mono">SHA256:9f2c 41d7 &hellip; e41a</td><td class="sec2">direct</td>'
              f'<td>41 days ago</td><td class="r">{status("disabled")}</td></tr></tbody></table>')
     held = ('<table><thead><tr><th style="width:260px">Role</th><th>Through</th><th style="width:150px">Since</th>'
-            '<th class="r" style="width:60px"></th></tr></thead><tbody>'
-            f'<tr><td>{role("releaser", "bestool")}</td><td>GitHub Actions trust on the role</td><td>12 Mar 2026</td>'
-            f'<td class="r"><span class="iconbtn">{svg("del")}</span></td></tr></tbody></table>'
+            '</tr></thead><tbody>'
+            f'<tr><td>{role("releaser", "bestool")}</td><td><a href="#">GitHub Actions trust on releaser</a></td><td>12 Mar 2026</td>'
+            '</tr></tbody></table>'
             '<div class="row top" style="margin-top:16px">'
             + field("Role", "Choose a role", 240, ph=True, caret=True) + field("Scope", "Software", 200, caret=True)
             + '<span class="btn o">Add role</span></div>')
