@@ -111,6 +111,7 @@ async fn second_restore_and_switchover() {
 	let second_restore = PostgresPhysicalRestore::new(
 		second_restore_name,
 		PostgresPhysicalRestoreSpec {
+			rank: None,
 			migrate_to: None,
 			builder_image: None,
 			replica: LocalObjectReference {

@@ -320,6 +320,7 @@ mod tests {
 				pre_migrate_sql: None,
 				migrate_to: None,
 				builder_image: None,
+				rank: None,
 				canopy_source: CanopySource {
 					group: "00000000-0000-0000-0000-000000000000".into(),
 					r#type: "tamanu-postgres".into(),
