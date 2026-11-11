@@ -195,7 +195,7 @@ def principals_table(added=False):
     R.append(row([name_cell("relay-syd-1", "Service"), "Relay key",
                   roles(role("relay", "syd-1")), "1 minute ago" + cap("connect cluster relay"), ""]))
     R.append(row([name_cell("ci-deploy-runner", "Automation"), "Enrolled key",
-                  roles(role("admin"), role("deploy-automation", struck=True)), "5 days ago" + cap("edit Ansible variable"), ""]))
+                  roles(role("deploy-automation", struck=True)), "11 Oct 2026" + cap("edit Ansible variable"), ""]))
     outliers = [
         row([name_cell("tamanu-prod-db-3", "tamanu-prod"), "Enrolled key",
              roles(role("fleet-machine", "own group")), "2 minutes ago" + cap("report status"),
@@ -326,7 +326,7 @@ def roles_table():
         n = f'<div class="row" style="gap:6px"><a class="mono" href="#">{name}</a>{BI if builtin else ""}</div>'
         return row([n, members, perms, last, st], cls)
     R = [
-        rr("admin", "2 on the allow-list" + cap("2 by Tailscale policy, 1 automation"), "Everything", "4 minutes ago", builtin=True),
+        rr("admin", "2 on the allow-list" + cap("2 by Tailscale policy"), "Everything", "4 minutes ago", builtin=True),
         rr("operator", "3 tailnet logins", "Read everything; write maintenance and notes", "2 days ago", builtin=True),
         rr("releaser", "1 by GitHub Actions trust", "Read and publish versions and artifacts" + cap("one piece of software"), "2 hours ago"),
         rr("restore-consumer", "2 by enrolled key" + cap("tag:restore-consumer"), "Read backups, consume restore replicas" + cap("own group"), "6 minutes ago"),
@@ -339,8 +339,8 @@ def roles_table():
         rr("backup-verifier", "1 by enrolled key" + cap("tag:backup-verify"), "Read backups, report verification" + cap("all groups"), "20 minutes ago"),
         rr("vuln-reporter", "3 machines", "Report vulnerabilities" + cap("own group"), "1 hour ago"),
         rr("auditor", '<span class="sec2">none</span>', "Read audit log and roles", "never"),
-        rr("deploy-automation", "1 automation", "Write Ansible variables and maintenance", "12 Oct 2026",
-           status("suspended"), "off"),
+        rr("deploy-automation", "1 automation", "Write Ansible variables and maintenance", "11 Oct 2026",
+           status("suspended") + cap("12 Oct 2026"), "off"),
     ]
     exc = ('<tr class="sect"><td colspan="5"><span class="row" style="gap:4px">'
            f'<span class="iconbtn" style="padding:0">{svg("more")}</span>Exceptions'
@@ -459,7 +459,6 @@ def who_can():
         row([name_cell("mei.tanaka@example.org", "Operator"), roles(role("admin")), "Allow-list", "all groups", "never"]),
         row([name_cell("sofia.alvarez@example.org", "Operator"), roles(role("admin")), "Allow-list", "all groups", "never"]),
         row([name_cell("rahul.verma@example.org", "Operator"), roles(role("admin", locked=True)), "Tailscale policy", "all groups", "never"]),
-        row([name_cell("ci-deploy-runner", "Automation"), roles(role("admin")), "Direct", "all groups", "never"]),
         row([name_cell("tomas.wiremu@example.org", "Operator"), roles(role("admin", struck=True, locked=True)), "Tailscale policy",
              '<span class="sec2">none</span>', status("suspended") + cap("by mei.tanaka, 3 Nov")], "off"),
     ]
@@ -467,7 +466,7 @@ def who_can():
              + row(['<span class="sec2">none of 412</span>', roles(role("fleet-machine", "own group")),
                     "Enrolled key", '<span class="sec2">none</span>', ""], "fleet"))
     answer = f"<table>{head}<tbody>{''.join(R)}{fleet}</tbody></table>"
-    return (q + "<div>" + header("5 principals can consume restore replicas in harbour")
+    return (q + "<div>" + header("4 principals can consume restore replicas in harbour")
             + answer + "</div>")
 
 
