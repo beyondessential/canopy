@@ -823,11 +823,11 @@ async fn settle_empty(
 	Ok(false)
 }
 
+/// Why a build that names no environment settles as failed.
+const NO_RANK: &str = "the restore names no environment, and a schema is registered against one";
+
 /// What a build recorded when the replica names no group it could be built or
 /// registered for.
-/// Why a build that names no environment settles as failed.
-const NO_RANK: &str = "the replica names no environment, and a schema is registered against one";
-
 const NO_GROUP: &str = "the replica names no group to register the schema for";
 
 /// What a build records when the restore never reached the version the schema
