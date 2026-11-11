@@ -398,19 +398,19 @@ def roles_table():
         n = f'<div class="row" style="gap:6px"><a class="mono" href="#">{name}</a>{BI if builtin else ""}</div>'
         return row([n, members, perms, last, st], cls)
     R = [
-        rr("admin", "2 on the allow-list" + cap("2 by Tailscale policy"), "Everything", "4 minutes ago", builtin=True),
-        rr("operator", "3 tailnet logins", "Read everything, write notes", "2 days ago", builtin=True),
+        rr("admin", "2 direct, 2 by Tailscale policy" + cap("including 1 suspended"), "Everything", "4 minutes ago", builtin=True),
+        rr("operator", "3 direct", "Read everything, write notes", "2 days ago", builtin=True),
         rr("releaser", "1 by GitHub Actions trust", "Read and publish versions and artifacts" + cap("bestool"), "2 hours ago"),
         rr("restore-consumer", "2 by enrolled key" + cap("tag:restore-consumer"), "Read backups; read, consume and report restore replicas" + cap("own group"), "6 minutes ago"),
-        rr("relay", "1 by relay key", "Connect cluster relay" + cap("syd-1"), "1 minute ago"),
-        rr("triage", "2 bearer tokens", "Read and triage incidents, read vulnerabilities", "8 minutes ago"),
-        rr("notes", "1 bearer token", "Read and write notes", "8 minutes ago"),
-        rr("dns-and-tls", "2 machines", "Manage DNS names and TLS certificates" + cap("own group"), "3 hours ago"),
-        rr("sso-grafana", "2 machines", "Request identity tokens" + cap("grafana-sso"), "14 minutes ago"),
-        rr("maintenance-planner", "1 tailnet login", "Write maintenance windows" + cap("harbour"), "2 days ago"),
+        rr("relay", "1 direct", "Connect cluster relay" + cap("syd-1"), "1 minute ago"),
+        rr("triage", "3 direct" + cap("including 1 revoked"), "Read and triage incidents, read vulnerabilities", "8 minutes ago"),
+        rr("notes", "1 direct", "Read and write notes", "8 minutes ago"),
+        rr("dns-and-tls", "2 direct", "Manage DNS names and TLS certificates" + cap("own group"), "3 hours ago"),
+        rr("sso-grafana", "2 direct", "Request identity tokens" + cap("grafana-sso"), "14 minutes ago"),
+        rr("maintenance-planner", "1 direct", "Write maintenance windows" + cap("harbour"), "2 days ago"),
         rr("backup-verifier", "1 by enrolled key" + cap("tag:backup-verify"), "Read and report backups", "20 minutes ago"),
         rr("auditor", '<span class="sec2">none</span>', "Read audit log and roles", "never"),
-        rr("deploy-automation", "1 automation", "Write Ansible variables and maintenance windows", "11 Oct 2026",
+        rr("deploy-automation", "1 direct", "Write Ansible variables and maintenance windows", "11 Oct 2026",
            status("suspended") + cap("12 Oct 2026"), "off"),
     ]
     exc = ('<tr class="sect"><td colspan="5"><span class="row" style="gap:4px">'
@@ -499,7 +499,7 @@ def role_page():
     head = (f'<div><span class="crumb">{svg("back")}Roles</span>'
             '<div class="hdr" style="margin-top:8px"><div class="title"><h1 class="h4">restore-consumer</h1></div>'
             f'<span class="grow"></span>{WHO}<span class="btn oe">Suspend role</span></div></div>')
-    f = facts([("Members", "2, by trust"), ("Last matched", "6 minutes ago, consume replica"),
+    f = facts([("Members", "2 by enrolled key"), ("Last matched", "6 minutes ago, consume replica"),
                ("Changed", "10 Nov 2026 by sofia.alvarez")])
     trusts = ('<table><thead><tr><th style="width:190px">Trust</th><th>Must present</th><th style="width:120px">Matches</th>'
               '<th style="width:150px">Last matched</th><th class="r" style="width:60px"></th></tr></thead><tbody>'
