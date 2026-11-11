@@ -36,6 +36,7 @@ import ServerShorty from "../components/ServerShorty";
 import GroupTree from "../components/GroupTree";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import TargetName from "../components/TargetName";
+import { NoteText } from "../components/Markdown";
 import TimeAgo from "../components/TimeAgo";
 import TimezoneTooltip from "../components/TimezoneTooltip";
 import { useIsAdmin } from "../hooks/useIsAdmin";
@@ -332,9 +333,7 @@ export default function MachineDetail() {
 				Object.keys(data.machine.tags ?? {}).length > 0) && (
 				<Paper variant="outlined" sx={{ p: 2 }}>
 					{data.machine.notes && (
-						<Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-							{data.machine.notes}
-						</Typography>
+						<NoteText>{data.machine.notes}</NoteText>
 					)}
 					<NotesHistory
 						record={{ module: "fleet/machines", id: data.machine.id }}

@@ -20,6 +20,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import { GradedAction } from "./GradedAction";
+import { NoteText } from "./Markdown";
 import TimeAgo from "./TimeAgo";
 
 /** Shared note shape; both IssueNoteData and IncidentNoteData fit this. */
@@ -271,13 +272,9 @@ function NoteRow({
 					)}
 				</Stack>
 			</Stack>
-			<Typography
-				variant="body2"
-				component="pre"
-				sx={{ mt: 0.5, mb: 0, whiteSpace: "pre-wrap", fontFamily: "inherit" }}
-			>
-				{note.body}
-			</Typography>
+			<Box sx={{ mt: 0.5 }}>
+				<NoteText>{note.body}</NoteText>
+			</Box>
 			{note.deleted_at && (
 				<Typography variant="caption" color="text.secondary">
 					Deleted by {note.deleted_by} <TimeAgo timestamp={note.deleted_at} />

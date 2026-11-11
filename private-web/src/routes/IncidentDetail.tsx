@@ -31,6 +31,7 @@ import { GradedAction } from "../components/GradedAction";
 import { AddNoteButton } from "../components/NotesList";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
+import { NoteText } from "../components/Markdown";
 import TimeAgo from "../components/TimeAgo";
 import ResolverAvatar from "../components/ResolverAvatar";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -639,13 +640,9 @@ function NoteEntry({
 					)}
 				</Stack>
 			</Stack>
-			<Typography
-				variant="body2"
-				component="pre"
-				sx={{ mt: 0.5, mb: 0, whiteSpace: "pre-wrap", fontFamily: "inherit" }}
-			>
-				{note.body}
-			</Typography>
+			<Box sx={{ mt: 0.5 }}>
+				<NoteText>{note.body}</NoteText>
+			</Box>
 			{note.deleted_at && (
 				<Typography variant="caption" color="text.secondary">
 					Deleted by {note.deleted_by} <TimeAgo timestamp={note.deleted_at} />

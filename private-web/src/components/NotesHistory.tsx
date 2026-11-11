@@ -1,6 +1,7 @@
 import { Box, Button, Collapse, Stack, Typography } from "@mui/material";
 import { useState } from "react";
 import { useApi } from "../api";
+import { NoteText } from "./Markdown";
 import TimeAgo from "./TimeAgo";
 
 const HOW: Record<string, string> = {
@@ -66,9 +67,7 @@ export default function NotesHistory({
 									Cleared
 								</Typography>
 							) : (
-								<Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-									{revision.notes}
-								</Typography>
+								<NoteText>{revision.notes}</NoteText>
 							)}
 						</Box>
 					))}

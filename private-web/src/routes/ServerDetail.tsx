@@ -32,6 +32,7 @@ import MaintenanceHeaderButton from "../components/MaintenanceHeaderButton";
 import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import GroupTree from "../components/GroupTree";
+import { NoteText } from "../components/Markdown";
 import TimeAgo from "../components/TimeAgo";
 import TimezoneTooltip from "../components/TimezoneTooltip";
 import VersionIndicator from "../components/VersionIndicator";
@@ -751,12 +752,9 @@ function GroupSection({
 				</MuiLink>
 			</Stack>
 			{group.notes && (
-				<Typography
-					variant="body2"
-					sx={{ whiteSpace: "pre-wrap", color: "text.secondary", mb: 1 }}
-				>
-					{group.notes}
-				</Typography>
+				<Box sx={{ mb: 1 }}>
+					<NoteText color="text.secondary">{group.notes}</NoteText>
+				</Box>
 			)}
 			{tagEntries.length > 0 && (
 				<Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
@@ -806,9 +804,9 @@ function NotesAndTagsSection({
 				Notes & tags
 			</Typography>
 			{notes && (
-				<Typography variant="body2" sx={{ whiteSpace: "pre-wrap", mb: 1 }}>
-					{notes}
-				</Typography>
+				<Box sx={{ mb: 1 }}>
+					<NoteText>{notes}</NoteText>
+				</Box>
 			)}
 			<NotesHistory record={{ module: "fleet/applications", id: serverId }} />
 			{tagEntries.length > 0 && (
