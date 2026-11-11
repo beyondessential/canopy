@@ -114,6 +114,14 @@ def cap(text):
     return f'<span class="cap cell-cap">{text}</span>' if text else ""
 
 
+def suspended_by(actor, date, reason):
+    """The Suspended state with who suspended, when and why. Reads the same everywhere."""
+    return status("suspended") + cap(f"by {actor}, {date}") + cap(reason)
+
+
+TOMAS_SUSPENDED = suspended_by("mei.tanaka", "3 Nov 2026", "Laptop reported stolen")
+
+
 def name_cell(name, sub="", href=True):
     n = f'<a class="mono" href="#">{name}</a>' if href else f'<span class="mono">{name}</span>'
     return n + cap(sub)
@@ -459,8 +467,9 @@ def who_can():
         row([name_cell("mei.tanaka@example.org", "Operator"), roles(role("admin")), "Allow-list", "all groups", "never"]),
         row([name_cell("sofia.alvarez@example.org", "Operator"), roles(role("admin")), "Allow-list", "all groups", "never"]),
         row([name_cell("rahul.verma@example.org", "Operator"), roles(role("admin", locked=True)), "Tailscale policy", "all groups", "never"]),
-        row([name_cell("tomas.wiremu@example.org", "Operator"), roles(role("admin", struck=True, locked=True)), "Tailscale policy",
-             '<span class="sec2">none</span>', status("suspended") + cap("by mei.tanaka, 3 Nov")], "off"),
+        row([name_cell("tomas.wiremu@example.org", "Operator") + f'<div style="margin-top:4px">{TOMAS_SUSPENDED}</div>',
+             roles(role("admin", struck=True, locked=True)), "Tailscale policy",
+             '<span class="sec2">none</span>', '<span class="sec2">never</span>'], "off"),
     ]
     fleet = ('<tr class="sect"><td colspan="5">Fleet machines<span class="cap">412 in 14 groups</span></td></tr>'
              + row(['<span class="sec2">none of 412</span>', roles(role("fleet-machine", "own group")),
