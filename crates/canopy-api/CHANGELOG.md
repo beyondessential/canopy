@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v2.0.1...bes-canopy-api-v3.0.0) - 2026-11-10
+
+### Added
+
+- *(public-server)* remove the public GET /applications listing (H6)
+
 ## [2.0.1](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v2.0.0...bes-canopy-api-v2.0.1) - 2026-11-10
 
 ### Fixed
