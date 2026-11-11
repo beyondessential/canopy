@@ -500,7 +500,7 @@ def role_page():
             '<div class="hdr" style="margin-top:8px"><div class="title"><h1 class="h4">restore-consumer</h1></div>'
             f'<span class="grow"></span>{WHO}<span class="btn oe">Suspend role</span></div></div>')
     f = facts([("Members", "2, by trust"), ("Last matched", "6 minutes ago, consume replica"),
-               ("Changed", "2 Oct 2026 by sofia.alvarez")])
+               ("Changed", "10 Nov 2026 by sofia.alvarez")])
     trusts = ('<table><thead><tr><th style="width:190px">Trust</th><th>Must present</th><th style="width:120px">Matches</th>'
               '<th style="width:150px">Last matched</th><th class="r" style="width:60px"></th></tr></thead><tbody>'
               f'<tr><td>Enrolled key</td><td>tagged <span class="mono">tag:restore-consumer</span></td><td>2</td><td>6 minutes ago</td>'
