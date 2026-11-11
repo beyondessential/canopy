@@ -455,6 +455,7 @@ NOUNS = [
     ("Status", ("Read Report", "group, environment, machine", "", "")),
     ("Maintenance windows", ("Read Write", "group, environment", "", "")),
     ("Ansible variables", ("Read Write", "group", "", "")),
+    ("Cluster relay", ("Connect", "cluster", "", "")),
     ("Names and certificates", None),
     ("DNS names", ("Read Manage", "group, environment, application", "", "")),
     ("TLS certificates", ("Read Manage", "group, environment, application", "", "")),
@@ -473,7 +474,6 @@ NOUNS = [
     ("Principals", ("Read Manage", None, "", "")),
     ("Audit log", ("Read", None, "", "")),
     ("Identity tokens", ("Request", "relying party", "", "")),
-    ("Cluster relay", ("Connect", "cluster", "", "")),
 ]
 
 
