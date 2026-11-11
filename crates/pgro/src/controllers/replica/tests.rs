@@ -152,6 +152,7 @@ fn make_replica(
 			pre_migrate_sql: None,
 			migrate_to: None,
 			builder_image: None,
+			rank: None,
 			canopy_source: CanopySource {
 				group: "00000000-0000-0000-0000-000000000000".into(),
 				r#type: "tamanu-postgres".into(),
@@ -429,6 +430,7 @@ fn snapshot_list_test_replica() -> PostgresPhysicalReplica {
 			pre_migrate_sql: None,
 			migrate_to: None,
 			builder_image: None,
+			rank: None,
 			canopy_source: CanopySource {
 				group: "00000000-0000-0000-0000-000000000000".into(),
 				r#type: "tamanu-postgres".into(),
@@ -507,6 +509,7 @@ fn make_restore(snapshot: &str, phase: Option<RestorePhase>) -> PostgresPhysical
 		spec: PostgresPhysicalRestoreSpec {
 			migrate_to: None,
 			builder_image: None,
+			rank: None,
 			replica: k8s_openapi::api::core::v1::LocalObjectReference {
 				name: "test".into(),
 			},

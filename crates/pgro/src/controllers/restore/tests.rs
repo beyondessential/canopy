@@ -34,6 +34,7 @@ fn deployment_uses_affinity_not_node_selector() {
 			pre_migrate_sql: None,
 			migrate_to: None,
 			builder_image: None,
+			rank: None,
 			canopy_source: CanopySource {
 				group: "11111111-1111-1111-1111-111111111111".to_string(),
 				r#type: "tamanu-postgres".to_string(),
@@ -87,6 +88,7 @@ fn deployment_uses_affinity_not_node_selector() {
 		PostgresPhysicalRestoreSpec {
 			migrate_to: None,
 			builder_image: None,
+			rank: None,
 			replica: LocalObjectReference {
 				name: "test-replica".to_string(),
 			},
@@ -136,6 +138,7 @@ fn test_restore_and_replica() -> (PostgresPhysicalRestore, PostgresPhysicalRepli
 			pre_migrate_sql: None,
 			migrate_to: None,
 			builder_image: None,
+			rank: None,
 			canopy_source: CanopySource {
 				group: "11111111-1111-1111-1111-111111111111".to_string(),
 				r#type: "tamanu-postgres".to_string(),
@@ -172,6 +175,7 @@ fn test_restore_and_replica() -> (PostgresPhysicalRestore, PostgresPhysicalRepli
 		PostgresPhysicalRestoreSpec {
 			migrate_to: None,
 			builder_image: None,
+			rank: None,
 			replica: LocalObjectReference {
 				name: "test-replica".to_string(),
 			},

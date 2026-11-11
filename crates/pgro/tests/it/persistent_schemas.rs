@@ -481,6 +481,7 @@ async fn persistent_schemas_skip_missing_on_source() {
 	let second_restore = PostgresPhysicalRestore::new(
 		&second_restore_name,
 		PostgresPhysicalRestoreSpec {
+			rank: None,
 			migrate_to: None,
 			builder_image: None,
 			replica: LocalObjectReference {

@@ -218,6 +218,7 @@ pub fn build_replica(name: &str, opts: ReplicaOpts) -> PostgresPhysicalReplica {
 	let mut replica = PostgresPhysicalReplica::new(
 		name,
 		PostgresPhysicalReplicaSpec {
+			rank: None,
 			pre_migrate_drop_schemas: None,
 			pre_migrate_sql: None,
 			migrate_to: None,
@@ -486,6 +487,7 @@ pub fn build_second_restore(
 	let mut restore = PostgresPhysicalRestore::new(
 		name,
 		PostgresPhysicalRestoreSpec {
+			rank: None,
 			migrate_to: None,
 			builder_image: None,
 			replica: LocalObjectReference {
