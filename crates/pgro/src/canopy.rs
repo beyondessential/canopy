@@ -16,7 +16,7 @@ use bes_canopy_api::{
 	http::{Method, Request, header::CONTENT_TYPE},
 	schema::{
 		BackupPurpose, IntentDescriptor, ProgressArgs, RestoreCapabilitiesArgs, RestoreCredentials,
-		RestoreCredentialsArgs, VerificationArgs, WorklistEntry,
+		RestoreCredentialsArgs, ServerRank, VerificationArgs, WorklistEntry,
 	},
 };
 use reqwest::Url;
@@ -261,13 +261,11 @@ fn registration_uri(version: &str, group: Uuid, rank: &str, run_id: Option<Uuid>
 	uri
 }
 
-/// Whether an environment is one canopy names.
-///
-/// The list is canopy's `ServerRank`. A spelling it does not know is refused
-/// here rather than reaching the path, where it would be a segment canopy
-/// authorises nothing for.
+/// Whether an environment is one canopy names. A spelling it does not know is
+/// refused here rather than reaching the path, where it would be a segment
+/// canopy authorises nothing for.
 fn is_known_rank(rank: &str) -> bool {
-	matches!(rank, "production" | "clone" | "demo" | "test" | "dev")
+	rank.parse::<ServerRank>().is_ok()
 }
 
 /// The artifact id out of a registration's answer.
