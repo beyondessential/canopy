@@ -528,7 +528,7 @@ page("h-role.html", "Role restore-consumer: permissions, trusts and members", "R
 
 
 def who_can():
-    q = ('<div class="paper"><div class="q">'
+    q = (header("Who can&#8230;") + '<div class="paper"><div class="q">'
          + field("Verb", "Consume", 160, caret=True) + field("Noun", "Restore replicas", 240, caret=True)
          + field("Scope", "Group harbour", 220, caret=True) + '<span class="btn c">Check</span></div></div>')
     head = ('<thead><tr><th style="width:260px">Principal</th><th style="width:240px">Role</th><th>Through</th>'
@@ -549,7 +549,8 @@ def who_can():
                       [roles(role("fleet-machine")), "Enrolled key",
                        '<span class="sec2">none</span>' + cap("fleet-machine does not hold Consume")], HARBOUR_FLEET)
     answer = f"<table>{head}<tbody>{''.join(R)}{fleet}</tbody></table>"
-    return (q + "<div>" + header("5 principals can consume restore replicas in harbour")
+    return ("<div>" + q + "</div><div>"
+            + '<p class="sub2" style="margin-bottom:8px">5 principals can consume restore replicas in harbour</p>'
             + answer + "</div>")
 
 
