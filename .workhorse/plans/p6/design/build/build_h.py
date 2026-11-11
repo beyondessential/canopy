@@ -185,7 +185,8 @@ def principals_table(added=False):
                   roles(role("operator"), role("maintenance-planner", "harbour")),
                   "2 days ago" + cap("declare maintenance"), ""]))
     R.append(row([name_cell("jonas.keller@example.org", "Operator"), "Tailnet login",
-                  roles(role("operator")), "3 days ago" + cap("read incidents"), ""]))
+                  roles(role("operator"), role("restore-drill", "harbour")), "3 days ago" + cap("read incidents"),
+                  status("exception", "warning") + cap("ends 25 Nov 2026")]))
     R.append(row([name_cell("lena.okafor@example.org", "Operator"), "Tailnet login",
                   roles(role("operator")), "6 Oct 2026" + cap("read versions"), ""]))
     R.append(row([name_cell("incident-triage-bot", "MCP agent"), "Bearer token",
@@ -200,6 +201,8 @@ def principals_table(added=False):
                   roles(role("restore-consumer", "own group")), "6 minutes ago" + cap("consume replica, tamanu-prod"), ""]))
     R.append(row([name_cell("pgro-harbour", "Service"), "Enrolled key",
                   roles(role("restore-consumer", "own group")), "1 hour ago" + cap("consume replica, harbour"), ""]))
+    R.append(row([name_cell("backup-verify-syd", "Service"), "Enrolled key",
+                  roles(role("backup-verifier")), "20 minutes ago" + cap("report backup verification"), ""]))
     R.append(row([name_cell("relay-syd-1", "Service"), "Relay key",
                   roles(role("relay", "syd-1")), "1 minute ago" + cap("connect cluster relay"), ""]))
     R.append(row([name_cell("ci-deploy-runner", "Automation"), "Enrolled key",
@@ -211,6 +214,18 @@ def principals_table(added=False):
         row([name_cell("backup-runner-syd", "tamanu-prod"), "Enrolled key",
              roles(role("fleet-machine", "own group"), role("sso-backup-runner")),
              "9 minutes ago" + cap("issue identity token"), status("exception", "warning") + cap("ends 30 Nov")]),
+        row([name_cell("tamanu-prod-web-1", "tamanu-prod"), "Enrolled key",
+             roles(role("fleet-machine", "own group"), role("dns-and-tls", "own group")),
+             "1 minute ago" + cap("report status"), cap("also holds dns-and-tls")]),
+        row([name_cell("harbour-web-1", "harbour"), "Enrolled key",
+             roles(role("fleet-machine", "own group"), role("dns-and-tls", "own group")),
+             "1 minute ago" + cap("report status"), cap("also holds dns-and-tls")]),
+        row([name_cell("grafana-syd-1", "monitoring"), "Enrolled key",
+             roles(role("fleet-machine", "own group"), role("sso-grafana", "grafana-sso")),
+             "1 minute ago" + cap("report status"), cap("also holds sso-grafana")]),
+        row([name_cell("grafana-syd-2", "monitoring"), "Enrolled key",
+             roles(role("fleet-machine", "own group"), role("sso-grafana", "grafana-sso")),
+             "2 minutes ago" + cap("report status"), cap("also holds sso-grafana")]),
     ]
     attention = ["tamanu-iti-kiosk-14", "tomas.wiremu", "status-digest-bot", "vuln-review-2025"]
     first = [r for n in attention for r in R if f">{n}" in r]
@@ -341,21 +356,20 @@ def roles_table():
         rr("relay", "1 by relay key", "Connect cluster relay" + cap("one cluster"), "1 minute ago"),
         rr("triage", "2 bearer tokens", "Read incidents and vulnerabilities, triage incidents", "8 minutes ago"),
         rr("notes", "1 bearer token", "Read and write notes", "8 minutes ago"),
-        rr("dns-and-tls", "6 machines", "Manage DNS names and TLS certificates" + cap("own application"), "3 hours ago"),
-        rr("sso-grafana", "9 machines", "Request identity tokens for grafana-sso", "9 minutes ago"),
+        rr("dns-and-tls", "2 machines", "Manage DNS names and TLS certificates" + cap("own group"), "3 hours ago"),
+        rr("sso-grafana", "2 machines", "Request identity tokens for grafana-sso", "14 minutes ago"),
         rr("maintenance-planner", "1 tailnet login", "Write maintenance windows" + cap("one group"), "2 days ago"),
         rr("backup-verifier", "1 by enrolled key" + cap("tag:backup-verify"), "Read backups, report verification" + cap("all groups"), "20 minutes ago"),
-        rr("vuln-reporter", "3 machines", "Report vulnerabilities" + cap("own group"), "1 hour ago"),
         rr("auditor", '<span class="sec2">none</span>', "Read audit log and roles", "never"),
         rr("deploy-automation", "1 automation", "Write Ansible variables and maintenance", "11 Oct 2026",
            status("suspended") + cap("12 Oct 2026"), "off"),
     ]
     exc = ('<tr class="sect"><td colspan="5"><span class="row" style="gap:4px">'
            f'<span class="iconbtn" style="padding:0">{svg("more")}</span>Exceptions'
-           '<span class="cap">3 one-member roles, the next ends 30 Nov 2026</span></span></td></tr>')
+           '<span class="cap">2 one-member roles, the next ends 25 Nov 2026</span></span></td></tr>')
     fleet = ('<tr class="sect"><td colspan="5">Fleet machines<span class="cap">412 in 14 groups</span></td></tr>'
              + row([f'<div class="row" style="gap:6px"><a class="mono" href="#">fleet-machine</a>{BI}</div>',
-                    "412 by enrolled key", "Report status, read own Ansible variables" + cap("own group"),
+                    "412 by enrolled key", "Report status and vulnerabilities, read own Ansible variables" + cap("own group"),
                     "1 minute ago", '<span class="btn o s">Show 412</span>'], "fleet"))
     return f"<table>{head}<tbody>{''.join(R)}{exc}{fleet}</tbody></table>"
 
@@ -464,6 +478,8 @@ def who_can():
     R = [
         row([name_cell("pgro-harbour", "Service"), roles(role("restore-consumer", "own group")),
              "Enrolled key" + cap("tag:restore-consumer"), "harbour", "1 hour ago"]),
+        row([name_cell("jonas.keller@example.org", "Operator"), roles(role("restore-drill", "harbour")),
+             "Direct", "harbour", "never"]),
         row([name_cell("mei.tanaka@example.org", "Operator"), roles(role("admin")), "Allow-list", "all groups", "never"]),
         row([name_cell("sofia.alvarez@example.org", "Operator"), roles(role("admin")), "Allow-list", "all groups", "never"]),
         row([name_cell("rahul.verma@example.org", "Operator"), roles(role("admin", locked=True)), "Tailscale policy", "all groups", "never"]),
@@ -475,7 +491,7 @@ def who_can():
              + row(['<span class="sec2">none of 412</span>', roles(role("fleet-machine", "own group")),
                     "Enrolled key", '<span class="sec2">none</span>', ""], "fleet"))
     answer = f"<table>{head}<tbody>{''.join(R)}{fleet}</tbody></table>"
-    return (q + "<div>" + header("4 principals can consume restore replicas in harbour")
+    return (q + "<div>" + header("5 principals can consume restore replicas in harbour")
             + answer + "</div>")
 
 
