@@ -109,6 +109,7 @@ ROLE_SCOPES = {
     "fleet-machine": "own group",
     "dns-and-tls": "own group",
     "sso-grafana": "grafana-sso",
+    "sso-backup-runner": "backup-sts",
 }
 
 
