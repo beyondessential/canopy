@@ -233,11 +233,11 @@ def principals_table(added=False):
                   status("revoked") + cap("by sofia.alvarez, 2 Aug 2026")], "off"))
     R.append(row([name_cell("release-publisher", "CI workflow"), "GitHub Actions trust",
                   roles(role("releaser")), "2 hours ago" + cap("publish version 3.4.1"), ""]))
-    R.append(row([name_cell("pgro-restore-operator", "Service"), "Enrolled key",
+    R.append(row([name_cell("pgro-restore-operator", "Service"), "Tailnet node",
                   roles(role("restore-consumer")), "6 minutes ago" + cap("consume replica, tamanu-prod"), ""]))
-    R.append(row([name_cell("pgro-harbour", "Service"), "Enrolled key",
+    R.append(row([name_cell("pgro-harbour", "Service"), "Tailnet node",
                   roles(role("restore-consumer")), "1 hour ago" + cap("consume replica, harbour"), ""]))
-    R.append(row([name_cell("backup-verify-syd", "Service"), "Enrolled key",
+    R.append(row([name_cell("backup-verify-syd", "Service"), "Tailnet node",
                   roles(role("backup-verifier")), "20 minutes ago" + cap("report backup verification"), ""]))
     R.append(row([name_cell("relay-syd-1", "Service"), "Relay key",
                   roles(role("relay")), "1 minute ago" + cap("connect cluster relay"), ""]))
@@ -408,14 +408,14 @@ def roles_table():
         rr("admin", "2 direct, 2 by Tailscale policy" + cap("including 1 suspended"), "Everything", "4 minutes ago", builtin=True),
         rr("operator", "3 direct", "Read everything, write notes", "2 days ago", builtin=True),
         rr("releaser", "1 by GitHub Actions trust", "Read and publish versions and artifacts" + cap("bestool"), "2 hours ago"),
-        rr("restore-consumer", "2 by enrolled key" + cap("tag:restore-consumer"), "Read backups; read, consume and report restore replicas" + cap("own group"), "6 minutes ago"),
+        rr("restore-consumer", "2 by tailnet tag" + cap("tag:restore-consumer"), "Read backups; read, consume and report restore replicas" + cap("own group"), "6 minutes ago"),
         rr("relay", "1 direct", "Connect cluster relay" + cap("syd-1"), "1 minute ago"),
         rr("triage", "3 direct" + cap("including 1 revoked"), "Read and triage incidents, read vulnerabilities", "8 minutes ago"),
         rr("notes", "1 direct", "Read and write notes", "8 minutes ago"),
         rr("dns-and-tls", "2 direct", "Manage DNS names and TLS certificates" + cap("own group"), "3 hours ago"),
         rr("sso-grafana", "2 direct", "Request identity tokens" + cap("grafana-sso"), "14 minutes ago"),
         rr("maintenance-planner", "1 direct", "Write maintenance windows" + cap("harbour"), "2 days ago"),
-        rr("backup-verifier", "1 by enrolled key" + cap("tag:backup-verify"), "Read and report backups", "20 minutes ago"),
+        rr("backup-verifier", "1 by tailnet tag" + cap("tag:backup-verify"), "Read and report backups", "20 minutes ago"),
         rr("auditor", '<span class="sec2">none</span>', "Read audit log and roles", "never"),
         rr("deploy-automation", "1 direct", "Write Ansible variables and maintenance windows", "11 Oct 2026",
            status("suspended") + cap("12 Oct 2026"), "off"),
@@ -506,16 +506,16 @@ def role_page():
     head = (f'<div><span class="crumb">{svg("back")}Roles</span>'
             '<div class="hdr" style="margin-top:8px"><div class="title"><h1 class="h4">restore-consumer</h1></div>'
             f'<span class="grow"></span>{WHO}<span class="btn oe">Suspend role</span></div></div>')
-    f = facts([("Members", "2 by enrolled key"), ("Last matched", "6 minutes ago, consume replica"),
+    f = facts([("Members", "2 by tailnet tag"), ("Last matched", "6 minutes ago, consume replica"),
                ("Changed", "10 Nov 2026 by sofia.alvarez")])
     trusts = ('<table><thead><tr><th style="width:190px">Trust</th><th>Must present</th><th style="width:120px">Matches</th>'
               '<th style="width:150px">Last matched</th><th class="r" style="width:60px"></th></tr></thead><tbody>'
-              f'<tr><td>Enrolled key</td><td>tagged <span class="mono">tag:restore-consumer</span></td><td>2</td><td>6 minutes ago</td>'
+              f'<tr><td>Tailnet tag</td><td><span class="mono">tag:restore-consumer</span></td><td>2</td><td>6 minutes ago</td>'
               f'<td class="r"><span class="iconbtn">{svg("del")}</span></td></tr></tbody></table>')
     members = ('<table><thead><tr><th style="width:260px">Principal</th><th>Own group</th><th style="width:190px">Through</th>'
                '<th style="width:150px">Last matched</th></tr></thead><tbody>'
-               '<tr><td><a class="mono" href="#">pgro-restore-operator</a></td><td>tamanu-prod</td><td>Enrolled key</td><td>6 minutes ago</td></tr>'
-               '<tr><td><a class="mono" href="#">pgro-harbour</a></td><td>harbour</td><td>Enrolled key</td><td>1 hour ago</td></tr>'
+               '<tr><td><a class="mono" href="#">pgro-restore-operator</a></td><td>tamanu-prod</td><td>Tailnet tag</td><td>6 minutes ago</td></tr>'
+               '<tr><td><a class="mono" href="#">pgro-harbour</a></td><td>harbour</td><td>Tailnet tag</td><td>1 hour ago</td></tr>'
                '</tbody></table>')
     return (head + f + section("Permissions", matrix()) + section("Trusts", trusts, '<span class="btn o">Add trust</span>')
             + section("Members", members, '<span class="btn o">Add member</span>'))
@@ -535,7 +535,7 @@ def who_can():
             '<th style="width:150px">Scope matched</th><th style="width:170px">Last matched for this</th></tr></thead>')
     R = [
         row([name_cell("pgro-harbour", "Service"), roles(role("restore-consumer")),
-             "Enrolled key" + cap("tag:restore-consumer"), "harbour", "1 hour ago"]),
+             "Tailnet tag" + cap("tag:restore-consumer"), "harbour", "1 hour ago"]),
         row([name_cell("jonas.keller@example.org", "Operator"), roles(role("restore-drill")),
              "Direct", "harbour", "never"]),
         row([name_cell("mei.tanaka@example.org", "Operator"), roles(role("admin")), "Direct", "all groups", "never"]),
