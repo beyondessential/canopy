@@ -210,7 +210,7 @@ def principals_table(added=False):
                   roles(role("admin")), "4 minutes ago" + cap("declare maintenance"), ""]))
     R.append(row([name_cell("rahul.verma@example.org", "Operator"), "Tailnet login",
                   roles(role("admin", locked=True)) + cap("Tailscale policy"),
-                  "1 hour ago" + cap("raise to Danger"), ""]))
+                  "1 hour ago" + cap("edit role notes"), ""]))
     R.append(row([name_cell("sofia.alvarez@example.org", "Operator"), "Tailnet login",
                   roles(role("admin")), "yesterday" + cap("edit role restore-consumer"), ""]))
     R.append(row([name_cell("tomas.wiremu@example.org", "Operator"), "Tailnet login",
