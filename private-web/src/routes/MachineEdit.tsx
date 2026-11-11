@@ -24,6 +24,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import type { GradedEndpoint } from "../safety-modes";
 import {
 	applicationName,
+	type GrantSubject,
 	type MachineGrants,
 	REACHABILITY_CHECK,
 	SERVER_RANK_ORDER,
@@ -220,15 +221,18 @@ function Form({
 		),
 	);
 	// The relying parties each subject holds as saved, and as edited, keyed by
-	// the machine's or the application's id.
+	// the subject's kind and id: an application can share its machine's id.
+	const subjectKey = (subject: GrantSubject) => `${subject.kind}:${subject.id}`;
+	const machineSubject: GrantSubject = { kind: "machine", id: machine.id };
+	const applicationSubject = (id: string): GrantSubject => ({ kind: "application", id });
 	const heldGrants: Record<string, string[]> = Object.fromEntries(
-		(identityGrants?.subjects ?? []).map((s) => [s.subject.id, s.granted]),
+		(identityGrants?.subjects ?? []).map((s) => [subjectKey(s.subject), s.granted]),
 	);
 	// Only what has been edited, so grants that arrive after the form mounts
 	// still read as held.
 	const [grantEdits, setGrantEdits] = useState<Record<string, string[]>>({});
-	const grantsOf = (subjectId: string) =>
-		grantEdits[subjectId] ?? heldGrants[subjectId] ?? [];
+	const grantsOf = (subject: GrantSubject) =>
+		grantEdits[subjectKey(subject)] ?? heldGrants[subjectKey(subject)] ?? [];
 	// Placement is read from the form, so ranking or grouping a box here offers
 	// the choice, and the saved subject is not shown once it no longer stands.
 	// spec: IDP#presentation
@@ -237,10 +241,11 @@ function Form({
 	const placementEdited =
 		box.groupId !== (machine.group_id ?? null) || box.rank !== (machine.rank ?? "");
 	const subChanges = placementEdited && placed;
-	const subOf = (subjectId: string) =>
+	const subOf = (subject: GrantSubject) =>
 		placementEdited
 			? undefined
-			: identityGrants?.subjects.find((s) => s.subject.id === subjectId)?.sub;
+			: identityGrants?.subjects.find((s) => subjectKey(s.subject) === subjectKey(subject))
+					?.sub;
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -346,14 +351,14 @@ function Form({
 	// as they were records nothing.
 	// spec: IDP#grants
 	for (const subject of identityGrants?.subjects ?? []) {
-		const id = subject.subject.id;
-		if (sameMembers(grantsOf(id), heldGrants[id] ?? [])) continue;
+		if (sameMembers(grantsOf(subject.subject), heldGrants[subjectKey(subject.subject)] ?? []))
+			continue;
 		plan.push({
 			call: "identity/set_grants",
 			run: () =>
 				callApi("identity", "set_grants", {
 					subject: subject.subject,
-					relying_party_ids: grantsOf(id),
+					relying_party_ids: grantsOf(subject.subject),
 				}),
 		});
 	}
@@ -556,13 +561,15 @@ function Form({
 						<IdentityGrants
 							grants={identityGrants}
 							offered={grantsOffered}
-							held={heldGrants[machine.id] ?? []}
-							value={grantsOf(machine.id)}
-							onChange={(ids) => setGrantEdits({ ...grantEdits, [machine.id]: ids })}
-							sub={subOf(machine.id)}
+							held={heldGrants[subjectKey(machineSubject)] ?? []}
+							value={grantsOf(machineSubject)}
+							onChange={(ids) =>
+								setGrantEdits({ ...grantEdits, [subjectKey(machineSubject)]: ids })
+							}
+							sub={subOf(machineSubject)}
 							subChanges={subChanges}
 							caption={
-								subOf(machine.id)
+								subOf(machineSubject)
 									? "Tokens that name this machine itself, carrying this subject. Applications on it hold their own grants below."
 									: "Tokens that name this machine itself. Applications on it hold their own grants below."
 							}
@@ -610,15 +617,18 @@ function Form({
 								<IdentityGrants
 									grants={identityGrants}
 									offered={grantsOffered}
-									held={heldGrants[application.id] ?? []}
-									value={grantsOf(application.id)}
+									held={heldGrants[subjectKey(applicationSubject(application.id))] ?? []}
+									value={grantsOf(applicationSubject(application.id))}
 									onChange={(ids) =>
-										setGrantEdits({ ...grantEdits, [application.id]: ids })
+										setGrantEdits({
+											...grantEdits,
+											[subjectKey(applicationSubject(application.id))]: ids,
+										})
 									}
-									sub={subOf(application.id)}
+									sub={subOf(applicationSubject(application.id))}
 									subChanges={subChanges}
 									caption={
-										subOf(application.id)
+										subOf(applicationSubject(application.id))
 											? "Its tokens carry this subject. Revoking refuses the next request; tokens already issued run out on their own."
 											: "Revoking refuses the next request; tokens already issued run out on their own."
 									}

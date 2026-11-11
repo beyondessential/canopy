@@ -369,12 +369,16 @@ export async function seedServer(
 		 * another application's `machineId` for the two-workloads-on-one-box
 		 * case. */
 		machineId?: string;
+		/** Give the application its box's id, the state a migration left some
+		 * in. Only for a box of its own. */
+		sharesMachineId?: boolean;
 		/** Whether the application has reported, which is what makes a box
 		 * without a bound device one a run can reach. */
 		reported?: boolean;
 	} = {},
 ): Promise<SeededServer> {
-	const id = randomUUID();
+	const machineId = opts.machineId ?? randomUUID();
+	const id = opts.sharesMachineId ? machineId : randomUUID();
 	const name = opts.name === null ? null : (opts.name ?? randomLabel("srv"));
 	const host = opts.host ?? `https://${randomLabel("host")}.e2e.invalid`;
 	const type = opts.type ?? "tamanu-central";
@@ -400,7 +404,6 @@ export async function seedServer(
 	// An identity belongs to the box, so a seeded device binds to the machine.
 	// Anything that resolves a device to what it speaks for — backups, reports —
 	// goes through the machine.
-	const machineId = opts.machineId ?? randomUUID();
 	if (opts.machineId === undefined) {
 		await sql.query(
 			`INSERT INTO machines (id, name, group_id, device_id) VALUES ($1, $2, $3, $4)`,

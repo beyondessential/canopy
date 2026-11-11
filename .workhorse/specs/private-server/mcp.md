@@ -122,7 +122,7 @@ So an issue about a box reads as the machine's and an issue about software as th
 **Find issues** returns issues across the fleet, filtered by active state, by effective result, by group, by machine, by application, and by recency (issues last seen within a look-back window).
 Filtering by application returns the application's own issues, matching what that application presents; its machine's are found by filtering by machine.
 
-**Get issue** takes an issue identifier and returns the issue with the incidents it is or was part of.
+**Get issue** takes an issue identifier and returns the issue, with the scope it is filed at and what that scope names, and the incidents it is or was part of.
 
 **Get check documentation** takes a source and a check's presented name and returns the check's operator-authored markdown documentation (see [CHK](../monitoring/checks.md), "Documentation"), which by convention covers what the check observes, what each result means, and how to solve a failure.
 The presented name is the one every other tool returns (see [CHK](../monitoring/checks.md), "Names"): `<type>:<check>` for an application type's check, with `<type>.<check>` accepted too, and the bare name for a machine's or Canopy's own.
@@ -179,9 +179,11 @@ Both are refused for a note an operator wrote, naming that as the reason, unless
 
 **Get group**, **Get machine** and **Get application** return the record's notes with their revision (see [FLT](../servers/overview.md), "Notes").
 **Replace notes** takes a group, machine or application identifier, the new text, and the revision the caller read, and replaces the record's notes with the text.
+An identifier is unique within its kind, not across kinds, since an application can share its machine's.
+The tool takes an optional kind (group, machine or application), and an identifier that names more than one record is refused, naming the kinds, until the caller gives one.
 It is refused if the notes have changed since that revision, and the result says so and returns the current notes and revision, so the caller can reconcile and try again.
 The change is recorded in the record's revision log as made through this interface by its caller.
-**Get notes history** takes the same identifier and returns the revision log newest first, each revision with its text, author, how it was made, and when.
+**Get notes history** takes the same identifier and optional kind, refuses an ambiguous identifier in the same way, and returns the revision log newest first, each revision with its text, author, how it was made, and when.
 
 All of these writes are held by the notes grant.
 

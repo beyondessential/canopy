@@ -182,6 +182,49 @@ test.describe("identity token grants", () => {
 		expect(appGrants.granted).toEqual([party.id]);
 	});
 
+	test("an application sharing its machine's id keeps its own grants", async ({
+		page,
+		request,
+		sql,
+	}) => {
+		const machineParty = await seedRelyingParty(sql, { name: "For the box" });
+		const appParty = await seedRelyingParty(sql, { name: "For the application" });
+		const group = await seedServerGroup(sql, { name: "shared-id-group" });
+		const app = await seedServer(sql, {
+			groupId: group.id,
+			rank: "production",
+			sharesMachineId: true,
+		});
+		expect(app.id).toBe(app.machineId);
+		await seedIdentityGrant(sql, {
+			relyingPartyId: machineParty.id,
+			machineId: app.machineId,
+		});
+
+		await page.goto(`/fleet/machines/${app.machineId}/edit`);
+		const section = page.locator(`[data-application="${app.id}"]`);
+		await expect(
+			page.getByTestId("machine-section").getByText("For the box"),
+		).toBeVisible();
+		await expect(section.getByText("For the box")).toHaveCount(0);
+
+		await section.getByLabel("May obtain tokens for").click();
+		await page.getByRole("option", { name: "For the application" }).click();
+		await page.getByRole("button", { name: "Save" }).click();
+		await expect(page).toHaveURL(`/fleet/machines/${app.machineId}`);
+
+		const grants = await (
+			await request.post("/api/identity/machine_grants", {
+				data: { machine_id: app.machineId },
+			})
+		).json();
+		const granted = (kind: string) =>
+			grants.subjects.find((s: { subject: { kind: string } }) => s.subject.kind === kind)
+				.granted;
+		expect(granted("machine")).toEqual([machineParty.id]);
+		expect(granted("application")).toEqual([appParty.id]);
+	});
+
 	test("an unchanged save sends no grant change", async ({ page, sql }) => {
 		const party = await seedRelyingParty(sql, { name: "Anthropic" });
 		const group = await seedServerGroup(sql, { name: "unchanged-group" });

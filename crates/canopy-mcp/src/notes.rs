@@ -108,10 +108,45 @@ pub struct DeleteNoteArgs {
 	pub note_id: String,
 }
 
+/// Which kind of record carries the notes an identifier names. Identifiers are
+/// unique within a kind, not across kinds: an application can share its
+/// machine's.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NotesKind {
+	Group,
+	Machine,
+	Application,
+}
+
+impl NotesKind {
+	const ALL: [Self; 3] = [Self::Group, Self::Machine, Self::Application];
+
+	fn as_str(self) -> &'static str {
+		match self {
+			Self::Group => "group",
+			Self::Machine => "machine",
+			Self::Application => "application",
+		}
+	}
+
+	fn record(self, id: Uuid) -> NotesRecord {
+		match self {
+			Self::Group => NotesRecord::Group(id),
+			Self::Machine => NotesRecord::Machine(id),
+			Self::Application => NotesRecord::Application(id),
+		}
+	}
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReplaceNotesArgs {
 	/// The id of the group, machine or application whose notes to replace.
 	pub id: String,
+	/// Which of `group`, `machine` or `application` the id is of. Needed only
+	/// when the id names more than one: an application can share its
+	/// machine's id, and the replacement is refused until you say which.
+	pub kind: Option<NotesKind>,
 	/// The new notes, replacing what is there.
 	pub notes: String,
 	/// The revision of the notes you read, from `get_group`, `get_machine` or
@@ -123,6 +158,10 @@ pub struct ReplaceNotesArgs {
 pub struct NotesHistoryArgs {
 	/// The id of a group, machine or application.
 	pub id: String,
+	/// Which of `group`, `machine` or `application` the id is of. Needed only
+	/// when the id names more than one: an application can share its
+	/// machine's id, and the read is refused until you say which.
+	pub kind: Option<NotesKind>,
 }
 
 #[derive(Serialize)]
@@ -253,23 +292,53 @@ fn unchangeable(note: &AnyNote, caller: &Caller) -> Option<&'static str> {
 	)
 }
 
-/// What kind of record an identifier names, and its notes, if any record does.
-async fn notes_record(
+/// Every record of `kind` (any kind, if `None`) that carries the identifier.
+/// An identifier is unique within its table, not across them, so more than
+/// one can answer.
+async fn notes_records(
 	conn: &mut AsyncPgConnection,
 	id: Uuid,
-) -> Result<Option<(NotesRecord, &'static str)>, AppError> {
-	for (record, kind) in [
-		(NotesRecord::Group(id), "group"),
-		(NotesRecord::Machine(id), "machine"),
-		(NotesRecord::Application(id), "application"),
-	] {
+	kind: Option<NotesKind>,
+) -> Result<Vec<(NotesRecord, NotesKind)>, AppError> {
+	let mut found = Vec::new();
+	for candidate in NotesKind::ALL {
+		if kind.is_some_and(|wanted| wanted != candidate) {
+			continue;
+		}
+		let record = candidate.record(id);
 		match notes_log::current(conn, record).await {
-			Ok(_) => return Ok(Some((record, kind))),
+			Ok(_) => found.push((record, candidate)),
 			Err(error) if is_not_found(&error) => {}
 			Err(error) => return Err(error),
 		}
 	}
-	Ok(None)
+	Ok(found)
+}
+
+/// The one record the identifier names, or the result to return instead: not
+/// found for none, a refusal naming the kinds for several.
+fn single_record(
+	id: Uuid,
+	kind: Option<NotesKind>,
+	mut found: Vec<(NotesRecord, NotesKind)>,
+) -> Result<(NotesRecord, NotesKind), CallToolResult> {
+	match found.len() {
+		0 => Err(not_found(match kind {
+			Some(kind) => format!("no {} with id {id}", kind.as_str()),
+			None => format!("no group, machine or application with id {id}"),
+		})),
+		1 => Ok(found.remove(0)),
+		_ => {
+			let kinds: Vec<_> = found.iter().map(|(_, kind)| kind.as_str()).collect();
+			Err(refusal(
+				format!(
+					"the id {id} names more than one record ({}); say which with `kind`",
+					kinds.join(", ")
+				),
+				json!({ "id": id, "kinds": kinds }),
+			))
+		}
+	}
 }
 
 async fn record_of(conn: &mut AsyncPgConnection, record: NotesRecord) -> Result<Record, AppError> {
@@ -535,7 +604,9 @@ impl CanopyMcp {
 		),
 		description = "Replace the notes of a group, machine or application with `notes`, stating \
 		               the `revision` you read (from `get_group`, `get_machine` or \
-		               `get_server`). The notes are one piece of free text kept by operators: \
+		               `get_server`). An application can share its machine's id: give `kind` \
+		               (`group`, `machine` or `application`) then, or the replacement is \
+		               refused. The notes are one piece of free text kept by operators: \
 		               read them first and send the whole text you want them to become, so what is \
 		               there is not lost. Every change is kept in the revision log \
 		               (`get_notes_history`), recorded as made through this interface. If the \
@@ -556,10 +627,10 @@ impl CanopyMcp {
 		let mut conn = self.db_write.get().await.map_err(mcp_err)?;
 		let result = conn
 			.transaction::<_, AppError, _>(async |conn| {
-				let Some((record, _)) = notes_record(conn, id).await? else {
-					return Ok(Err(not_found(format!(
-						"no group, machine or application with id {id}"
-					))));
+				let found = notes_records(conn, id, args.kind).await?;
+				let (record, _) = match single_record(id, args.kind, found) {
+					Ok(single) => single,
+					Err(result) => return Ok(Err(result)),
 				};
 				let outcome = notes_log::set(
 					conn,
@@ -603,7 +674,9 @@ impl CanopyMcp {
 		annotations(read_only_hint = true),
 		description = "The revision log of a group's, machine's or application's notes, newest \
 		               first: each revision with its text, who made it, how (the operator \
-		               interface, an Ansible import, or an access token), and when."
+		               interface, an Ansible import, or an access token), and when. An \
+		               application can share its machine's id: give `kind` (`group`, `machine` or \
+		               `application`) then, or the read is refused."
 	)]
 	async fn get_notes_history(
 		&self,
@@ -611,10 +684,12 @@ impl CanopyMcp {
 	) -> Result<CallToolResult, McpError> {
 		let id = parse_uuid(&args.id, "id")?;
 		let mut conn = self.conn().await?;
-		let Some((record, kind)) = notes_record(&mut conn, id).await.map_err(mcp_err)? else {
-			return Ok(not_found(format!(
-				"no group, machine or application with id {id}"
-			)));
+		let found = notes_records(&mut conn, id, args.kind)
+			.await
+			.map_err(mcp_err)?;
+		let (record, kind) = match single_record(id, args.kind, found) {
+			Ok(single) => single,
+			Err(result) => return Ok(result),
 		};
 		let revisions = notes_log::history(&mut conn, record)
 			.await
@@ -622,7 +697,7 @@ impl CanopyMcp {
 		let revision = revisions.first().map_or(0, |latest| latest.revision);
 		ok_json(&NotesHistory {
 			id,
-			kind,
+			kind: kind.as_str(),
 			revision,
 			revisions,
 		})

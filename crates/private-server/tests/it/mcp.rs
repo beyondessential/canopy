@@ -1498,6 +1498,15 @@ async fn find_issues_by_application_returns_its_own_issues() {
 			.expect("the disk issue");
 		assert_eq!(disk["scope"]["grain"], "machine");
 		assert_eq!(disk["scope"]["name"], "box-one");
+
+		let detail = call_tool!(
+			private,
+			"get_issue",
+			serde_json::json!({ "issue_id": disk["id"] })
+		);
+		assert_eq!(detail["scope"]["grain"], "machine");
+		assert_eq!(detail["scope"]["id"], MACHINE);
+		assert_eq!(detail["scope"]["name"], "box-one");
 	})
 	.await
 }
