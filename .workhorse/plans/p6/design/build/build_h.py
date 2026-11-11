@@ -338,10 +338,10 @@ def releaser_page():
               '<dt>workflow</dt><dd>.github/workflows/release.yml</dd>'
               '<dt>environment</dt><dd>release</dd></dl>')
     creds = ('<table class="top"><thead><tr><th style="width:190px">Credential</th><th>Must present</th>'
-             '<th style="width:170px">Role</th><th style="width:150px">Last matched</th><th class="r" style="width:120px"></th></tr></thead><tbody>'
+             '<th style="width:170px">Role</th><th style="width:150px">Last matched</th><th class="r" style="width:150px">Status</th></tr></thead><tbody>'
              f'<tr><td>GitHub Actions trust</td><td>{claims}</td><td>{role("releaser")}</td><td>2 hours ago</td><td></td></tr>'
              f'<tr class="off"><td>Enrolled key</td><td class="mono">SHA256:9f2c 41d7 &hellip; e41a</td><td class="sec2">none</td>'
-             f'<td>41 days ago</td><td class="r">{status("disabled")}</td></tr></tbody></table>')
+             f'<td>30 Sep 2026</td><td class="r">{status("revoked")}{cap("by mei.tanaka, 1 Oct 2026")}</td></tr></tbody></table>')
     held = held_roles([("releaser", "bestool", "Versions, Artifacts", "GitHub Actions trust on releaser", "12 Mar 2026")])
     eff = ('<table><thead><tr><th>Permission</th><th style="width:200px">Scope</th><th style="width:200px">Role</th>'
            '<th style="width:150px">Last matched</th></tr></thead><tbody>'
