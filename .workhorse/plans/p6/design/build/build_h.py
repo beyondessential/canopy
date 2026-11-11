@@ -51,6 +51,8 @@ tr.fleet td{background:rgba(0,0,0,.02)}
 .check svg{width:24px;height:24px;fill:rgba(0,0,0,.6)}
 .check svg.on{fill:#ed6c02}
 .under{filter:none}
+.field.dis .box{border-color:rgba(0,0,0,.12)}
+.field.dis label{color:rgba(0,0,0,.38)}
 .q{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
 """
 
@@ -308,6 +310,25 @@ def section(title, inner, action=""):
     return f"<div>{header(title, action)}<div class=\"paper\">{inner}</div></div>"
 
 
+def held_roles(rows):
+    """Roles a principal holds: the role, the scope its matrix rows carry, and
+    whether it is held directly (removable) or through a trust (linked)."""
+    body = ""
+    for name, scope, scoped_rows, through, since in rows:
+        sc = (f'<span class="mono">{scope}</span>' if scope else '<span class="sec2">all groups</span>') + cap(scoped_rows)
+        direct = through == "Direct"
+        act = f'<span class="iconbtn">{svg("del")}</span>' if direct else ""
+        thr = through if direct else f'<a href="#">{through}</a>'
+        body += f'<tr><td>{role(name)}</td><td>{sc}</td><td>{thr}</td><td>{since}</td><td class="r">{act}</td></tr>'
+    return ('<table class="top"><thead><tr><th style="width:240px">Role</th><th style="width:220px">Role&#8217;s scope</th>'
+            '<th>Through</th><th style="width:150px">Since</th><th class="r" style="width:60px"></th></tr></thead>'
+            f'<tbody>{body}</tbody></table>'
+            '<div class="row top" style="margin-top:16px">'
+            + field("Role", "Choose a role", 240, ph=True, caret=True)
+            + field("Scope", "", 200, ph=True).replace('class="field"', 'class="field dis"')
+            + '<span class="btn o">Add role</span></div>')
+
+
 def releaser_page():
     head = detail_head("release-publisher", "CI workflow", '<span class="btn oe">Suspend</span>')
     f = facts([("Authenticates by", "GitHub Actions trust"), ("Last matched", "2 hours ago, publish version 3.4.1"),
@@ -321,13 +342,7 @@ def releaser_page():
              f'<tr><td>GitHub Actions trust</td><td>{claims}</td><td>{role("releaser")}</td><td>2 hours ago</td><td></td></tr>'
              f'<tr class="off"><td>Enrolled key</td><td class="mono">SHA256:9f2c 41d7 &hellip; e41a</td><td class="sec2">none</td>'
              f'<td>41 days ago</td><td class="r">{status("disabled")}</td></tr></tbody></table>')
-    held = ('<table><thead><tr><th style="width:260px">Role</th><th>Through</th><th style="width:150px">Since</th>'
-            '</tr></thead><tbody>'
-            f'<tr><td>{role("releaser")}</td><td><a href="#">GitHub Actions trust on releaser</a></td><td>12 Mar 2026</td>'
-            '</tr></tbody></table>'
-            '<div class="row top" style="margin-top:16px">'
-            + field("Role", "Choose a role", 240, ph=True, caret=True) + field("Scope", "Software", 200, caret=True)
-            + '<span class="btn o">Add role</span></div>')
+    held = held_roles([("releaser", "bestool", "Versions, Artifacts", "GitHub Actions trust on releaser", "12 Mar 2026")])
     eff = ('<table><thead><tr><th>Permission</th><th style="width:200px">Scope</th><th style="width:200px">Role</th>'
            '<th style="width:150px">Last matched</th></tr></thead><tbody>'
            f'<tr><td>Publish versions</td><td>bestool</td><td>{role("releaser")}</td><td>2 hours ago</td></tr>'
@@ -352,9 +367,8 @@ def triage_page():
              '<tr><td>Bearer token</td><td><span class="mono">canopy_mcp_7Hq2&hellip;</span>' + cap("expires 2 Feb 2027") + '</td>'
              f'<td>{roles(role("triage"), role("notes"))}</td><td>8 minutes ago</td>'
              '<td class="r"><span class="btn oe s">Revoke</span></td></tr></tbody></table>')
-    held = ('<table><thead><tr><th style="width:260px">Role</th><th>Through</th><th style="width:150px">Since</th></tr></thead><tbody>'
-            f'<tr><td>{role("triage")}</td><td>Direct</td><td>2 Feb 2026</td></tr>'
-            f'<tr><td>{role("notes")}</td><td>Direct</td><td>2 Feb 2026</td></tr></tbody></table>')
+    held = held_roles([("triage", "", "Incidents, Vulnerabilities", "Direct", "2 Feb 2026"),
+                       ("notes", "", "Notes", "Direct", "2 Feb 2026")])
     return head + f + section("Credentials", creds) + section("Roles", held)
 
 
