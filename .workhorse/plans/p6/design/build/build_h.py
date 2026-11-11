@@ -227,7 +227,7 @@ def principals_table(added=False):
     R.append(row([name_cell("incident-triage-bot", "MCP agent"), "Bearer token",
                   roles(role("triage"), role("notes")), "8 minutes ago" + cap("write note"), ""]))
     R.append(row([name_cell("status-digest-bot", "MCP agent"), "Bearer token",
-                  roles(role("triage")), "2 hours ago" + cap("read incidents"), status("expires in 9d", "warning")]))
+                  roles(role("triage")), "2 hours ago" + cap("read incidents"), status("expires in 9 days", "warning")]))
     R.append(row([name_cell("vuln-review-2025", "MCP agent"), "Bearer token",
                   roles(role("triage", struck=True)), "1 Aug 2026" + cap("read vulnerabilities"),
                   status("revoked") + cap("by sofia.alvarez, 2 Aug 2026")], "off"))
@@ -246,10 +246,10 @@ def principals_table(added=False):
     outliers = [
         row([name_cell("tamanu-prod-db-3", "Fleet machine, tamanu-prod"), "Enrolled key",
              roles(role("fleet-machine")), "2 minutes ago" + cap("report status"),
-             status("new key 2h ago", "warning")]),
+             status("new key", "warning") + cap("2 hours ago")]),
         row([name_cell("backup-runner-syd", "Fleet machine, tamanu-prod"), "Enrolled key",
              roles(role("fleet-machine"), role("sso-backup-runner")),
-             "9 minutes ago" + cap("issue identity token"), status("exception", "warning") + cap("ends 30 Nov")]),
+             "9 minutes ago" + cap("issue identity token"), status("exception", "warning") + cap("ends 30 Nov 2026")]),
         row([name_cell("tamanu-prod-web-1", "Fleet machine, tamanu-prod"), "Enrolled key",
              roles(role("fleet-machine"), role("dns-and-tls")),
              "1 minute ago" + cap("report status"), cap("also holds dns-and-tls")]),
