@@ -64,6 +64,7 @@ ICON = {
     "copy": "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z",
     "del": "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
     "cbon": "M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z",
+    "x": "M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
     "cboff": "M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z",
 }
 
@@ -273,11 +274,17 @@ def principals_table(added=False):
     return f"<table>{head}<tbody>{''.join(R)}{fleet}</tbody></table>"
 
 
-def add_principal():
+def add_principal(chosen=()):
+    """The add form. Roles is a multi-select of role chips; empty, it shows its placeholder."""
+    if chosen:
+        picked = "".join(role(r).replace("</span></span>", f'</span>{svg("x", "rm")}</span>') for r in chosen)
+        roles_field = field("Roles", f'<span class="chips">{picked}</span>', 300, caret=True)
+    else:
+        roles_field = field("Roles", "Choose roles", 300, ph=True, caret=True)
     return ('<div class="paper"><div class="row top">'
             + field("Kind", "MCP agent", 200, caret=True)
             + field("Name", "e.g. grafana-sidecar", ph=True, fw=True)
-            + field("Role", "triage", 200, caret=True)
+            + roles_field
             + '<span class="btn c">Add principal</span></div></div>')
 
 
@@ -289,7 +296,7 @@ def filters():
 
 
 page("h-principals.html", "Principals, default view with the fleet held back", "Principals",
-     add_principal() + "<div>" + header("Principals", WHO) + filters() + principals_table() + "</div>")
+     add_principal(("triage", "notes")) + "<div>" + header("Principals", WHO) + filters() + principals_table() + "</div>")
 
 
 # ---- h-principal (release-publisher) and h-suspend ---------------------------
@@ -558,13 +565,13 @@ MINTED = (
     '<div class="secret"><div class="box">canopy_mcp_q8Vn2LxT0cRk4Yw7Hs1Pz9MbE3uJa6Df</div>'
     f'<span class="iconbtn big">{svg("copy")}</span></div>'
     '<div class="facts" style="margin-top:20px">'
-    f'<div><span class="cap">Role</span><span class="body2">{role("triage")}</span></div>'
+    f'<div><span class="cap">Roles</span><span class="body2">{role("triage")}</span></div>'
     '<div><span class="cap">Expires</span><span class="body2">11 Nov 2027</span></div></div>'
     '</div><div class="actions"><span class="btn">Done</span></div></div></div>'
 )
 
 page("h-token-minted.html", "Principals: MCP agent grafana-sidecar added, token shown once", "Principals",
-     add_principal().replace("e.g. grafana-sidecar", "grafana-sidecar").replace('box ph">grafana', 'box">grafana')
+     add_principal()
      + "<div>" + header("Principals", WHO) + filters() + principals_table(added=True) + "</div>", MINTED)
 
 print("built", sorted(p.name for p in MOCKUPS.glob("h-*.html")))
