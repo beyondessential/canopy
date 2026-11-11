@@ -95,7 +95,22 @@ def page(name, title, selected, body, overlay=""):
 # ---- shared pieces -------------------------------------------------------
 
 
-def role(name, scope="", struck=False, locked=False):
+# The scope a role's matrix rows carry, shown in its chip. One table, so a role's
+# chip reads the same on every page; roles scoped to all groups are left out.
+ROLE_SCOPES = {
+    "releaser": "bestool",
+    "restore-consumer": "own group",
+    "relay": "syd-1",
+    "maintenance-planner": "harbour",
+    "restore-drill": "harbour",
+    "fleet-machine": "own group",
+    "dns-and-tls": "own group",
+    "sso-grafana": "grafana-sso",
+}
+
+
+def role(name, struck=False, locked=False):
+    scope = ROLE_SCOPES.get(name, "")
     cls = "chip role" + (" x" if struck else "")
     icon = svg("lock") if locked else ""
     sc = f'<span class="sc">{scope}</span>' if scope else ""
@@ -182,10 +197,10 @@ def principals_table(added=False):
                   roles(role("admin", struck=True, locked=True)) + cap("Tailscale policy"),
                   "2 Nov 2026" + cap("edit role operator"), TOMAS_SUSPENDED], "off"))
     R.append(row([name_cell("aroha.ngata@example.org", "Operator"), "Tailnet login",
-                  roles(role("operator"), role("maintenance-planner", "harbour")),
+                  roles(role("operator"), role("maintenance-planner")),
                   "2 days ago" + cap("declare maintenance"), ""]))
     R.append(row([name_cell("jonas.keller@example.org", "Operator"), "Tailnet login",
-                  roles(role("operator"), role("restore-drill", "harbour")), "3 days ago" + cap("read incidents"),
+                  roles(role("operator"), role("restore-drill")), "3 days ago" + cap("read incidents"),
                   status("exception", "warning") + cap("ends 25 Nov 2026")]))
     R.append(row([name_cell("lena.okafor@example.org", "Operator"), "Tailnet login",
                   roles(role("operator")), "6 Oct 2026" + cap("read versions"), ""]))
@@ -197,35 +212,35 @@ def principals_table(added=False):
                   roles(role("triage", struck=True)), "1 Aug 2026" + cap("read vulnerabilities"),
                   status("revoked") + cap("by sofia.alvarez, 2 Aug 2026")], "off"))
     R.append(row([name_cell("release-publisher", "CI workflow"), "GitHub Actions trust",
-                  roles(role("releaser", "bestool")), "2 hours ago" + cap("publish version 3.4.1"), ""]))
+                  roles(role("releaser")), "2 hours ago" + cap("publish version 3.4.1"), ""]))
     R.append(row([name_cell("pgro-restore-operator", "Service"), "Enrolled key",
-                  roles(role("restore-consumer", "own group")), "6 minutes ago" + cap("consume replica, tamanu-prod"), ""]))
+                  roles(role("restore-consumer")), "6 minutes ago" + cap("consume replica, tamanu-prod"), ""]))
     R.append(row([name_cell("pgro-harbour", "Service"), "Enrolled key",
-                  roles(role("restore-consumer", "own group")), "1 hour ago" + cap("consume replica, harbour"), ""]))
+                  roles(role("restore-consumer")), "1 hour ago" + cap("consume replica, harbour"), ""]))
     R.append(row([name_cell("backup-verify-syd", "Service"), "Enrolled key",
                   roles(role("backup-verifier")), "20 minutes ago" + cap("report backup verification"), ""]))
     R.append(row([name_cell("relay-syd-1", "Service"), "Relay key",
-                  roles(role("relay", "syd-1")), "1 minute ago" + cap("connect cluster relay"), ""]))
+                  roles(role("relay")), "1 minute ago" + cap("connect cluster relay"), ""]))
     R.append(row([name_cell("ci-deploy-runner", "Automation"), "Enrolled key",
                   roles(role("deploy-automation", struck=True)), "11 Oct 2026" + cap("edit Ansible variable"), ""]))
     outliers = [
         row([name_cell("tamanu-prod-db-3", "tamanu-prod"), "Enrolled key",
-             roles(role("fleet-machine", "own group")), "2 minutes ago" + cap("report status"),
+             roles(role("fleet-machine")), "2 minutes ago" + cap("report status"),
              status("new key 2h ago", "warning")]),
         row([name_cell("backup-runner-syd", "tamanu-prod"), "Enrolled key",
-             roles(role("fleet-machine", "own group"), role("sso-backup-runner")),
+             roles(role("fleet-machine"), role("sso-backup-runner")),
              "9 minutes ago" + cap("issue identity token"), status("exception", "warning") + cap("ends 30 Nov")]),
         row([name_cell("tamanu-prod-web-1", "tamanu-prod"), "Enrolled key",
-             roles(role("fleet-machine", "own group"), role("dns-and-tls", "own group")),
+             roles(role("fleet-machine"), role("dns-and-tls")),
              "1 minute ago" + cap("report status"), cap("also holds dns-and-tls")]),
         row([name_cell("harbour-web-1", "harbour"), "Enrolled key",
-             roles(role("fleet-machine", "own group"), role("dns-and-tls", "own group")),
+             roles(role("fleet-machine"), role("dns-and-tls")),
              "1 minute ago" + cap("report status"), cap("also holds dns-and-tls")]),
         row([name_cell("grafana-syd-1", "monitoring"), "Enrolled key",
-             roles(role("fleet-machine", "own group"), role("sso-grafana", "grafana-sso")),
+             roles(role("fleet-machine"), role("sso-grafana")),
              "1 minute ago" + cap("report status"), cap("also holds sso-grafana")]),
         row([name_cell("grafana-syd-2", "monitoring"), "Enrolled key",
-             roles(role("fleet-machine", "own group"), role("sso-grafana", "grafana-sso")),
+             roles(role("fleet-machine"), role("sso-grafana")),
              "2 minutes ago" + cap("report status"), cap("also holds sso-grafana")]),
     ]
     attention = ["tamanu-iti-kiosk-14", "tomas.wiremu", "status-digest-bot", "vuln-review-2025"]
@@ -234,7 +249,7 @@ def principals_table(added=False):
     if added:
         R.insert(len(first), row([name_cell("grafana-sidecar", "MCP agent"), "Bearer token",
                                   roles(role("triage")), '<span class="sec2">never</span>', status("new", "o")]))
-    fleet = fleet_rows(5, outliers, 412, 14, ["Enrolled key", roles(role("fleet-machine", "own group")), "1 minute ago"])
+    fleet = fleet_rows(5, outliers, 412, 14, ["Enrolled key", roles(role("fleet-machine")), "1 minute ago"])
     return f"<table>{head}<tbody>{''.join(R)}{fleet}</tbody></table>"
 
 
@@ -290,7 +305,7 @@ def releaser_page():
              f'<td>41 days ago</td><td class="r">{status("disabled")}</td></tr></tbody></table>')
     held = ('<table><thead><tr><th style="width:260px">Role</th><th>Through</th><th style="width:150px">Since</th>'
             '</tr></thead><tbody>'
-            f'<tr><td>{role("releaser", "bestool")}</td><td><a href="#">GitHub Actions trust on releaser</a></td><td>12 Mar 2026</td>'
+            f'<tr><td>{role("releaser")}</td><td><a href="#">GitHub Actions trust on releaser</a></td><td>12 Mar 2026</td>'
             '</tr></tbody></table>'
             '<div class="row top" style="margin-top:16px">'
             + field("Role", "Choose a role", 240, ph=True, caret=True) + field("Scope", "Software", 200, caret=True)
@@ -479,9 +494,9 @@ def who_can():
     head = ('<thead><tr><th style="width:260px">Principal</th><th style="width:240px">Role</th><th>Through</th>'
             '<th style="width:150px">Scope matched</th><th style="width:170px">Last matched for this</th></tr></thead>')
     R = [
-        row([name_cell("pgro-harbour", "Service"), roles(role("restore-consumer", "own group")),
+        row([name_cell("pgro-harbour", "Service"), roles(role("restore-consumer")),
              "Enrolled key" + cap("tag:restore-consumer"), "harbour", "1 hour ago"]),
-        row([name_cell("jonas.keller@example.org", "Operator"), roles(role("restore-drill", "harbour")),
+        row([name_cell("jonas.keller@example.org", "Operator"), roles(role("restore-drill")),
              "Direct", "harbour", "never"]),
         row([name_cell("mei.tanaka@example.org", "Operator"), roles(role("admin")), "Direct", "all groups", "never"]),
         row([name_cell("sofia.alvarez@example.org", "Operator"), roles(role("admin")), "Direct", "all groups", "never"]),
@@ -491,7 +506,7 @@ def who_can():
              '<span class="sec2">none</span>', '<span class="sec2">never</span>'], "off"),
     ]
     fleet = ('<tr class="sect"><td colspan="5">Fleet machines<span class="cap">412 in 14 groups</span></td></tr>'
-             + row(['<span class="sec2">none of 412</span>', roles(role("fleet-machine", "own group")),
+             + row(['<span class="sec2">none of 412</span>', roles(role("fleet-machine")),
                     "Enrolled key", '<span class="sec2">none</span>', ""], "fleet"))
     answer = f"<table>{head}<tbody>{''.join(R)}{fleet}</tbody></table>"
     return (q + "<div>" + header("5 principals can consume restore replicas in harbour")
