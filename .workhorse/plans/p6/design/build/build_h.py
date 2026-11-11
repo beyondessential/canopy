@@ -249,7 +249,7 @@ def principals_table(added=False):
              status("new key", "warning") + cap("2 hours ago")]),
         row([name_cell("backup-runner-syd", "Fleet machine, tamanu-prod"), "Enrolled key",
              roles(role("fleet-machine"), role("sso-backup-runner")),
-             "9 minutes ago" + cap("issue identity token"), status("exception", "warning") + cap("ends 30 Nov 2026")]),
+             "9 minutes ago" + cap("request identity token"), status("exception", "warning") + cap("ends 30 Nov 2026")]),
         row([name_cell("tamanu-prod-web-1", "Fleet machine, tamanu-prod"), "Enrolled key",
              roles(role("fleet-machine"), role("dns-and-tls")),
              "1 minute ago" + cap("report status"), cap("also holds dns-and-tls")]),
