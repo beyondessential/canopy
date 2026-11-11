@@ -1,27 +1,32 @@
 # Direction H: principals and roles
 
-Round 2 refines the hybrid the user chose. The principals list is home, permissions live in roles, and Suspend is the cut-off. Seven files are in `.workhorse/design/mockups/p6/h-*.html`, with renders in `shots/r2/`.
+The principals list is home, permissions live in roles, and Suspend is the cut-off. Seven files are in `.workhorse/design/mockups/p6/h-*.html`, built by `build/build_h.py`, with renders in `shots/r4/`.
 
 ## Hard cases, by file
 
 | File | Shows |
 |---|---|
-| `h-principals` | 1 (admin chips marked Tailscale policy), 2 (an unknown tailnet node refused with no roles), 3 (twenty rows), 5 (a revoked token and a suspended admin among live rows), 7 (two outliers above the fleet row and its Show) |
-| `h-principal` | 5 (a disabled certificate beside the live trust), 6 (scoped permissions), 8 (GitHub Actions trust on repository, workflow and environment) |
-| `h-suspend` | 9 (the dialog lists what stops at once, takes a reason, offers to revoke the token too) |
-| `h-roles` | 3, 5 (a suspended role), 7 (`fleet-machine` with its count and Show); built-ins marked, exceptions collapsed |
-| `h-role` | 6 (Consume on restore replicas and Read on backups, own group) |
-| `h-who-can` | 1, 7 (fleet as a count at the foot), 9 (the suspended admin struck through), 10 |
+| `h-principals` | 1 (admins marked Tailscale policy), 2 (an unknown tailnet node, not authorised), 3 (twenty-three rows), 5 (a revoked token, a suspended admin), 7 (six fleet machines surfaced with their reason above the fleet row) |
+| `h-principal` | 5 (a revoked enrolled key beside the live trust), 6 (`releaser` scoped to `bestool` by the role), 8 (GitHub Actions trust) |
+| `h-suspend` | 9 (what stops at once, an optional reason, revoking the token too with its cost) |
+| `h-roles` | 3, 5 (a suspended role), 7 (`fleet-machine` with its count and Show) |
+| `h-role` | 6 (own-group scope, trusted by tailnet tag) |
+| `h-who-can` | 1, 7 (harbour's fleet machines as a count, and why they do not match), 9 (the suspended admin with who, when and why), 10 |
 | `h-token-minted` | 4 |
+
+## Decided since round 2
+
+- `restore-consumer` and `backup-verifier` are trusted by tailnet tag; their members authenticate as tailnet nodes.
+- A scope can be one named record of the noun: `bestool`, `syd-1`, `grafana-sso`.
 
 ## Departures from the brief
 
-- The build agent failed to start (prompt too long, as in round 1). The main session built the files with `build/build_h.py`, reusing round 1's CSS and sidebar.
-- `h-role` trusts `restore-consumer` by tailnet tag rather than by an enrolled machine key with a tag. The restore operators are tailnet nodes today.
-- In `h-who-can` the fleet row answers "none of 412": `fleet-machine` does not hold Consume, and saying so is part of the answer.
+- The release-publisher's old credential is a revoked enrolled key, not a disabled certificate: Revoke is the word for credentials.
+- The matrix gains Triage and Request verbs and Status and Identity tokens nouns, so every role summary is expressible in it.
+- Vulnerability reporting is part of `fleet-machine`'s default, so the fleet row's claim holds without listing dozens of machines.
 
 ## Unsure
 
-- Whether a suspended Tailscale-policy admin should read as Suspended or as Policy first. It reads Suspended here, since that is what decides access.
-- Whether Last matched should say what matched (`write note`) on lists, or only on detail pages. Lists show the time alone.
-- The scope column on `h-role` holds one scope per noun row. A role that wants Read everywhere and Consume in its own group on the same noun has no way to say it.
+- Whether a direct credential's Roles column should list the principal's direct roles, as drawn, or stay empty.
+- The principals add form sits above its long table; the roles add forms sit under theirs, as the shipped Admins page does.
+- Whether Canopy can resolve tailnet group membership. No trust here relies on it.
