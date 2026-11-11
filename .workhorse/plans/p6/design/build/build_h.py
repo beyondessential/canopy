@@ -36,7 +36,7 @@ tr.fleet td{background:rgba(0,0,0,.02)}
 .matrix th,.matrix td{padding:0 8px;height:32px}
 .matrix th{height:40px}
 .matrix td.noun{white-space:nowrap}
-.matrix th.verb,.matrix td.cell{text-align:center;width:72px}
+.matrix th.verb,.matrix td.cell{text-align:center;width:68px}
 .matrix td.cell svg{width:20px;height:20px;vertical-align:middle}
 .matrix td.cell svg.on{fill:#ed6c02}
 .matrix td.cell svg.off{fill:rgba(0,0,0,.38)}
@@ -327,7 +327,7 @@ def triage_page():
 SUSPEND = (
     '<div class="backdrop"><div class="dialog"><h2>Suspend incident-triage-bot?</h2><div class="content">'
     '<p class="d-text">It loses these at once:</p>'
-    '<ul><li>Read incidents and vulnerabilities</li><li>Triage incidents</li><li>Read and write notes</li></ul>'
+    '<ul><li>Read and triage incidents, read vulnerabilities</li><li>Read and write notes</li></ul>'
     '<div style="margin-top:20px">' + field("Reason", "Posting incident notes in a loop", fw=True) + "</div>"
     f'<div class="check">{svg("cboff")}Also revoke its bearer token</div>'
     '</div><div class="actions"><span class="btn">Cancel</span><span class="btn c" style="background:#d32f2f">Suspend</span></div></div></div>'
@@ -350,18 +350,18 @@ def roles_table():
         return row([n, members, perms, last, st], cls)
     R = [
         rr("admin", "2 on the allow-list" + cap("2 by Tailscale policy"), "Everything", "4 minutes ago", builtin=True),
-        rr("operator", "3 tailnet logins", "Read everything; write maintenance and notes", "2 days ago", builtin=True),
-        rr("releaser", "1 by GitHub Actions trust", "Read and publish versions and artifacts" + cap("one piece of software"), "2 hours ago"),
+        rr("operator", "3 tailnet logins", "Read everything, write notes", "2 days ago", builtin=True),
+        rr("releaser", "1 by GitHub Actions trust", "Read and publish versions and artifacts" + cap("bestool"), "2 hours ago"),
         rr("restore-consumer", "2 by enrolled key" + cap("tag:restore-consumer"), "Read backups, consume restore replicas" + cap("own group"), "6 minutes ago"),
-        rr("relay", "1 by relay key", "Connect cluster relay" + cap("one cluster"), "1 minute ago"),
-        rr("triage", "2 bearer tokens", "Read incidents and vulnerabilities, triage incidents", "8 minutes ago"),
+        rr("relay", "1 by relay key", "Connect cluster relay" + cap("syd-1"), "1 minute ago"),
+        rr("triage", "2 bearer tokens", "Read and triage incidents, read vulnerabilities", "8 minutes ago"),
         rr("notes", "1 bearer token", "Read and write notes", "8 minutes ago"),
         rr("dns-and-tls", "2 machines", "Manage DNS names and TLS certificates" + cap("own group"), "3 hours ago"),
-        rr("sso-grafana", "2 machines", "Request identity tokens for grafana-sso", "14 minutes ago"),
-        rr("maintenance-planner", "1 tailnet login", "Write maintenance windows" + cap("one group"), "2 days ago"),
-        rr("backup-verifier", "1 by enrolled key" + cap("tag:backup-verify"), "Read backups, report verification" + cap("all groups"), "20 minutes ago"),
+        rr("sso-grafana", "2 machines", "Request identity tokens" + cap("grafana-sso"), "14 minutes ago"),
+        rr("maintenance-planner", "1 tailnet login", "Write maintenance windows" + cap("harbour"), "2 days ago"),
+        rr("backup-verifier", "1 by enrolled key" + cap("tag:backup-verify"), "Read and report backups", "20 minutes ago"),
         rr("auditor", '<span class="sec2">none</span>', "Read audit log and roles", "never"),
-        rr("deploy-automation", "1 automation", "Write Ansible variables and maintenance", "11 Oct 2026",
+        rr("deploy-automation", "1 automation", "Write Ansible variables and maintenance windows", "11 Oct 2026",
            status("suspended") + cap("12 Oct 2026"), "off"),
     ]
     exc = ('<tr class="sect"><td colspan="5"><span class="row" style="gap:4px">'
@@ -369,7 +369,7 @@ def roles_table():
            '<span class="cap">2 one-member roles, the next ends 25 Nov 2026</span></span></td></tr>')
     fleet = ('<tr class="sect"><td colspan="5">Fleet machines<span class="cap">412 in 14 groups</span></td></tr>'
              + row([f'<div class="row" style="gap:6px"><a class="mono" href="#">fleet-machine</a>{BI}</div>',
-                    "412 by enrolled key", "Report status and vulnerabilities, read own Ansible variables" + cap("own group"),
+                    "412 by enrolled key", "Report status and vulnerabilities, read Ansible variables" + cap("own group"),
                     "1 minute ago", '<span class="btn o s">Show 412</span>'], "fleet"))
     return f"<table>{head}<tbody>{''.join(R)}{exc}{fleet}</tbody></table>"
 
@@ -389,18 +389,19 @@ page("h-roles.html", "Roles, all roles with exceptions collapsed", "Roles",
 
 # ---- h-role (restore-consumer) -----------------------------------------------
 
-VERBS = ["Read", "Write", "Manage", "Publish", "Consume", "Report", "Connect"]
+VERBS = ["Read", "Write", "Manage", "Triage", "Publish", "Consume", "Report", "Request", "Connect"]
 # noun: (accepted verbs, scopes offered or None, checked verbs, scope shown)
 NOUNS = [
     ("Fleet", None),
     ("Groups", ("Read Write Manage", "group", "", "")),
-    ("Machines", ("Read Write Manage Report", "group, environment", "", "")),
-    ("Applications", ("Read Write Manage Report", "group, environment", "", "")),
+    ("Machines", ("Read Write Manage", "group, environment, machine", "", "")),
+    ("Applications", ("Read Write Manage", "group, environment, application", "", "")),
+    ("Status", ("Read Report", "group, environment, machine", "", "")),
     ("Maintenance windows", ("Read Write", "group, environment", "", "")),
     ("Ansible variables", ("Read Write", "group", "", "")),
     ("Names and certificates", None),
-    ("DNS names", ("Read Manage", "application", "", "")),
-    ("TLS certificates", ("Read Manage", "application", "", "")),
+    ("DNS names", ("Read Manage", "group, environment, application", "", "")),
+    ("TLS certificates", ("Read Manage", "group, environment, application", "", "")),
     ("Backups", None),
     ("Backups", ("Read Write Report", "group", "Read", "Own group")),
     ("Restore replicas", ("Read Consume Report", "group", "Read Consume Report", "Own group")),
@@ -408,13 +409,14 @@ NOUNS = [
     ("Versions", ("Read Publish", "software", "", "")),
     ("Artifacts", ("Read Publish", "software", "", "")),
     ("Monitoring", None),
-    ("Incidents", ("Read Write", "group, environment", "", "")),
+    ("Incidents", ("Read Write Triage", "group, environment", "", "")),
     ("Vulnerabilities", ("Read Write Report", "group", "", "")),
     ("Notes", ("Read Write", "group", "", "")),
     ("Access", None),
     ("Roles", ("Read Manage", None, "", "")),
     ("Principals", ("Read Manage", None, "", "")),
     ("Audit log", ("Read", None, "", "")),
+    ("Identity tokens", ("Request", "relying party", "", "")),
     ("Cluster relay", ("Connect", "cluster", "", "")),
 ]
 
