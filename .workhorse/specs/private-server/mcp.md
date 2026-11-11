@@ -179,9 +179,11 @@ Both are refused for a note an operator wrote, naming that as the reason, unless
 
 **Get group**, **Get machine** and **Get application** return the record's notes with their revision (see [FLT](../servers/overview.md), "Notes").
 **Replace notes** takes a group, machine or application identifier, the new text, and the revision the caller read, and replaces the record's notes with the text.
+An identifier is unique within its kind, not across kinds, since an application can share its machine's.
+The tool takes an optional kind (group, machine or application), and an identifier that names more than one record is refused, naming the kinds, until the caller gives one.
 It is refused if the notes have changed since that revision, and the result says so and returns the current notes and revision, so the caller can reconcile and try again.
 The change is recorded in the record's revision log as made through this interface by its caller.
-**Get notes history** takes the same identifier and returns the revision log newest first, each revision with its text, author, how it was made, and when.
+**Get notes history** takes the same identifier and optional kind, refuses an ambiguous identifier in the same way, and returns the revision log newest first, each revision with its text, author, how it was made, and when.
 
 All of these writes are held by the notes grant.
 

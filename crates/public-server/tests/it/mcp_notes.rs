@@ -353,7 +353,7 @@ async fn replacing_notes_states_the_revision_and_is_logged() {
 			&public,
 			&token,
 			"replace_notes",
-			json!({ "id": s.machine, "notes": "rack 4", "revision": 0 }),
+			json!({ "id": s.machine, "kind": "machine", "notes": "rack 4", "revision": 0 }),
 		)
 		.await;
 		ok(&machine);
@@ -383,6 +383,77 @@ async fn replacing_notes_states_the_revision_and_is_logged() {
 		)
 		.await;
 		assert!(refused(&missing));
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_id_shared_by_a_machine_and_its_application_needs_a_kind() {
+	commons_tests::server::run(async |mut conn, public, _private| {
+		let s = seed(&mut conn).await;
+		let (_, token) = noting(&mut conn).await;
+
+		let ambiguous = call(
+			&public,
+			&token,
+			"replace_notes",
+			json!({ "id": s.machine, "notes": "x", "revision": 0 }),
+		)
+		.await;
+		assert!(refused(&ambiguous));
+		assert_eq!(
+			ambiguous["result"]["structuredContent"]["current"]["kinds"],
+			json!(["machine", "application"])
+		);
+
+		let history = call(
+			&public,
+			&token,
+			"get_notes_history",
+			json!({ "id": s.machine }),
+		)
+		.await;
+		assert!(refused(&history));
+
+		let app = call(
+			&public,
+			&token,
+			"replace_notes",
+			json!({ "id": s.machine, "kind": "application", "notes": "app notes", "revision": 0 }),
+		)
+		.await;
+		assert_eq!(ok(&app)["revision"], 1);
+
+		let machine = call(
+			&public,
+			&token,
+			"replace_notes",
+			json!({ "id": s.machine, "kind": "machine", "notes": "box notes", "revision": 0 }),
+		)
+		.await;
+		assert_eq!(ok(&machine)["revision"], 1);
+
+		for (kind, text) in [("application", "app notes"), ("machine", "box notes")] {
+			let history = call(
+				&public,
+				&token,
+				"get_notes_history",
+				json!({ "id": s.machine, "kind": kind }),
+			)
+			.await;
+			let history = ok(&history);
+			assert_eq!(history["kind"], kind);
+			assert_eq!(history["revisions"][0]["notes"], text);
+		}
+
+		let wrong = call(
+			&public,
+			&token,
+			"replace_notes",
+			json!({ "id": s.machine, "kind": "group", "notes": "x", "revision": 0 }),
+		)
+		.await;
+		assert!(refused(&wrong));
 	})
 	.await
 }
