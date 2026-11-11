@@ -336,19 +336,35 @@ def held_roles(rows):
             + '<span class="btn o">Add role</span></div>')
 
 
+OFF = ' class="off"'
+
+
+def credentials(rows):
+    """A principal's credentials: what each must present, the roles it reaches,
+    when it last matched, and its state or the action on it."""
+    body = "".join(
+        f'<tr{OFF if off else ""}><td>{name}</td><td>{present}</td><td>{held}</td><td>{last}</td>'
+        f'<td class="r">{end}</td></tr>'
+        for name, present, held, last, end, off in rows)
+    return ('<table class="top"><thead><tr><th style="width:190px">Credential</th><th>Must present</th>'
+            '<th style="width:200px">Roles</th><th style="width:150px">Last matched</th>'
+            '<th class="r" style="width:150px"></th></tr></thead>'
+            f'<tbody>{body}</tbody></table>')
+
+
 def releaser_page():
     head = detail_head("release-publisher", "CI workflow", '<span class="btn oe">Suspend</span>')
     f = facts([("Authenticates by", "GitHub Actions trust"), ("Last matched", "2 hours ago, publish version 3.4.1"),
                ("Added", "12 Mar 2026 by mei.tanaka")])
-    claims = ('<dl class="claims"><dt>Issuer</dt><dd>token.actions.githubusercontent.com</dd>'
+    claims = ('<dl class="claims"><dt>issuer</dt><dd>token.actions.githubusercontent.com</dd>'
               '<dt>repository</dt><dd>beyondessential/bestool</dd>'
               '<dt>workflow</dt><dd>.github/workflows/release.yml</dd>'
               '<dt>environment</dt><dd>release</dd></dl>')
-    creds = ('<table class="top"><thead><tr><th style="width:190px">Credential</th><th>Must present</th>'
-             '<th style="width:170px">Role</th><th style="width:150px">Last matched</th><th class="r" style="width:150px">Status</th></tr></thead><tbody>'
-             f'<tr><td>GitHub Actions trust</td><td>{claims}</td><td>{role("releaser")}</td><td>2 hours ago</td><td></td></tr>'
-             f'<tr class="off"><td>Enrolled key</td><td class="mono">SHA256:9f2c 41d7 &hellip; e41a</td><td class="sec2">none</td>'
-             f'<td>30 Sep 2026</td><td class="r">{status("revoked")}{cap("by mei.tanaka, 1 Oct 2026")}</td></tr></tbody></table>')
+    creds = credentials([
+        ("GitHub Actions trust", claims, roles(role("releaser")), "2 hours ago", "", False),
+        ("Enrolled key", '<span class="mono">SHA256:9f2c 41d7 &hellip; e41a</span>', '<span class="sec2">none</span>',
+         "30 Sep 2026", status("revoked") + cap("by mei.tanaka, 1 Oct 2026"), True),
+    ])
     held = held_roles([("releaser", "bestool", "Versions, Artifacts", "GitHub Actions trust on releaser", "12 Mar 2026")])
     eff = ('<table><thead><tr><th>Permission</th><th style="width:200px">Scope</th><th style="width:200px">Role</th>'
            '<th style="width:150px">Last matched</th></tr></thead><tbody>'
@@ -357,7 +373,7 @@ def releaser_page():
            f'<tr><td>Read artifacts</td><td>bestool</td><td>{role("releaser")}</td><td>2 hours ago</td></tr>'
            f'<tr><td>Read versions</td><td>bestool</td><td>{role("releaser")}</td><td>5 days ago</td></tr>'
            '</tbody></table>')
-    return (head + f + section("Credentials", creds, '<span class="btn o">Add credential</span>')
+    return (head + f + section("Credentials", creds, '<span class="btn o">Add enrolled key</span>')
             + section("Roles", held) + section("Effective permissions", eff))
 
 
@@ -369,11 +385,10 @@ def triage_page():
     head = detail_head("incident-triage-bot", "MCP agent", '<span class="btn oe">Suspend</span>')
     f = facts([("Authenticates by", "Bearer token"), ("Last matched", "8 minutes ago, write note"),
                ("Added", "2 Feb 2026 by sofia.alvarez")])
-    creds = ('<table><thead><tr><th style="width:190px">Credential</th><th>Must present</th>'
-             '<th style="width:170px">Role</th><th style="width:150px">Last matched</th><th class="r" style="width:120px"></th></tr></thead><tbody>'
-             '<tr><td>Bearer token</td><td><span class="mono">canopy_mcp_7Hq2&hellip;</span>' + cap("expires 2 Feb 2027") + '</td>'
-             f'<td>{roles(role("triage"), role("notes"))}</td><td>8 minutes ago</td>'
-             '<td class="r"><span class="btn oe s">Revoke</span></td></tr></tbody></table>')
+    creds = credentials([
+        ("Bearer token" + cap("expires 2 Feb 2027"), "The token issued 2 Feb 2026", roles(role("triage"), role("notes")),
+         "8 minutes ago", '<span class="btn oe s">Revoke</span>', False),
+    ])
     held = held_roles([("triage", "", "Incidents, Vulnerabilities", "Direct", "2 Feb 2026"),
                        ("notes", "", "Notes", "Direct", "2 Feb 2026")])
     return head + f + section("Credentials", creds) + section("Roles", held)
