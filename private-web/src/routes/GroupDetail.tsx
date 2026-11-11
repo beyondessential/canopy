@@ -28,6 +28,7 @@ import ActiveIncidentCard from "../components/ActiveIncidentCard";
 import GroupTree from "../components/GroupTree";
 import MaintenanceHeaderButton from "../components/MaintenanceHeaderButton";
 import MaintenanceSection from "../components/MaintenanceSection";
+import { NoteText } from "../components/Markdown";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import { useApi, useApiAction } from "../api";
 import { GradedAction } from "../components/GradedAction";
@@ -218,9 +219,7 @@ export default function GroupDetail() {
 					<Typography variant="h6" component="h2" gutterBottom>
 						Notes
 					</Typography>
-					<Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-						{group.notes}
-					</Typography>
+					<NoteText>{group.notes}</NoteText>
 					<NotesHistory record={{ module: "fleet/groups", id: group.id }} />
 				</Paper>
 			)}

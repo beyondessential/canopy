@@ -84,6 +84,7 @@ Resolution cascades to the incident's open issues — each is resolved with the 
 Unresolving clears the resolution record; it does not reopen the incident.
 
 Notes attach free-form commentary to an incident, each recording who wrote it and when.
+A note is written in markdown and rendered as markdown wherever it is shown (see [FLT](../servers/overview.md), "Notes").
 A note can be added by an operator or by an agent through the fleet query interface (see [MCP](../private-server/mcp.md)).
 An operator can delete any note, and an agent can edit or delete a note another agent wrote but not one an operator wrote.
 An operator using the fleet query interface can edit or delete a note they wrote, as well as an agent's.

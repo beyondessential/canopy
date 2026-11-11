@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { callApi, useApi } from "../api";
 import { GradedAction } from "../components/GradedAction";
+import { NoteText } from "../components/Markdown";
 import TimeAgo from "../components/TimeAgo";
 import { useDebounced } from "../hooks/useDebounced";
 import { useIsAdmin } from "../hooks/useIsAdmin";
@@ -338,9 +339,7 @@ function EntryCard({
 			</Stack>
 			{open && (
 				<Box sx={{ mt: 1.5 }}>
-					<Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-						{entry.body}
-					</Typography>
+					<NoteText>{entry.body}</NoteText>
 					<Typography
 						variant="caption"
 						color="text.secondary"
