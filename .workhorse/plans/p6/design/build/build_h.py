@@ -431,16 +431,16 @@ def roles_table():
 
 
 def add_role():
-    return ('<div class="paper"><div class="row top">'
+    return ('<div class="row top" style="margin-top:16px">'
             + field("Name", "e.g. backup-auditor", ph=True, fw=True, mono=True)
             + field("Start from", "Empty", 220, caret=True)
-            + '<span class="btn c">Add role</span></div></div>')
+            + '<span class="btn c">Add role</span></div>')
 
 
 page("h-roles.html", "Roles, all roles with exceptions collapsed", "Roles",
-     add_role() + "<div>" + header("Roles", WHO)
+     "<div>" + header("Roles", WHO)
      + '<div class="row" style="margin:16px 0 12px">' + field("Search", "Role or member", ph=True, fw=True) + "</div>"
-     + roles_table() + "</div>")
+     + roles_table() + add_role() + "</div>")
 
 
 # ---- h-role (restore-consumer) -----------------------------------------------
@@ -517,8 +517,15 @@ def role_page():
                '<tr><td><a class="mono" href="#">pgro-restore-operator</a></td><td>tamanu-prod</td><td>Tailnet tag</td><td>6 minutes ago</td></tr>'
                '<tr><td><a class="mono" href="#">pgro-harbour</a></td><td>harbour</td><td>Tailnet tag</td><td>1 hour ago</td></tr>'
                '</tbody></table>')
-    return (head + f + section("Permissions", matrix()) + section("Trusts", trusts, '<span class="btn o">Add trust</span>')
-            + section("Members", members, '<span class="btn o">Add member</span>'))
+    add_trust = ('<div class="row top" style="margin-top:16px">'
+                 + field("Trust", "Tailnet tag", 190, caret=True)
+                 + field("Must present", "e.g. tag:restore-consumer", ph=True, fw=True, mono=True)
+                 + '<span class="btn o">Add trust</span></div>')
+    add_member = ('<div class="row top" style="margin-top:16px">'
+                  + field("Principal", "Choose a principal", 300, ph=True, caret=True)
+                  + '<span class="btn o">Add member</span></div>')
+    return (head + f + section("Permissions", matrix()) + section("Trusts", trusts + add_trust)
+            + section("Members", members + add_member))
 
 
 page("h-role.html", "Role restore-consumer: permissions, trusts and members", "Roles", role_page())
