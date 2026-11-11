@@ -239,27 +239,27 @@ def principals_table(added=False):
                   roles(role("restore-consumer")), "1 hour ago" + cap("consume replica, harbour"), ""]))
     R.append(row([name_cell("backup-verify-syd", "Service"), "Tailnet node",
                   roles(role("backup-verifier")), "20 minutes ago" + cap("report backup verification"), ""]))
-    R.append(row([name_cell("relay-syd-1", "Service"), "Relay key",
+    R.append(row([name_cell("relay-syd-1", "Service"), "Enrolled key",
                   roles(role("relay")), "1 minute ago" + cap("connect cluster relay"), ""]))
     R.append(row([name_cell("ci-deploy-runner", "Automation"), "Enrolled key",
                   roles(role("deploy-automation", struck=True)), "11 Oct 2026" + cap("edit Ansible variable"), ""]))
     outliers = [
-        row([name_cell("tamanu-prod-db-3", "tamanu-prod"), "Enrolled key",
+        row([name_cell("tamanu-prod-db-3", "Fleet machine, tamanu-prod"), "Enrolled key",
              roles(role("fleet-machine")), "2 minutes ago" + cap("report status"),
              status("new key 2h ago", "warning")]),
-        row([name_cell("backup-runner-syd", "tamanu-prod"), "Enrolled key",
+        row([name_cell("backup-runner-syd", "Fleet machine, tamanu-prod"), "Enrolled key",
              roles(role("fleet-machine"), role("sso-backup-runner")),
              "9 minutes ago" + cap("issue identity token"), status("exception", "warning") + cap("ends 30 Nov")]),
-        row([name_cell("tamanu-prod-web-1", "tamanu-prod"), "Enrolled key",
+        row([name_cell("tamanu-prod-web-1", "Fleet machine, tamanu-prod"), "Enrolled key",
              roles(role("fleet-machine"), role("dns-and-tls")),
              "1 minute ago" + cap("report status"), cap("also holds dns-and-tls")]),
-        row([name_cell("harbour-web-1", "harbour"), "Enrolled key",
+        row([name_cell("harbour-web-1", "Fleet machine, harbour"), "Enrolled key",
              roles(role("fleet-machine"), role("dns-and-tls")),
              "1 minute ago" + cap("report status"), cap("also holds dns-and-tls")]),
-        row([name_cell("grafana-syd-1", "monitoring"), "Enrolled key",
+        row([name_cell("grafana-syd-1", "Fleet machine, monitoring"), "Enrolled key",
              roles(role("fleet-machine"), role("sso-grafana")),
              "1 minute ago" + cap("report status"), cap("also holds sso-grafana")]),
-        row([name_cell("grafana-syd-2", "monitoring"), "Enrolled key",
+        row([name_cell("grafana-syd-2", "Fleet machine, monitoring"), "Enrolled key",
              roles(role("fleet-machine"), role("sso-grafana")),
              "2 minutes ago" + cap("report status"), cap("also holds sso-grafana")]),
     ]
