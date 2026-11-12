@@ -145,7 +145,7 @@ pub struct EntryArg {
 	/// `accepted_risk`.
 	pub reason: Option<String>,
 	/// A link to the issue tracking the fix, for `will_fix`. An http or https
-	/// address.
+	/// address, optional.
 	pub issue_url: Option<String>,
 }
 
@@ -589,8 +589,10 @@ impl CanopyMcp {
 		               `workspace_packages`, last), which also covers ones that reach it later. A \
 		               linux item takes only a whole decision. An entry's `outcome` is \
 		               `not_affected` or `accepted_risk`, each with a `reason`, or `will_fix`, \
-		               with an optional reason and an `issue_url`. A reason is a sentence or two, at \
-		               most 500 characters. A decision replaces any \
+		               with an optional reason and an optional `issue_url`. An item that needs a \
+		               fix is `will_fix` whether or not it has an issue link, never \
+		               `accepted_risk`. A reason is a sentence or two, at most 500 characters. A \
+		               decision replaces any \
 		               current one, an operator's included, and the history keeps the one it \
 		               replaced. Each item is judged on its own: the valid ones are recorded and \
 		               audited, and the others refused with the reason and no effect. The result \
@@ -747,7 +749,8 @@ fn triage_guidance(repository: &str) -> String {
 		 5. Propose decisions to the user in batches of ten items. For each, give the outcome \
 		 (not_affected, accepted_risk or will_fix), and a reason that says what you checked: the \
 		 files and calls you read and what they showed, not a restatement of the advisory. A will \
-		 fix takes the link to the issue tracking the fix where there is one. Where the code \
+		 fix takes the link to the issue tracking the fix where there is one. An item that needs \
+		 a fix is will_fix whether or not it has an issue, never accepted_risk. Where the code \
 		 shows that workspace packages differ in how they use the package, propose a split \
 		 decision with an entry per group of workspace packages, ending in a catch-all if later \
 		 ones should be covered; where it does not, a whole decision. A Linux item takes only a \
