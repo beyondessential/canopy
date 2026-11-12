@@ -169,6 +169,7 @@ All three writes are held by the triage grant.
 The agent lists the repository's items that need triage, groups and orders them as it finds easiest for a person to review, and reads how the code uses each vulnerable package.
 It then puts its proposed decisions to the user in batches of ten, each with a reason that says what was checked, and records a batch only once the user has confirmed it, so a person approves every decision.
 The prompt tells the agent that the model's suggestions were made without source and are to be checked, and that an advisory it cannot verify from the code is left for a person.
+It also tells the agent that an item needing a fix is will fix whether or not it has an issue to link, and never accepted risk.
 
 ### Notes
 
