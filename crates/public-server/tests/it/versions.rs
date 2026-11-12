@@ -1068,3 +1068,32 @@ async fn mobile_package_for_an_exact_version_without_one_is_not_found() {
 	})
 	.await
 }
+
+/// 2.68.2 changed only the servers, so the install page for the minor version
+/// offers 2.68.1, the newest release with a mobile build.
+#[tokio::test(flavor = "multi_thread")]
+async fn mobile_install_page_skips_a_release_without_a_mobile_build() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		seed_mobile_packages(&mut conn).await;
+
+		let response = public.get("/versions/2.68/mobile").await;
+		response.assert_status_ok();
+		let page = response.text();
+		assert!(page.contains("Version 2.68.1"), "{page}");
+		assert!(page.contains("https://clients.example/2.68.1/android/tamanu/app-release.apk"));
+		assert!(!page.contains("No mobile artifacts available"));
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mobile_install_page_for_a_release_without_a_mobile_build_says_so() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		seed_mobile_packages(&mut conn).await;
+
+		let response = public.get("/versions/2.68.2/mobile").await;
+		response.assert_status_ok();
+		assert!(response.text().contains("No mobile artifacts available"));
+	})
+	.await
+}
