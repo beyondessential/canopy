@@ -939,8 +939,8 @@ async fn changelog_is_capped_at_a_mebibyte() {
 	.await
 }
 
-/// 2.68.2 is the newest patch but has no package yet, and 2.69.0 is outside
-/// the minor version, so `~2.68.0` resolves to 2.68.1.
+/// 2.68.2 is the newest patch but changed only the servers, so it has no
+/// mobile package, and 2.69.0 is outside the minor version.
 async fn seed_mobile_packages(conn: &mut diesel_async::AsyncPgConnection) {
 	conn.batch_execute(
 		"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
@@ -960,20 +960,15 @@ async fn seed_mobile_packages(conn: &mut diesel_async::AsyncPgConnection) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn mobile_package_redirects_to_newest_patch_with_a_package() {
+async fn mobile_package_refuses_a_range() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		seed_mobile_packages(&mut conn).await;
 
 		for path in [
 			"/versions/~2.68.0/mobile/package",
-			"/versions/~2.68.0/mobile/package?branding=tamanu",
+			"/versions/2.68/mobile/package?branding=tamanu",
 		] {
-			let response = public.get(path).await;
-			response.assert_status(StatusCode::TEMPORARY_REDIRECT);
-			response.assert_header(
-				"location",
-				"https://clients.example/2.68.1/android/tamanu/app-release.apk",
-			);
+			public.get(path).await.assert_status_bad_request();
 		}
 	})
 	.await
@@ -987,7 +982,7 @@ async fn mobile_package_answers_head() {
 		let response = public
 			.method(
 				axum::http::Method::HEAD,
-				"/versions/~2.68.0/mobile/package?branding=tamanu",
+				"/versions/2.68.1/mobile/package?branding=tamanu",
 			)
 			.await;
 		response.assert_status(StatusCode::TEMPORARY_REDIRECT);
@@ -995,21 +990,6 @@ async fn mobile_package_answers_head() {
 			"location",
 			"https://clients.example/2.68.1/android/tamanu/app-release.apk",
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn mobile_package_without_a_match_is_not_found() {
-	commons_tests::server::run(async |mut conn, public, _| {
-		seed_mobile_packages(&mut conn).await;
-
-		for path in [
-			"/versions/~2.70.0/mobile/package",
-			"/versions/~2.67.0/mobile/package",
-		] {
-			public.get(path).await.assert_status_not_found();
-		}
 	})
 	.await
 }

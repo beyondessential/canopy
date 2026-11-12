@@ -647,44 +647,35 @@ async fn view_mobile_install(
 	Ok(Html(tera.render("mobile", &context)?))
 }
 
-/// Redirect to the Android package of an exact version, or of the newest
-/// version in a range.
+/// Redirect to the Android package of an exact version.
 ///
 /// This is the address central hands an out-of-date Tamanu mobile app to
 /// update itself from, so it is answered for GET and HEAD alike (axum answers
 /// HEAD from the GET handler) and points at the file's own host, which serves
-/// the length, byte ranges, and HTTPS the app's download relies on. A version
-/// or range with no package is a 404 rather than another version's package:
+/// the length, byte ranges, and HTTPS the app's download relies on. Central
+/// names the exact release its devices must run, so a range is refused, and a
+/// version with no package is a 404 rather than another version's package:
 /// the app installs what it is given.
 async fn mobile_package(
 	Path(version): Path<String>,
 	State(db): State<Db>,
 	headers: axum::http::HeaderMap,
 ) -> Result<Redirect> {
-	let mut db = db.get().await?;
-
-	// An exact version is the release central requires its devices to run, so
-	// it is answered for itself, known issue or not: they cannot sync until
-	// they run it. A range resolves among ready versions, and since a version
-	// is published before its package is registered, the newest one carrying a
-	// package is the one to offer, not the newest version.
-	let candidates = if node_semver::Version::parse(&version).is_ok() {
-		vec![version_named(&mut db, &version).await?]
-	} else {
-		ready_matching(&mut db, VersionRange::from_str(&version)?.0).await?
-	};
-
-	for version in candidates {
-		let package = offered_artifacts(&mut db, &version, Scope::Unscoped, &headers)
-			.await?
-			.into_iter()
-			.find(|a| a.artifact_type == "mobile" && a.platform == "android");
-		if let Some(package) = package {
-			return Ok(Redirect::temporary(&package.download_url));
-		}
+	if node_semver::Version::parse(&version).is_err() {
+		return Err(AppError::BadRequest(
+			"The mobile package is served for an exact version only".into(),
+		));
 	}
 
-	Err(AppError::ArtifactNotFound)
+	let mut db = db.get().await?;
+	// Answered for itself, known issue or not: devices cannot sync until they run it.
+	let version = version_named(&mut db, &version).await?;
+	let package = offered_artifacts(&mut db, &version, Scope::Unscoped, &headers)
+		.await?
+		.into_iter()
+		.find(|a| a.artifact_type == "mobile" && a.platform == "android")
+		.ok_or(AppError::ArtifactNotFound)?;
+	Ok(Redirect::temporary(&package.download_url))
 }
 
 /// Check for available updates from a given version.
