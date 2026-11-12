@@ -616,14 +616,30 @@ async fn view_mobile_install(
 	headers: axum::http::HeaderMap,
 ) -> Result<Html<String>> {
 	let mut db = db.get().await?;
-	let version = VersionRange::from_str(&version)?;
-	let version = latest_matching_ready(&mut db, version.0).await?;
-	let artifacts = offered_artifacts(&mut db, &version, Scope::Unscoped, &headers)
-		.await?
-		.into_iter()
-		.filter(|a| a.artifact_type == "mobile")
-		.map(ArtifactWithQR::from)
-		.collect::<Vec<_>>();
+	let candidates = ready_matching(&mut db, VersionRange::from_str(&version)?.0).await?;
+	if candidates.is_empty() {
+		return Err(AppError::NoMatchingVersions);
+	}
+
+	// A release that changed only the servers has no mobile build, so the page
+	// offers the newest ready version that has one, as the package address does.
+	let mut shown = None;
+	for candidate in candidates {
+		let artifacts = offered_artifacts(&mut db, &candidate, Scope::Unscoped, &headers)
+			.await?
+			.into_iter()
+			.filter(|a| a.artifact_type == "mobile")
+			.map(ArtifactWithQR::from)
+			.collect::<Vec<_>>();
+		let has_build = !artifacts.is_empty();
+		if shown.is_none() || has_build {
+			shown = Some((candidate, artifacts));
+		}
+		if has_build {
+			break;
+		}
+	}
+	let (version, artifacts) = shown.expect("there is at least one candidate");
 
 	let mut context = Context::new();
 	context.insert("version", &version);
