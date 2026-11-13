@@ -39,7 +39,7 @@ Each token records when it was last used, so idle tokens are visible.
 
 A token carries the grants chosen when it is minted, which cannot be changed afterwards; a token minted without one never gains it.
 The **triage grant** allows the token to record, withdraw and edit vulnerability triage decisions.
-The **notes grant** allows the token to add notes to issues and incidents and to edit and delete the notes agents wrote, to replace the notes of a group, machine or application, and to record, amend, retire and restore [incident memory](../monitoring/incident-memory.md) entries.
+The **notes grant** allows the token to add notes to issues and incidents and to edit and delete the notes agents wrote, to replace the notes of a group, machine or application, to record, amend, retire and restore [incident memory](../monitoring/incident-memory.md) entries, and to record [alert triage](../monitoring/alert-triage.md) verdicts.
 A token is minted with no grants unless the administrator chooses one, so every token reads only unless minted to write.
 The token list shows each token's grants.
 
@@ -212,6 +212,25 @@ Incident counts follow the same rule as **Find incidents**, counting published i
 **Retire memory entry** takes an identifier and a reason.
 **Restore memory entry** takes an identifier, the revision read, and the earlier version to restore, and is refused as an amendment is when the entry has changed since.
 All four are held by the notes grant, and each is audited as the action it takes (see [AUD](../platform/audit-log.md)).
+
+### Alert triage
+
+These tools carry [alert triage](../monitoring/alert-triage.md): Canopy's rules for whether an incident notification needs a person now.
+
+**Triage alert** takes an incident identifier and returns what a triage of it needs, in one result:
+
+- the incident with its live issues, its notes, and its earlier triage verdicts
+- for each failing check, its documentation, its stability record, and the incident memory entries linked to it, its group, or the incident
+- the open incidents on other environments failing a check in common with it, and the incidents on other environments that opened close in time to it, as candidates for a shared cause
+- whether the incident must be escalated, with each reason and what it rests on, and which reason the harmless-pattern exception can answer
+- the rules for what remains to Claude's judgement and what an escalation or a log entry says
+
+The tool's description tells an agent to call it for every Canopy incident notification before deciding anything.
+
+**Record alert triage** takes an incident identifier, a verdict of escalated or logged, the reasoning, a link to where the verdict was posted, and, for a logged verdict relying on the harmless-pattern exception, the memory entry it relies on.
+It records the verdict with the incident's worst result and failing checks at that moment, and adds the reasoning to the incident as a note by its caller.
+A logged verdict is refused, naming the reasons, when Canopy has decided the incident must be escalated, unless the only reason is the production opening and the memory entry given is linked to a failing check or the incident's group.
+It is held by the notes grant and audited as the action it takes.
 
 ### Audit log
 

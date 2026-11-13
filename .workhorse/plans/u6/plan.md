@@ -1,47 +1,63 @@
 # Alert triage with Claude Tag
 
-Delivered as a Claude plugin in this repo, attached to the Claude Tag bundle for the two channels, plus Slack and Claude Tag configuration. There are no Canopy code changes.
+The triage rules live in Canopy, served through two new MCP tools. Claude Tag calls them from the thread under each alert. Its channel instructions keep only the Slack side: which channels, the post layout and the write-up thread.
 
 ## Shape
 
-- A new plugin `plugins/canopy-alert-triage/` with two skills:
-  - **triage-canopy-alert**: runs in the thread under each alert. It reads the incident over MCP, makes the assessment, posts the escalation or the write-up reply, replies in the alert's thread, and writes the incident note.
-  - **daily-alert-write-up**: run by a routine at 8am Pacific/Auckland. It summarises the previous write-up day and opens the new thread.
-- The plugin depends on the `canopy-mcp` plugin for fleet access. Both attach to the same bundle.
-- The **incident note is the state store.** Each triage note carries a fixed machine-readable first line, so a later triage can read the last verdict, the worst result at the time, and the escalation post's permalink. An example of the line: `triage: escalated | worst=error | post=<permalink>`. That way, deciding whether an incident is worse needs nothing from Slack.
-- Finding the day's thread: the opening post has a fixed title, `Alert triage · <weekday> <date> (NZ)`. The triage skill finds the newest such post by Claude in the triage channel, and starts one itself when the newest is more than a day old.
+### Canopy (this repo)
+
+- **`triage_alert(incident_id)`** in `crates/canopy-mcp`. It gathers, in one call:
+  - the incident, its live issues and its notes
+  - its triage verdicts so far
+  - each failing check's documentation, stability record and linked memory entries
+  - the related-incident candidates
+
+  It computes the must-escalate reasons in TRI's "What Canopy decides" list, and returns them with the judgement rules and post contents as text.
+- **`record_alert_triage(...)`** stores the verdict and the baseline snapshot (worst result and failing checks), and adds the reasoning as an agent note.
+  - It refuses a logged verdict against must-escalate reasons, except the production-opening reason backed by a linked memory entry.
+  - It's held by the notes grant, and is a new audit action.
+- **Storage:** a new table of triage verdicts, one row per verdict, keyed to the incident. Each row holds the verdict, worst result, failing check set (source and check), post link, memory entry used, the note it wrote, the caller and the time. Create it with `just migration`, never by hand.
+  - A structured row rather than parsing a note's first line: the comparison with the last triage must not depend on free text.
+- **Mechanical rules**, all decided in the database crate so they can be tested without MCP:
+  - First triage of a production or Canopy-wide incident: no earlier verdict rows, and the target is production (`Machine::environment_rank`, never the raw `rank`) or Canopy.
+  - Escalating failure newly live: a live member with an effective failure and escalates set, whose check wasn't in the last snapshot as escalating.
+  - Worse: the current worst live result outranks the snapshot's.
+  - New failing check: a check failing now that wasn't in the snapshot set.
+  - Shared check: an open incident on another target with a live failure on the same source and check.
+  - Unfamiliar: no documentation, no memory entry linked to the check, and no earlier published incident containing it.
+- **Shared-cause candidates:** incidents on other targets opened within 30 minutes of this one. Claude judges these; they're never a must-escalate.
+- **Server instructions** (`lib.rs`) get a paragraph pointing agents at `triage_alert` for Canopy incident notifications.
+
+### Claude Tag (configuration, documented in a README)
+
+- Add a written-out `@Claude triage this incident: {link}` line to the incident open and resolve workflows. Maintenance workflows get just the mention.
+- Alerts channel instructions: take the id from the link (never fetch it), call `triage_alert`, follow it, post, call `record_alert_triage`, then reply with one line.
+- Triage channel instructions: the escalation thread behaviour, memory recording and the daily write-up.
+- The 8am Pacific/Auckland routine in the triage channel.
+- A token with the notes grant in the bundle's credential for `meta.tamanu.app`.
 
 ## Risks to settle before building
 
-- **Cross-channel posting from a reply-triggered session.** The Claude Tag docs allow a *routine* to post into another public channel. They don't say whether a thread session started by a bot's `@Claude` can post top-level into another channel, or reply in a thread there. Spike this first with a test workflow in a scratch pair of channels.
-  - If it can't, the fallback is to run triage from an hourly routine in the triage channel that sweeps the alerts channel, which loses immediacy.
-  - The other fallback is a second Canopy webhook that posts each alert to the triage channel too.
-- **Workflow mentions.** Confirm that a Workflow Builder message can mention the Claude app so that it reaches Claude as a real `@Claude`. Claude Tag replies to a bot's mention unless the channel's **Respond automatically** setting is off.
-- **Finding the incident from the post.** The open workflow's message reads as follows:
-  - a `:deciduous_tree::rotating_light: <server>` line
-  - `Severity:`
-  - `Source:`, which carries the counts
-  - the issue list
-  - an **Open in Canopy** button linking to `https://canopy.tail53aef.ts.net/incidents/<id>`
-
-  That link is on the tailnet, which Claude Tag can't reach. The skill takes the incident id from the URL and reads the incident through the public MCP mount, never by fetching the link. The open question is whether Claude Tag sees a button's URL at all, or only the message text.
-  - Test it in the spike by asking Claude for the incident id.
-  - If it can't see the URL, put the link (or the bare id) in the message text too, beside the `@Claude` mention.
-  - The last resort is matching `server` against Find incidents, which is ambiguous when a group has more than one open incident across its environments.
-- **Health data.** Claude Tag isn't covered by Anthropic's BAA. Canopy alerts are infrastructure, but check messages are free text. Confirm no check puts patient data in its message, and keep raw output out of memory entries (TRI already says so).
-- **Spend.** Triage costs one session per alert, which on a noisy day could be dozens. Set a spend limit on the bundle and watch the first week.
+- **Cross-channel posting from a reply-triggered session.** The docs allow a *routine* to post into another public channel. They're silent on whether a thread session started by a bot's `@Claude` can post at the top level of another channel, or reply in one of its threads. Spike it in scratch channels.
+  - Fallback: an hourly routine in the triage channel that sweeps the alerts channel, which loses immediacy.
+  - Alternatively: a second Canopy webhook that also posts each alert to the triage channel.
+- **Workflow mentions.** Confirm that a Workflow Builder message can mention the Claude app as a real `@Claude`. **Respond automatically** must be on in the alerts channel.
+- **Finding the incident from the post.** The **Open in Canopy** button links to `https://canopy.tail53aef.ts.net/incidents/<id>`, which is on the tailnet and unreachable. The written-out link line gives Claude the id either way. The spike also checks whether Claude sees a button's URL at all.
+- **Health data.** Claude Tag isn't covered by Anthropic's BAA. Check messages are free text, so confirm none carries patient data. Memory entries never hold raw output (TRI).
+- **Spend.** Each alert costs one session. Set a spend limit on the bundle and watch the first week.
 
 ## Checklist
 
-- [ ] Spike: cross-channel post and workflow `@Claude` mention, in scratch channels
-- [ ] Mint a Canopy MCP token named for the triage with the **notes grant**, and swap it in as the bundle's credential for `meta.tamanu.app`
-- [ ] Write `plugins/canopy-alert-triage/` (plugin.json, two skills) and add it to `.claude-plugin/marketplace.json`
-- [ ] Encode TRI's escalation rules in the triage skill, including the uncertainty rule and the harmless-pattern exception
-- [ ] Write the plugin README with setup steps:
-  - create the triage channel (public) and invite Claude
-  - add `@Claude` to the incident open, incident resolve, maintenance declared and maintenance ended workflows
-  - attach both plugins to a bundle scoped to the two channels
-  - set **Respond automatically** on in the alerts channel
-  - post the routine message in the triage channel
-- [ ] Update the `canopy-mcp` README: the token is no longer read-only when the notes grant is used
-- [ ] Trial run: replay a week of past incidents (Find incidents) through the triage skill by hand and compare its verdicts with what operators did
+- [ ] Spike in scratch channels: workflow mention, cross-channel post and thread reply, button URL visibility
+- [ ] Migration and model for triage verdicts in `crates/database`
+- [ ] Must-escalate reasons and shared-cause candidates in `crates/database`, with tests covering each reason, the baseline comparison across two triages, and a machine and application seeded under one id
+- [ ] `triage_alert` and `record_alert_triage` in `crates/canopy-mcp`, with the refusal rules and the notes-grant check
+- [ ] New audit action in the `actions!` catalogue for recording a verdict
+- [ ] Server instructions paragraph, and MCP tests in `crates/private-server/tests/it/mcp.rs`
+- [ ] Show the verdict notes on the incident page (they're agent notes, so they may need nothing new; confirm)
+- [ ] README in `plugins/canopy-mcp/` covering:
+  - the workflow edits
+  - both channels' instructions
+  - the routine message
+  - the notes-grant token
+- [ ] Trial: run `triage_alert` over a week of past published incidents and compare its verdicts with what operators did
