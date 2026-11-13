@@ -606,7 +606,7 @@ pub async fn assess(conn: &mut AsyncPgConnection, incident_id: Uuid) -> Result<A
 	let (incident, rows) = Incident::get_with_issues(conn, incident_id).await?;
 	let state = state_of(&incident, &rows);
 	let verdicts = verdicts_for(conn, incident_id).await?;
-	let baseline = verdicts.iter().next();
+	let baseline = <[VerdictRow]>::first(&verdicts);
 	let already_triaged = baseline
 		.filter(|row| row.revision == state.revision)
 		.cloned();
@@ -891,7 +891,7 @@ pub enum Recorded {
 	/// The verdict, the note showing it, and the related incidents escalated
 	/// since the triage read.
 	Done {
-		verdict: VerdictRow,
+		verdict: Box<VerdictRow>,
 		note: IncidentNote,
 		escalated_since: Vec<Related>,
 	},
@@ -999,13 +999,14 @@ pub async fn record(
 		)));
 	}
 
-	if new.verdict == Verdict::Logged && !assessment.reasons.is_empty() {
-		if let Some(why) = exception_refusal(&assessment, &entries) {
-			return Ok(Recorded::Refused {
-				reasons: assessment.reasons,
-				why,
-			});
-		}
+	if new.verdict == Verdict::Logged
+		&& !assessment.reasons.is_empty()
+		&& let Some(why) = exception_refusal(&assessment, &entries)
+	{
+		return Ok(Recorded::Refused {
+			reasons: assessment.reasons,
+			why,
+		});
 	}
 
 	let note = IncidentNote::add(
@@ -1052,7 +1053,7 @@ pub async fn record(
 		.collect();
 
 	Ok(Recorded::Done {
-		verdict: stored.into(),
+		verdict: Box::new(stored.into()),
 		note,
 		escalated_since,
 	})

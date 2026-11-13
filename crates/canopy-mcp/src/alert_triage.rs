@@ -486,7 +486,7 @@ impl CanopyMcp {
 				note,
 				escalated_since,
 			}) => ok_json(&RecordedOut {
-				verdict,
+				verdict: *verdict,
 				note_id: note.id,
 				escalated_since,
 			}),
