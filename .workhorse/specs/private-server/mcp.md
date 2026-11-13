@@ -215,22 +215,27 @@ All four are held by the notes grant, and each is audited as the action it takes
 
 ### Alert triage
 
-These tools carry [alert triage](../monitoring/alert-triage.md): Canopy's rules for whether an incident notification needs a person now.
+These tools carry [alert triage](../monitoring/alert-triage.md), whose rules decide what each tool returns and refuses.
 
 **Triage alert** takes an incident identifier and returns what a triage of it needs, in one result:
 
-- the incident with its live issues, its notes, and its earlier triage verdicts
-- for each failing check, its documentation, its stability record, and the incident memory entries linked to it, its group, or the incident
-- the open incidents on other environments failing a check in common with it, and the incidents on other environments that opened close in time to it, as candidates for a shared cause
-- whether the incident must be escalated, with each reason and what it rests on, and which reason the harmless-pattern exception can answer
-- the rules for what remains to Claude's judgement and what an escalation or a log entry says
+- the incident with its live issues, its notes, its verdicts, and the revision it was read at
+- whether it has already been triaged at its current state, and if so that verdict and where it was reported
+- for each failing check, its documentation, its stability record, and the current incident memory entries linked to it, its group, or the incident
+- the incidents on other targets sharing a failing check with it, and the candidates for a shared cause, each with its latest verdict and where that was reported
+- whether the incident must be escalated, each reason with what it rests on, and whether the harmless-pattern exception can answer them
+- the guidance for what is left to the agent's judgement and for how the verdict is reported
 
-The tool's description tells an agent to call it for every Canopy incident notification before deciding anything.
+It reads only.
+Its description tells an agent to call it for every incident notification before deciding anything.
 
-**Record alert triage** takes an incident identifier, a verdict of escalated or logged, the reasoning, a link to where the verdict was posted, and, for a logged verdict relying on the harmless-pattern exception, the memory entry it relies on.
-It records the verdict with the incident's worst result and failing checks at that moment, and adds the reasoning to the incident as a note by its caller.
-A logged verdict is refused, naming the reasons, when Canopy has decided the incident must be escalated, unless the only reason is the production opening and the memory entry given is linked to a failing check or the incident's group.
-It is held by the notes grant and audited as the action it takes.
+**Record alert triage** takes an incident identifier, the revision read, a verdict of escalated or logged, the reasoning, and any memory entries relied on, and returns the verdict with the related incidents escalated since the revision read.
+It is refused, without effect, on the terms alert triage sets: the incident having changed since the revision, or a logged verdict where Canopy requires an escalation.
+**Attach alert triage report** takes a verdict's identifier and a link to where it was reported.
+
+**Find alert triage verdicts** takes a write-up day, defaulting to the current one, and returns the verdicts recorded in it, each with its incident's target, verdict, reasons, and where it was reported, together with the published incidents of that day that have no verdict.
+
+Recording and attaching are held by the notes grant.
 
 ### Audit log
 

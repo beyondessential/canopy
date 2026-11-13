@@ -92,3 +92,5 @@ An edited note keeps the text it replaced, with who edited it and when.
 A deleted note leaves the incident's notes but is kept, recording who deleted it and when, and administrators can show deleted notes again by asking for them.
 Adding, editing and deleting a note are audited actions (see [AUD](../platform/audit-log.md)).
 What an incident taught beyond its own span belongs in the [incident memory](incident-memory.md).
+
+An incident carries the [alert triage](alert-triage.md) verdicts recorded on it, newest first, each shown as the note its agent wrote.

@@ -1,39 +1,47 @@
 # Alert triage with Claude Tag
 
-The triage rules live in Canopy, served through two new MCP tools. Claude Tag calls them from the thread under each alert. Its channel instructions keep only the Slack side: which channels, the post layout and the write-up thread.
+The triage rules live in Canopy, served through new MCP tools (TRI, MCP "Alert triage"). Claude Tag calls them from the thread under each alert. Its channel configuration holds only the Slack side: the workflow mentions, which channels are which, and the 8am routine. How an escalation or a write-up line reads is guidance Canopy serves.
 
 ## Shape
 
 ### Canopy (this repo)
 
-- **`triage_alert(incident_id)`** in `crates/canopy-mcp`. It gathers, in one call:
-  - the incident, its live issues and its notes
-  - its triage verdicts so far
-  - each failing check's documentation, stability record and linked memory entries
-  - the related-incident candidates
+- **Tools** in `crates/canopy-mcp`:
+  - `triage_alert(incident_id)`: read-only. Returns everything in MCP's list: the incident, its revision, an already-triaged short-circuit, check context, related incidents with their verdicts, the must-escalate reasons, and the served guidance text.
+  - `record_alert_triage(incident_id, revision, verdict, reasoning, memory_entry_ids)`: refuses on a stale revision or a disallowed "logged". Stores the verdict and baseline, adds the agent note, and returns related incidents escalated since the revision.
+  - `attach_alert_triage_report(verdict_id, link)`.
+  - `find_alert_triage_verdicts(day)`: the write-up day's verdicts and the published incidents with none.
+  - Record and attach are held by the notes grant.
+- **Revision:** a digest of the incident's live membership state, built from each live member's issue id, effective result and escalates flag, plus whether the incident is open. It's derived on read, so no column is needed. "Already triaged at this state" means the digest equals the latest verdict's.
+- **Storage:** a new table of verdicts, one row per verdict, keyed to the incident. Each row holds:
+  - the verdict, the reasoning and the revision
+  - the worst result
+  - the failing check set (source, presented name, escalating)
+  - the memory entries relied on and the report link
+  - the note it wrote (`ON DELETE SET NULL`, so deleting the note leaves the verdict), the caller and the time
 
-  It computes the must-escalate reasons in TRI's "What Canopy decides" list, and returns them with the judgement rules and post contents as text.
-- **`record_alert_triage(...)`** stores the verdict and the baseline snapshot (worst result and failing checks), and adds the reasoning as an agent note.
-  - It refuses a logged verdict against must-escalate reasons, except the production-opening reason backed by a linked memory entry.
-  - It's held by the notes grant, and is a new audit action.
-- **Storage:** a new table of triage verdicts, one row per verdict, keyed to the incident. Each row holds the verdict, worst result, failing check set (source and check), post link, memory entry used, the note it wrote, the caller and the time. Create it with `just migration`, never by hand.
-  - A structured row rather than parsing a note's first line: the comparison with the last triage must not depend on free text.
-- **Mechanical rules**, all decided in the database crate so they can be tested without MCP:
-  - First triage of a production or Canopy-wide incident: no earlier verdict rows, and the target is production (`Machine::environment_rank`, never the raw `rank`) or Canopy.
-  - Escalating failure newly live: a live member with an effective failure and escalates set, whose check wasn't in the last snapshot as escalating.
-  - Worse: the current worst live result outranks the snapshot's.
-  - New failing check: a check failing now that wasn't in the snapshot set.
-  - Shared check: an open incident on another target with a live failure on the same source and check.
-  - Unfamiliar: no documentation, no memory entry linked to the check, and no earlier published incident containing it.
-- **Shared-cause candidates:** incidents on other targets opened within 30 minutes of this one. Claude judges these; they're never a must-escalate.
-- **Server instructions** (`lib.rs`) get a paragraph pointing agents at `triage_alert` for Canopy incident notifications.
+  Create it with `just migration`, never by hand.
+- **Mechanical rules**, all in the database crate so they can be tested without MCP:
+  - Each rule applies only to an open incident. A closed or resolved one returns no reasons.
+  - First triage of a production or Canopy-wide incident: no earlier verdict, and the target is production (via the environment rank, `Machine::environment_rank`, never the raw `rank`) or Canopy.
+  - Escalating failure newly live: a failing check with escalates set that wasn't escalating in the baseline set.
+  - Worse: escalating failure > failure > warning, with broken counted as a warning, compared with the baseline's worst.
+  - New failing check: in the live failing set, not in the baseline's.
+  - Shared check: an open incident on another target failing the same source and presented name, where the two failures' degraded-since times are within 30 minutes.
+  - Unfamiliar: no documentation, no current (unretired) memory entry linked to the check, and no *other* published incident fleet-wide that contained it.
+  - Harmless-pattern check: the only reason is the production opening (not Canopy-wide), and every failing check has a current memory entry among those given that is linked to it.
+- **Shared-cause candidates:** incidents on other targets with a failure that began within 30 minutes of this one's and that share no check with it.
+- **Write-up day:** from 08:00 Pacific/Auckland to the next 08:00. Use jiff with the zone, never a fixed offset, so daylight saving is handled.
+- **Self-alert:** a job condition listing published incidents still open an hour past their notification with no verdict. It's live only while any verdict exists from the past week. It warns, and clears once each has a verdict or has closed.
+- **Audit:** two new actions, recording a verdict and attaching its report. The note is audited as the existing note action.
+- **Server instructions** (`lib.rs`): a paragraph pointing agents at `triage_alert` for every incident notification.
 
 ### Claude Tag (configuration, documented in a README)
 
-- Add an `@Claude` mention, picked from the message editor's autocomplete, to the incident open, incident resolve and both maintenance workflows. Claude reads the incident id from the **Open in Canopy** button, so no written-out link is needed.
-- Alerts channel instructions: take the incident id from the Open in Canopy button's URL (never fetch it), call `triage_alert`, follow it, post, call `record_alert_triage`, then reply with one line.
-- Triage channel instructions: the escalation thread behaviour, memory recording and the daily write-up.
-- The 8am Pacific/Auckland routine in the triage channel.
+- Add an `@Claude` mention, picked from the message editor's autocomplete, to the incident open, incident resolve and both maintenance workflows. Claude reads the incident id from the **Open in Canopy** button.
+- Alerts channel instructions: name the triage channel. For each alert, take the incident id from the button's URL (never fetch it), call `triage_alert`, and follow it.
+- Triage channel instructions: answer in threads, record memory from operator confirmations, follow `triage_alert`'s guidance for the write-up.
+- The 8am Pacific/Auckland routine in the triage channel, which opens the day's thread from `find_alert_triage_verdicts`.
 - A token with the notes grant in the bundle's credential for `meta.tamanu.app`.
 
 ## Spike results (2026-11-13)
@@ -52,11 +60,18 @@ All three unknowns passed in scratch channels, so the design stands with no fall
 
 - [x] Spike in scratch channels: workflow mention, cross-channel post and thread reply, button URL visibility
 - [ ] Migration and model for triage verdicts in `crates/database`
-- [ ] Must-escalate reasons and shared-cause candidates in `crates/database`, with tests covering each reason, the baseline comparison across two triages, and a machine and application seeded under one id
-- [ ] `triage_alert` and `record_alert_triage` in `crates/canopy-mcp`, with the refusal rules and the notes-grant check
-- [ ] New audit action in the `actions!` catalogue for recording a verdict
-- [ ] Server instructions paragraph, and MCP tests in `crates/private-server/tests/it/mcp.rs`
-- [ ] Show the verdict notes on the incident page (they're agent notes, so they may need nothing new; confirm)
+- [ ] Incident revision digest, baseline comparison, must-escalate reasons, harmless-pattern check and shared-cause candidates in `crates/database`. Tests to cover:
+  - each reason
+  - closed incidents
+  - two triages in a row
+  - a stale revision
+  - a machine and application seeded under one id
+- [ ] Write-up day boundaries in Pacific/Auckland, tested across a daylight saving change
+- [ ] The four MCP tools in `crates/canopy-mcp`, with the refusal rules and the notes-grant check
+- [ ] Two audit actions in the `actions!` catalogue
+- [ ] Self-alert condition for untriaged published incidents
+- [ ] Server instructions paragraph and the served guidance text, plus MCP tests in `crates/private-server/tests/it/mcp.rs`
+- [ ] Verdict notes on the incident page (agent notes, so confirm nothing new is needed)
 - [ ] README in `plugins/canopy-mcp/` covering:
   - the workflow edits
   - both channels' instructions

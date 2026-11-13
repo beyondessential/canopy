@@ -18,6 +18,7 @@ The current conditions are:
 - An operator-notification delivery has permanently failed (stays until operator-resolved).
 - The recovery escrow could not be written, or was written leaving out values Canopy could not read (see [ESC](../jobs/escrow.md), "Keeping the escrow whole"); it names what is missing, and clears on the next escrow written whole.
 - An MCP access token is within fifteen days of its expiry (see [MCP](mcp.md), "Access tokens").
+- One or more published incidents have stayed open an hour past their notification with no alert triage verdict, while alert triage is in use (see [TRI](../monitoring/alert-triage.md), "Untriaged incidents"); it warns, names each incident, and clears once each has a verdict or has closed.
 - One or more catalogued checks have gone unreported across the whole fleet for thirty days (see [CHK](../monitoring/checks.md), "Liveness and decommissioning"); it clears when no such check remains, each having been decommissioned or reported again.
 - A history has less than two weeks of future range left to write into, failing below one week (see [HST](../platform/history-storage.md), "Running short"); it clears once every history is provisioned ahead again.
 - One or more closed weeks of the audit log have not been archived, warning after a day and failing once an unarchived week's earliest entries are ninety days old (see [AUD](../platform/audit-log.md), "Self-alerts"); it names the weeks outstanding, and clears once every closed week is archived.
