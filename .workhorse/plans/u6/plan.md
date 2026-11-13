@@ -41,7 +41,7 @@ The triage rules live in Canopy, served through two new MCP tools. Claude Tag ca
 - **Cross-channel posting from a reply-triggered session.** The docs allow a *routine* to post into another public channel. They're silent on whether a thread session started by a bot's `@Claude` can post at the top level of another channel, or reply in one of its threads. Spike it in scratch channels.
   - Fallback: an hourly routine in the triage channel that sweeps the alerts channel, which loses immediacy.
   - Alternatively: a second Canopy webhook that also posts each alert to the triage channel.
-- **Workflow mentions.** Confirm that a Workflow Builder message can mention the Claude app as a real `@Claude`. **Respond automatically** must be on in the alerts channel.
+- **Workflow mentions.** Confirmed in the spike (2026-11-13): Claude Tag replies to a Workflow Builder message that mentions it. **Respond automatically** must be on in the alerts channel.
 - **Finding the incident from the post.** The **Open in Canopy** button links to `https://canopy.tail53aef.ts.net/incidents/<id>`, which is on the tailnet and unreachable. The written-out link line gives Claude the id either way. The spike also checks whether Claude sees a button's URL at all.
 - **Health data.** Claude Tag isn't covered by Anthropic's BAA. Check messages are free text, so confirm none carries patient data. Memory entries never hold raw output (TRI).
 - **Spend.** Each alert costs one session. Set a spend limit on the bundle and watch the first week.
