@@ -403,6 +403,84 @@ pub async fn sweep_vulnerability_repositories(
 	.map(Some)
 }
 
+/// Published incidents left open past their notification with no alert triage
+/// verdict, while alert triage is in use. Recovers once each has a verdict or
+/// has closed, or once triage has gone unused long enough to count as off.
+// spec: TRI#untriaged-incidents
+pub const UNTRIAGED_INCIDENTS_REF: &str = "alert-triage-untriaged";
+
+pub const UNTRIAGED_INCIDENTS_DOC: &str = "## Description
+
+Each incident notification Canopy posts to Slack is triaged by an agent, which records a verdict on the incident: escalated to the triage channel, or logged in the day's write-up. This alert means at least one published incident has stayed open an hour past its notification without a verdict, so nobody may have looked at it.
+
+It is raised only while alert triage is in use, which Canopy takes to be while any verdict has been recorded in the past week.
+
+## Results
+
+- **warn** — one or more open published incidents have no verdict an hour after they notified. The message names each. Recovers once each has a verdict or has closed.
+
+## Solve
+
+Open each incident named and look at it yourself. Then check the triaging agent: whether it replied under the notification in the alerts channel, whether its token still holds the notes grant and has not expired, and whether the notification workflows still mention it.";
+
+/// Raise or recover the [`UNTRIAGED_INCIDENTS_REF`] self-alert.
+// spec: TRI#untriaged-incidents
+pub async fn sweep_untriaged_incidents(conn: &mut AsyncPgConnection) -> Result<Option<Issue>> {
+	use crate::alert_triage;
+
+	let now = jiff::Timestamp::now();
+	let overdue = if alert_triage::in_use(conn, now).await? {
+		alert_triage::untriaged_overdue(conn, now).await?
+	} else {
+		Vec::new()
+	};
+	if overdue.is_empty() {
+		return recover(
+			conn,
+			UNTRIAGED_INCIDENTS_REF,
+			"every published incident open past its notification has a triage verdict",
+		)
+		.await;
+	}
+	let message = format!(
+		"{} published incident{} open an hour past {} notification with no triage verdict: {}",
+		overdue.len(),
+		if overdue.len() == 1 { " is" } else { "s are" },
+		if overdue.len() == 1 { "its" } else { "their" },
+		overdue
+			.iter()
+			.map(|u| format!("{} (notified {})", u.target, u.notified_at))
+			.collect::<Vec<_>>()
+			.join("; ")
+	);
+	let detail = crate::check_detail! {
+		"incidents": overdue
+			.iter()
+			.map(|u| {
+				serde_json::json!({
+					"incident_id": u.incident_id,
+					"target": u.target,
+					"opened_at": u.opened_at,
+					"notified_at": u.notified_at,
+				})
+			})
+			.collect::<Vec<_>>(),
+	};
+	raise_with_detail(
+		conn,
+		UNTRIAGED_INCIDENTS_REF,
+		CheckResult::Warning,
+		CheckResult::Warning,
+		false,
+		Some(UNTRIAGED_INCIDENTS_DOC),
+		"Incidents not triaged",
+		&message,
+		Some(detail),
+	)
+	.await
+	.map(Some)
+}
+
 /// A server has been paused long enough that a certificate has gone stale
 /// underneath the pause. Coalescing: one alert lists every server and name.
 /// Recovers when every paused server's certificates are current again — which in

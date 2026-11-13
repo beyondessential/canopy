@@ -27,7 +27,7 @@ diesel_migrations = "2.3.2"
 futures = "0.3.32"
 hex = "0.4.3"
 ipnet = { version = "2.12.0", features = ["serde"] }
-jiff.workspace = true
+jiff = { workspace = true, features = ["tzdb-bundle-always"] }
 jiff-diesel = { version = "0.1.3", features = ["postgres"] }
 lloggs = { workspace = true, features = ["miette-7"] }
 miette.workspace = true

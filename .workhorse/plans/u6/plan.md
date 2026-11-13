@@ -20,7 +20,7 @@ The triage rules live in Canopy, served through new MCP tools (TRI, MCP "Alert t
   - the memory entries relied on and the report link
   - the note it wrote (`ON DELETE SET NULL`, so deleting the note leaves the verdict), the caller and the time
 
-  Create it with `just migration`, never by hand.
+  Created with `diesel migration generate` (what `just migration` runs; `just` isn't installed on this machine). `schema.rs` was edited to match, since generating it needs a migrated database.
 - **Mechanical rules**, all in the database crate so they can be tested without MCP:
   - Each rule applies only to an open incident. A closed or resolved one returns no reasons.
   - First triage of a production or Canopy-wide incident: no earlier verdict, and the target is production (via the environment rank, `Machine::environment_rank`, never the raw `rank`) or Canopy.
@@ -31,7 +31,7 @@ The triage rules live in Canopy, served through new MCP tools (TRI, MCP "Alert t
   - Unfamiliar: no documentation, no current (unretired) memory entry linked to the check, and no *other* published incident fleet-wide that contained it.
   - Harmless-pattern check: the only reason is the production opening (not Canopy-wide), and every failing check has a current memory entry among those given that is linked to it.
 - **Shared-cause candidates:** incidents on other targets with a failure that began within 30 minutes of this one's and that share no check with it.
-- **Write-up day:** from 08:00 Pacific/Auckland to the next 08:00. Use jiff with the zone, never a fixed offset, so daylight saving is handled.
+- **Write-up day:** from 08:00 Pacific/Auckland to the next 08:00. Use jiff with the zone, never a fixed offset, so daylight saving is handled. The database crate bundles the tz database (`tzdb-bundle-always`) so this works in images without `/usr/share/zoneinfo`.
 - **Self-alert:** a job condition listing published incidents still open an hour past their notification with no verdict. It's live only while any verdict exists from the past week. It warns, and clears once each has a verdict or has closed.
 - **Audit:** two new actions, recording a verdict and attaching its report. The note is audited as the existing note action.
 - **Server instructions** (`lib.rs`): a paragraph pointing agents at `triage_alert` for every incident notification.
@@ -59,20 +59,20 @@ All three unknowns passed in scratch channels, so the design stands with no fall
 ## Checklist
 
 - [x] Spike in scratch channels: workflow mention, cross-channel post and thread reply, button URL visibility
-- [ ] Migration and model for triage verdicts in `crates/database`
-- [ ] Incident revision digest, baseline comparison, must-escalate reasons, harmless-pattern check and shared-cause candidates in `crates/database`. Tests to cover:
+- [x] Migration and model for triage verdicts in `crates/database`
+- [x] Incident revision digest, baseline comparison, must-escalate reasons, harmless-pattern check and shared-cause candidates in `crates/database`. Tests to cover:
   - each reason
   - closed incidents
   - two triages in a row
   - a stale revision
   - a machine and application seeded under one id
-- [ ] Write-up day boundaries in Pacific/Auckland, tested across a daylight saving change
-- [ ] The four MCP tools in `crates/canopy-mcp`, with the refusal rules and the notes-grant check
-- [ ] Two audit actions in the `actions!` catalogue
-- [ ] Self-alert condition for untriaged published incidents
-- [ ] Server instructions paragraph and the served guidance text, plus MCP tests in `crates/private-server/tests/it/mcp.rs`
-- [ ] Verdict notes on the incident page (agent notes, so confirm nothing new is needed)
-- [ ] README in `plugins/canopy-mcp/` covering:
+- [x] Write-up day boundaries in Pacific/Auckland, tested across a daylight saving change
+- [x] The four MCP tools in `crates/canopy-mcp`, with the refusal rules and the notes-grant check
+- [x] Two audit actions in the `actions!` catalogue
+- [x] Self-alert condition for untriaged published incidents
+- [x] Server instructions paragraph and the served guidance text, plus MCP tests (`crates/public-server/tests/it/mcp_alert_triage.rs`, and the writing-tools list in `crates/private-server/tests/it/mcp.rs`)
+- [x] Verdict notes on the incident page: they are ordinary agent notes, which the incident page already lists, so nothing new was needed
+- [x] README in `plugins/canopy-mcp/` covering:
   - the workflow edits
   - both channels' instructions
   - the routine message

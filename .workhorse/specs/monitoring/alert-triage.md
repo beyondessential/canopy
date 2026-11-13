@@ -26,7 +26,7 @@ An incident with no verdict has no baseline, and its triage is its **first triag
 An incident whose state matches its baseline has already been triaged at that state, and triage returns the existing verdict and where it was reported, so a repeated alert adds nothing.
 
 Results are ranked, most severe first, as an escalating failure, a failure, then a warning, a broken check counting as a warning (see [CHK](checks.md#results)).
-A check is failing when its effective result is a live failure, and two checks are the same check when they share a source and a presented name (see [CHK](checks.md#names)).
+A check is failing when its effective result is a live failure, and two checks are the same check when they share a source and a name, the identity an [incident memory](incident-memory.md#what-an-entry-holds) entry links a check by.
 Two failures are **close in time** when they began within thirty minutes of each other.
 
 ## What Canopy decides must be escalated

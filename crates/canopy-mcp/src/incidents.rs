@@ -193,7 +193,7 @@ struct IncidentList {
 ///
 /// One resolver so the incident view and the issue list cannot disagree about
 /// what a scope is called, and so adding a grain is one change rather than two.
-async fn scope_labels(
+pub(crate) async fn scope_labels(
 	conn: &mut AsyncPgConnection,
 	issues: &[&Issue],
 ) -> Result<
@@ -239,7 +239,7 @@ async fn scope_labels(
 // spec: MCP#incidents-and-issues
 #[derive(Serialize)]
 #[serde(tag = "grain", rename_all = "snake_case")]
-enum IssueScopeOut {
+pub(crate) enum IssueScopeOut {
 	/// The software: a version, a database connection, a service of its own.
 	Application { id: Uuid, name: Option<String> },
 	/// The box: its disks, its memory, its clock, its reachability.
@@ -253,7 +253,7 @@ enum IssueScopeOut {
 }
 
 impl IssueScopeOut {
-	fn of(
+	pub(crate) fn of(
 		issue: &Issue,
 		applications: &std::collections::HashMap<Uuid, database::applications::ApplicationNaming>,
 		machines: &std::collections::HashMap<Uuid, String>,

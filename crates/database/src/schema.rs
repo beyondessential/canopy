@@ -14,6 +14,26 @@ diesel::table! {
 }
 
 diesel::table! {
+	alert_triage_verdicts (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		incident_id -> Uuid,
+		verdict -> Text,
+		reasoning -> Text,
+		revision -> Text,
+		open -> Bool,
+		worst_result -> Nullable<Text>,
+		failing_checks -> Jsonb,
+		reasons -> Jsonb,
+		memory_entry_ids -> Array<Uuid>,
+		note_id -> Nullable<Uuid>,
+		report_link -> Nullable<Text>,
+		reported_at -> Nullable<Timestamptz>,
+		recorded_by -> Text,
+	}
+}
+
+diesel::table! {
 	ansible_catalogue (id) {
 		id -> Bool,
 		document -> Nullable<Jsonb>,
@@ -1374,6 +1394,8 @@ diesel::table! {
 	}
 }
 
+diesel::joinable!(alert_triage_verdicts -> incident_notes (note_id));
+diesel::joinable!(alert_triage_verdicts -> incidents (incident_id));
 diesel::joinable!(ansible_leases -> server_groups (server_group_id));
 diesel::joinable!(ansible_variables -> machines (machine_id));
 diesel::joinable!(ansible_variables -> server_groups (server_group_id));
@@ -1497,6 +1519,7 @@ diesel::joinable!(vulnerability_matches -> vulnerabilities (vulnerability_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
 	admins,
+	alert_triage_verdicts,
 	ansible_catalogue,
 	ansible_leases,
 	ansible_secret_values_held,

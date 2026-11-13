@@ -25,6 +25,7 @@
 //! combines into the single stored `ToolRouter`. `util` holds helpers shared
 //! across more than one of those modules.
 
+mod alert_triage;
 mod applications;
 mod audit;
 mod backups;
@@ -71,6 +72,8 @@ pub const AUDITED_TOOLS: &[&str] = &[
 	"amend_memory_entry",
 	"retire_memory_entry",
 	"restore_memory_entry",
+	"record_alert_triage",
+	"attach_alert_triage_report",
 ];
 
 #[derive(Clone)]
@@ -99,7 +102,8 @@ impl CanopyMcp {
 				+ Self::upgrade_plans_router()
 				+ Self::vulnerabilities_router()
 				+ Self::notes_router()
-				+ Self::memory_router(),
+				+ Self::memory_router()
+				+ Self::alert_triage_router(),
 			prompt_router: Self::vulnerabilities_prompts(),
 		}
 	}
@@ -171,7 +175,13 @@ impl ServerHandler for CanopyMcp {
 			 applies with find_memory and get_memory_entry, and record what a later \
 			 investigator would otherwise rediscover with record_memory_entry, amending an \
 			 existing entry rather than adding a duplicate. These writes need an administrator \
-			 or a token with the notes grant."
+			 or a token with the notes grant.\n\n\
+			 Alert triage: for every Canopy incident notification you are asked to triage, \
+			 call triage_alert with the incident id from the notification's link before \
+			 deciding anything, and follow its `guidance`. Canopy decides the escalations \
+			 that follow mechanically from the incident's state; record_alert_triage refuses \
+			 a logged verdict where Canopy requires an escalation. find_alert_triage_verdicts \
+			 gives a write-up day's verdicts for the morning summary."
 				.into(),
 		);
 		info.capabilities = ServerCapabilities::builder()

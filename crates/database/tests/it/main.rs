@@ -5,6 +5,7 @@
 
 mod abandoned_grain_migration;
 mod admins;
+mod alert_triage;
 mod ansible_catalogue;
 mod ansible_enums;
 mod ansible_leases;

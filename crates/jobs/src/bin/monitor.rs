@@ -236,6 +236,14 @@ pub fn spawn() -> JoinHandle<()> {
 				Err(err) => error!("stale-healthcheck self-alert sweep failed: {err}"),
 			}
 
+			// Published incidents left without a triage verdict, while alert
+			// triage is in use.
+			// spec: TRI#untriaged-incidents
+			match database::self_alerts::sweep_untriaged_incidents(&mut db).await {
+				Ok(_) => {}
+				Err(err) => error!("untriaged-incident self-alert sweep failed: {err}"),
+			}
+
 			// Incidents whose linger window has expired: the last effective
 			// failure left, nothing came back, close them and ship the
 			// pending Slack cancel-or-resolve.
