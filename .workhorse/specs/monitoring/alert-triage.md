@@ -4,24 +4,24 @@ id: TRI
 
 # Alert triage
 
-Applies to how Claude Tag, Anthropic's Claude agent in Slack, triages the incident notifications Canopy posts to Slack, and where it reports what it decided.
+Applies to how Claude Tag, Anthropic's Claude agent in Slack, triages the incident notifications Canopy posts to Slack, what Canopy decides for it, and where it reports what was decided.
 
 ## Channels
 
 - Canopy's [incident notifications](incidents.md#notification) and maintenance announcements post to the **alerts channel**.
-- Each of those posts addresses Claude, so Claude triages every one as it arrives, in a thread under the post.
+- Each of those posts mentions Claude and writes out the link to its incident, so Claude triages every one as it arrives, in a thread under the post.
 - What needs a person now goes to the **triage channel**, which holds escalations and one write-up thread per day and nothing else.
 - Both channels are public and Claude is a member of both.
+- Which channels these are, and how posts in them are laid out, is Claude Tag's channel configuration; Canopy holds no Slack channel names for triage.
 
 > [!NOTE]
-> Claude Tag reads messages from workflows and other bots as context and acts on one only when it mentions Claude, so the mention in Canopy's posts is what starts triage. Claude Tag posts from one channel into another only when both are public.
+> Claude Tag reads messages from workflows and other bots as context and acts on one only when it mentions Claude, so the mention in Canopy's posts is what starts triage. Claude Tag posts from one channel into another only when both are public. The incident link in a post points at the operator interface on the tailnet, which Claude Tag cannot reach, so Claude reads the incident id from it rather than following it.
 
-## Reading an alert
+## Where the rules live
 
-- Triage starts from the incident the post links to, read through the [fleet query interface](../private-server/mcp.md), never from the post's text alone.
-- For each live issue in the incident, Claude reads the check's documentation, its stability record, and the [incident memory](incident-memory.md) entries linked to the check, the group, or the incident.
-- Claude reads the incident's notes, including what earlier triage of the same incident recorded.
-- Claude reads the other incidents open across the fleet, and those closed within the last day, to find related trouble.
+- The triage rules and the context they need are served by Canopy, through the [fleet query interface](../private-server/mcp.md#alert-triage), so they change with Canopy rather than with each channel's configuration.
+- Canopy decides every escalation that follows mechanically from the incident's state, and Claude judges only what needs judgement.
+- Canopy refuses a verdict that logs an alert it has decided must be escalated.
 
 ## The assessment
 
@@ -29,31 +29,50 @@ Each triage settles three things:
 
 - **Whether it is new.** An incident is related to another when the same check is failing in both, or when their failures began close together with a shared cause plausible, such as a common release, cluster, or upstream service.
 - **How severe it is.** Severity is Canopy's own grading of the incident's worst live result: critical, error, or warning.
-- **Whether it needs action now**, which decides whether it is escalated.
+- **Whether it needs action now**, which decides whether it is escalated or logged.
 
-### What is escalated
+An incident's earlier triage is the baseline for the next: what Canopy compares against is the incident's worst result and failing checks as they stood when it was last triaged.
 
-An alert is escalated when any of these holds:
+### What Canopy decides must be escalated
 
-- It opens an incident on a production environment or on Canopy as a whole.
-- It is an escalation, carrying a failure from an escalating check.
-- The incident is worse than when it was last triaged: its worst live result is more severe, or a failure joined on a check that was not failing before.
-- It is related to another open incident on a different environment, so the trouble spans more than one environment.
-- Claude cannot assess it with confidence: the incident cannot be read, a failing check is undocumented and unfamiliar, or nothing Claude reads explains the failure.
+- The incident is on a production environment or on Canopy as a whole, and has not been triaged before.
+- A failure from an escalating check is live that was not at the last triage.
+- The incident's worst live result is more severe than at the last triage.
+- A failure is live on a check that was not failing at the last triage.
+- The same check is failing in an open incident on another environment.
+- A failing check is unfamiliar: it has no documentation, no incident memory entry is linked to it, and it has never been part of a published incident before.
 
-An opening on a production environment is logged rather than escalated only when an incident memory entry names the pattern as harmless and the check's stability record shows that pattern recovering on its own.
+Each reason is given with what it rests on, such as the other incident sharing the check.
+
+### What Claude judges
+
+- Whether incidents on other environments that opened close in time to this one share a cause, which Canopy offers as candidates.
+- Whether it can explain the failure from what it read. Anything it cannot explain with confidence is escalated, and the escalation says that it is out of uncertainty.
 
 > [!NOTE]
-> Triage leans towards escalating. A false escalation costs a person a minute; a swallowed outage at a clinical site costs far more. Claude says when it escalates out of uncertainty, so the reader knows which escalations are judgement and which are clear.
+> Triage leans towards escalating. A false escalation costs a person a minute; a swallowed outage at a clinical site costs far more. Canopy decides the clear cases so that the model's judgement can only add escalations, never remove one Canopy requires, except under the harmless-pattern exception below.
+
+### The harmless-pattern exception
+
+- A first triage of a production incident may be logged instead of escalated when an incident memory entry linked to its check or group names the pattern as harmless and the check's stability record shows that pattern recovering on its own.
+- The verdict names the memory entry it relies on, and Canopy refuses it otherwise.
+- The exception covers only the production-opening reason; any other reason Canopy gives still requires escalation.
 
 ### What is logged
 
-Every alert that is not escalated is logged in the day's write-up thread. That includes:
+Every alert that is not escalated is logged in the day's write-up thread, including:
 
-- an opening on a lesser environment (clone, demo, test or dev) whose failures are explained and unrelated to production trouble
+- an opening on a lesser environment (clone, demo, test or dev) that Canopy gives no reason to escalate and that Claude can explain
 - a reminder for an incident unchanged since its last triage
 - a close
-- a maintenance window being declared or ending
+- a maintenance window being declared or ending, which links no incident and is logged without a verdict
+
+## Recording a verdict
+
+- Each triage's verdict is recorded on its incident: escalated or logged, the reasoning, where it was posted, and the incident's worst result and failing checks at the time.
+- A verdict shows on the incident as a note written by Claude, so operators see the reasoning on the incident's page.
+- When an operator confirms a cause or says that a pattern is harmless, in an escalation thread or the write-up thread, Claude records it in the incident memory, linked to the check, group, or incident it concerns.
+- A memory entry describes the pattern and how to recognise it, never a copy of a check's raw output.
 
 ## Escalation posts
 
@@ -63,6 +82,7 @@ Every alert that is not escalated is logged in the day's write-up thread. That i
   - Canopy's severity
   - why it was escalated
   - what to look at first
+  - related incidents
   - a link to the incident
 - An escalation of related incidents is one post naming every environment involved, not one post per incident.
 - When an escalated incident worsens, the new escalation links the earlier post.
@@ -77,13 +97,6 @@ Every alert that is not escalated is logged in the day's write-up thread. That i
 - An alert arriving when the day's thread has not been started starts it.
 - Each alert adds one reply to the day's thread, naming the incident's group and environment, what happened, and how it was triaged and why.
 - An escalated alert's reply links its escalation post, so the thread is the whole day's record.
-
-## Recording in Canopy
-
-- Each triage adds a note to its incident recording the verdict, the reasoning, and a link to the escalation post or write-up reply.
-- These notes are how a later triage of the same incident knows what was decided before.
-- When an operator confirms a cause or says that a pattern is harmless, in an escalation thread or the write-up thread, Claude records it in the incident memory, linked to the check, group, or incident it concerns.
-- A memory entry describes the pattern and how to recognise it, never a copy of a check's raw output.
 
 ## In the alerts channel
 
