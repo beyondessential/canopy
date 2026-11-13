@@ -401,7 +401,7 @@ test.describe("upgrades dashboard", () => {
 			"planned-group-header",
 		);
 		await expect(scheduled.getByTestId("migration-testing")).toHaveText("weekly");
-		await expect(scheduled).toContainText("testing");
+		await expect(scheduled.getByText("testing", { exact: true })).toBeVisible();
 		const requested = plannedGroup(page, "drifting").getByTestId(
 			"planned-group-header",
 		);
@@ -590,11 +590,11 @@ test.describe("upgrades dashboard", () => {
 		await form.getByRole("button", { name: "Record" }).click();
 
 		// The clone's row names its rank; production, still unplanned, has none.
-		const group = plannedGroup(page, "kamaka");
-		const row = group.getByTestId("planned-upgrade-row");
+		const block = plannedGroup(page, "kamaka");
+		const row = block.getByTestId("planned-upgrade-row");
 		await expect(row).toHaveCount(1);
 		await expect(row).toContainText("clone");
-		await expect(group).toContainText("2.61.0");
+		await expect(block).toContainText("2.61.0");
 		await expect(
 			page.getByRole("button", { name: "More actions for kamaka clone" }),
 		).toBeVisible();
@@ -745,7 +745,7 @@ test.describe("upgrades dashboard", () => {
 		await expect(row).not.toContainText("FJT");
 	});
 
-	/// The tables carry seven columns and a note, so at a narrow width they have
+	/// The tables carry several columns and a note, so at a narrow width they have
 	/// to scroll inside their own card. Before this they ran out past the card's
 	/// border and under the edge of the window, with the last columns
 	/// unreachable.

@@ -1359,7 +1359,7 @@ function PlannedGroup({
 							<TableCell sx={{ width: "18%" }}>Planned for</TableCell>
 							<TableCell sx={{ width: "20%" }}>Window</TableCell>
 							<TableCell>Note</TableCell>
-							{isAdmin && <TableCell sx={{ width: 56 }} />}
+							{isAdmin && <TableCell sx={{ width: 72 }} />}
 						</TableRow>
 					</TableHead>
 					<TableBody>
@@ -1662,7 +1662,10 @@ function RequestTest({
 				calls="migration_tests/request"
 				action={`Test migrations for ${groupName}`}
 			>
-				<Tooltip title="Test the migrations against the latest backup of each server set up for testing">
+				<Tooltip
+					describeChild
+					title="Test the migrations against the latest backup of each server set up for testing"
+				>
 					<Button
 						size="small"
 						variant="outlined"
