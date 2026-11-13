@@ -86,6 +86,22 @@ pub struct ForGroupArgs {
 	pub group_id: Uuid,
 }
 
+/// Where one of a group's applications stands against the version it would take
+/// next, and whether anything will test it.
+#[derive(Serialize, ToSchema)]
+pub struct ServerVerdict {
+	/// Where it stands.
+	#[serde(flatten)]
+	pub verdict: GroupVerdict,
+	/// Whether a declaration that tests the plan restores its machine. One
+	/// nothing tests stays at not tested for good.
+	pub set_up: bool,
+	/// The ask for its environment to be tested that this application's machine
+	/// has yet to answer, where there is one.
+	// spec: RST#dispatching-a-migration-test
+	pub test_request: Option<crate::fns::upgrade_plans::TestRequest>,
+}
+
 /// Where each of a group's applications stands against the version it would take
 /// next.
 ///
@@ -101,7 +117,7 @@ pub struct ForGroupArgs {
 	security(("tailscale-admin" = [])),
 	request_body = ForGroupArgs,
 	responses(
-		(status = 200, description = "Verdicts, one per server with a candidate.", body = Vec<GroupVerdict>),
+		(status = 200, description = "Verdicts, one per server with a candidate.", body = Vec<ServerVerdict>),
 		(status = 401, body = ProblemDetailsSchema),
 		(status = 403, body = ProblemDetailsSchema),
 	),
@@ -110,10 +126,47 @@ pub async fn for_group(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
 	Json(args): Json<ForGroupArgs>,
-) -> Result<Json<Vec<GroupVerdict>>> {
+) -> Result<Json<Vec<ServerVerdict>>> {
 	let mut conn = state.db.get().await?;
-	let verdicts = database::migration_tests::verdicts_for_group(&mut conn, args.group_id).await?;
-	Ok(Json(verdicts))
+	let applications =
+		database::applications::Application::list_live_in_group(&mut conn, args.group_id).await?;
+	let declared = database::restore::migrating_environments(&mut conn, args.group_id).await?;
+	let verdicts = database::migration_tests::verdicts(&mut conn, applications.clone()).await?;
+
+	let mut out = Vec::with_capacity(verdicts.len());
+	for verdict in verdicts {
+		let tested = applications
+			.iter()
+			.find(|application| application.id == verdict.server_id)
+			.filter(|application| {
+				application
+					.machine_id
+					.is_some_and(|machine_id| declared.tests_machine(machine_id))
+			});
+		let mut test_request = None;
+		if let Some(application) = tested
+			&& let (Some(machine_id), Some(rank)) = (application.machine_id, application.rank)
+			&& let Some(plan) = database::upgrade_plans::UpgradePlan::open_for_environment(
+				&mut conn,
+				args.group_id,
+				rank,
+			)
+			.await?
+		{
+			test_request = MigrationTestRequest::pending(&mut conn, machine_id, plan.id)
+				.await?
+				.map(|request| crate::fns::upgrade_plans::TestRequest {
+					requested_at: request.requested_at,
+					requested_by: request.requested_by,
+				});
+		}
+		out.push(ServerVerdict {
+			verdict,
+			set_up: tested.is_some(),
+			test_request,
+		});
+	}
+	Ok(Json(out))
 }
 
 /// Whether a restore attempt is under way for a group, for showing beside a

@@ -677,7 +677,8 @@ impl Loaded {
 				})?);
 				*COMPILED
 					.lock()
-					.unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((digest.clone(), catalogue.clone()));
+					.unwrap_or_else(|poisoned| poisoned.into_inner()) =
+					Some((digest.clone(), catalogue.clone()));
 				catalogue
 			}
 		};

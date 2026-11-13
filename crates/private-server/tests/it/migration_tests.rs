@@ -86,3 +86,66 @@ async fn for_group_reports_nothing_without_a_plan() {
 	})
 	.await;
 }
+
+/// Only the servers a testing declaration restores are set up for testing, and
+/// the fleet view counts those alone.
+// spec: RST#verdicts
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_server_a_declaration_tests_is_set_up() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(FLEET).await.unwrap();
+		conn.batch_execute(
+			"INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by)
+				SELECT 'bbbbbbbb-0000-0000-0000-000000000001', 'production', id, 'test@example.com'
+				FROM versions WHERE major = 2 AND minor = 63 AND patch = 0;
+			INSERT INTO devices (id, role) VALUES
+				('bbbbbbbb-0000-0000-0000-0000000000d0', 'backup-restore');
+			INSERT INTO restore_consumer_capabilities (consumer_device_id, intent, semantics)
+				VALUES ('bbbbbbbb-0000-0000-0000-0000000000d0', 'upgrade', '[\"migrate\"]');
+			INSERT INTO restore_replicas
+				(consumer_device_id, group_id, machine_id, type, intent, name)
+				VALUES ('bbbbbbbb-0000-0000-0000-0000000000d0',
+					'bbbbbbbb-0000-0000-0000-000000000001',
+					'bbbbbbbb-0000-0000-0000-0000000000a0',
+					'tamanu-postgres', 'upgrade', 'central-upgrade');",
+		)
+		.await
+		.unwrap();
+		private
+			.post("/api/migration_tests/request")
+			.json(&json!({ "group_id": GROUP, "rank": "production" }))
+			.await
+			.assert_status_ok();
+
+		let verdicts: Vec<Value> = private
+			.post("/api/migration_tests/for_group")
+			.json(&json!({ "group_id": GROUP }))
+			.await
+			.json();
+		let entry = |id: &str| {
+			verdicts
+				.iter()
+				.find(|v| v["server_id"] == id)
+				.unwrap_or_else(|| panic!("no entry for {id}: {verdicts:?}"))
+		};
+		assert_eq!(entry(CENTRAL)["set_up"], true);
+		assert_eq!(
+			entry(CENTRAL)["test_request"]["requested_by"],
+			"admin@localhost"
+		);
+		assert_eq!(entry(FACILITY)["set_up"], false);
+		assert!(entry(FACILITY)["test_request"].is_null());
+
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
+		let tests = row["tests"].as_array().unwrap();
+		assert_eq!(tests.len(), 1, "the facility is not counted: {row}");
+		assert_eq!(tests[0]["server_id"], CENTRAL);
+		assert_eq!(tests[0]["name"], "central");
+	})
+	.await;
+}

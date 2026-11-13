@@ -1,8 +1,11 @@
+import type { Page } from "@playwright/test";
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
+	seedBackupCredentialIssuance,
 	seedDevice,
 	seedMaintenanceWindow,
+	seedMigrationTest,
 	seedRestoreConsumerCapability,
 	seedRestoreReplica,
 	seedServer,
@@ -27,11 +30,12 @@ async function runningAt(
 }
 
 /** Declare a replica on an intent that migrates, which is what makes a plan
- * something the pipeline will act on. */
+ * something the pipeline will act on. Whole-group unless a machine is named. */
 async function declareUpgradeReplica(
 	sql: Parameters<typeof seedRestoreReplica>[0],
 	groupId: string,
-): Promise<void> {
+	machineId?: string,
+): Promise<string> {
 	const consumer = await seedDevice(sql, { role: "backup-restore" });
 	await seedRestoreConsumerCapability(sql, {
 		deviceId: consumer.id,
@@ -40,9 +44,29 @@ async function declareUpgradeReplica(
 	await seedRestoreReplica(sql, {
 		consumerDeviceId: consumer.id,
 		groupId,
+		machineId,
 		intent: "upgrade",
 		name: "upgrade",
 	});
+	return consumer.id;
+}
+
+/** The group's block in the planned list: its header and its environments. */
+function plannedGroup(page: Page, name: string) {
+	return page.getByTestId("planned-group").filter({
+		has: page.getByTestId("planned-group-header").getByRole("link", {
+			name,
+			exact: true,
+		}),
+	});
+}
+
+/** Open a planned environment's actions and pick one. */
+async function planAction(page: Page, environment: string, action: string) {
+	await page
+		.getByRole("button", { name: `More actions for ${environment}` })
+		.click();
+	await page.getByRole("menuitem", { name: action }).click();
 }
 
 test.describe("upgrades dashboard", () => {
@@ -50,16 +74,14 @@ test.describe("upgrades dashboard", () => {
 		await resetSeededTables(sql);
 	});
 
-	test("separates planned groups from ones with nothing recorded", async ({
+	test("lists each planned group under a header of its own", async ({
 		page,
 		sql,
 	}) => {
 		const planned = await seedServerGroup(sql, { name: "kamaka" });
 		const unplanned = await seedServerGroup(sql, { name: "drifting" });
-		const current = await seedServerGroup(sql, { name: "settled" });
 		await runningAt(sql, planned.id, "2.60.0");
 		await runningAt(sql, unplanned.id, "2.60.0");
-		await runningAt(sql, current.id, "2.61.0");
 		const target = await seedVersion(sql, {
 			major: 2,
 			minor: 61,
@@ -77,44 +99,35 @@ test.describe("upgrades dashboard", () => {
 
 		await page.goto("/upgrades");
 
-		const plannedRow = page
-			.getByTestId("planned-upgrade-row")
-			.filter({ hasText: "kamaka" });
-		await expect(plannedRow).toContainText("production");
-		await expect(plannedRow).toContainText("2.60.0");
-		await expect(plannedRow).toContainText("2.61.0");
-		await expect(page.getByTestId("planned-upgrade-note")).toContainText(
+		const group = plannedGroup(page, "kamaka");
+		const header = group.getByTestId("planned-group-header");
+		// Every environment runs the same version, so the header says it once.
+		await expect(header).toContainText("2.60.0 → 2.61.0");
+		await expect(
+			group.getByRole("columnheader", { name: "Running", exact: true }),
+		).toHaveCount(0);
+		const row = group.getByTestId("planned-upgrade-row");
+		await expect(row).toContainText("production");
+		await expect(row).toContainText("late");
+		await expect(group.getByTestId("planned-upgrade-note")).toContainText(
 			"site can absorb 2.61 only",
 		);
-		await expect(plannedRow).toContainText("late");
-		// The plan says where it is going; the verdict says whether the data
+		// The plan says where it is going; the header says whether the data
 		// survives getting there. Untested until a consumer reports.
-		await expect(plannedRow).toContainText("not yet tested");
-
-		// The group with nothing recorded is the one this view exists to
-		// surface, so it is listed rather than omitted, behind a disclosure.
-		await page
-			.getByRole("button", { name: "Show environments with no plan" })
-			.click();
-		const drifting = page
-			.getByTestId("unplanned-upgrade-row")
-			.filter({ hasText: "drifting" });
-		await expect(drifting).toBeVisible();
-		await expect(drifting).toContainText("1 minor");
-		await expect(page.getByTestId("unplanned-upgrades")).not.toContainText(
-			"kamaka",
+		await expect(header.getByTestId("migration-verdict")).toHaveText(
+			"Not yet tested",
 		);
-		// A group already on the newest version has nothing to plan.
-		await expect(page.getByTestId("unplanned-upgrades")).not.toContainText(
-			"settled",
+		await expect(header).toHaveCSS("background-color", "rgba(0, 0, 0, 0.04)");
+
+		// A group with nothing recorded is not one of the planned.
+		await expect(page.getByTestId("planned-group")).toHaveCount(1);
+		await expect(page.getByTestId("planned-upgrades")).not.toContainText(
+			"drifting",
 		);
 	});
 
 	/// spec: RST#dispatching-a-migration-test
-	test("an environment's migrations are tested when asked", async ({
-		page,
-		sql,
-	}) => {
+	test("a group's migrations are tested when asked", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
 		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
@@ -126,16 +139,14 @@ test.describe("upgrades dashboard", () => {
 		await declareUpgradeReplica(sql, group.id);
 
 		await page.goto("/upgrades");
-		const row = page
-			.getByTestId("planned-upgrade-row")
-			.filter({ hasText: "kamaka" });
-		await row.getByRole("button", { name: "Test migrations for kamaka" }).click();
+		const header = plannedGroup(page, "kamaka").getByTestId(
+			"planned-group-header",
+		);
+		await header.getByRole("button", { name: "Test now" }).click();
 
-		await expect(row.getByTestId("migration-testing")).toHaveText("weekly");
-		await expect(row.getByTestId("migration-test-requested")).toBeVisible();
-		await expect(
-			row.getByRole("button", { name: "Test migrations for kamaka" }),
-		).toHaveCount(0);
+		await expect(header.getByTestId("migration-testing")).toHaveText("weekly");
+		await expect(header.getByTestId("migration-test-requested")).toBeVisible();
+		await expect(header.getByRole("button", { name: "Test now" })).toHaveCount(0);
 		const requests = await sql.query<{ target_version_id: string }>(
 			`SELECT p.target_version_id FROM migration_test_requests r
 			 JOIN upgrade_plans p ON p.id = r.plan_id`,
@@ -155,21 +166,21 @@ test.describe("upgrades dashboard", () => {
 		await declareUpgradeReplica(sql, group.id);
 
 		await page.goto("/upgrades");
-		const row = page
-			.getByTestId("planned-upgrade-row")
-			.filter({ hasText: "kamaka" });
-		const button = row.getByRole("button", { name: "Test migrations for kamaka" });
+		const header = plannedGroup(page, "kamaka").getByTestId(
+			"planned-group-header",
+		);
+		const button = header.getByRole("button", { name: "Test now" });
 		await expect(button).toBeVisible();
 		// Withdrawn from elsewhere after this page loaded.
 		await sql.query("UPDATE upgrade_plans SET withdrawn_at = NOW()");
 		await button.click();
 
-		await expect(row.getByTestId("migration-test-request-error")).toContainText(
-			"no open plan",
-		);
+		await expect(
+			header.getByTestId("migration-test-request-error"),
+		).toContainText("no open plan");
 	});
 
-	test("says a plan with nothing declared to test it is not set up", async ({
+	test("says quietly when nothing is set up to test a group", async ({
 		page,
 		sql,
 	}) => {
@@ -187,11 +198,261 @@ test.describe("upgrades dashboard", () => {
 		// Nothing is declared to migrate this group's data, so no test will ever
 		// run: saying "not yet tested" would leave a reader waiting on a result
 		// that cannot arrive.
-		const row = page
-			.getByTestId("planned-upgrade-row")
-			.filter({ hasText: "kamaka" });
-		await expect(row).toContainText("not set up");
-		await expect(row).not.toContainText("not yet tested");
+		const header = plannedGroup(page, "kamaka").getByTestId(
+			"planned-group-header",
+		);
+		await expect(header.getByTestId("migration-verdict")).toHaveText(
+			"Nothing set up for testing",
+		);
+		await expect(header).not.toContainText("Not yet tested");
+		await expect(header.getByRole("button", { name: "Test now" })).toHaveCount(0);
+	});
+
+	/// spec: UPG#the-dashboard
+	test("a passing test is said once for the group", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await seedVersion(sql, { major: 2, minor: 60, patch: 0 });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		const central = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedStatus(sql, { serverId: central.id, version: "2.60.0" });
+		await runningAt(sql, group.id, "2.60.0", "clone");
+		for (const rank of ["production", "clone"] as const) {
+			await seedUpgradePlan(sql, {
+				groupId: group.id,
+				rank,
+				targetVersionId: target.id,
+			});
+		}
+		const consumer = await declareUpgradeReplica(
+			sql,
+			group.id,
+			central.machineId,
+		);
+		await seedMigrationTest(sql, {
+			consumerDeviceId: consumer,
+			groupId: group.id,
+			machineId: central.machineId,
+			applicationId: central.id,
+			targetVersionId: target.id,
+			totalElapsedSecs: 5400,
+			timings: [
+				{ name: "addIndexToFhirJobs", elapsedSecs: 12 },
+				{ name: "backfillNoteTypeIds", elapsedSecs: 5388 },
+			],
+		});
+
+		await page.goto("/upgrades");
+
+		const block = plannedGroup(page, "kamaka");
+		const header = block.getByTestId("planned-group-header");
+		await expect(header.getByTestId("migration-verdict")).toHaveText(
+			"Migrations passed",
+		);
+		// The clone has nothing set up for testing, so it is not counted.
+		await expect(header.getByTestId("migration-verdict-detail")).toContainText(
+			"kamaka-central · 2 migrations in 1.5h",
+		);
+		await expect(header).not.toContainText("of 2");
+		await expect(header).toHaveCSS("background-color", "rgba(46, 125, 50, 0.08)");
+		await expect(header.getByRole("button", { name: "Test again" })).toBeVisible();
+		await expect(block.getByTestId("planned-upgrade-row")).toHaveCount(2);
+
+		await header.getByTestId("migration-verdict").click();
+		await expect(page).toHaveURL(
+			new RegExp(`/fleet/groups/${group.id}#migration-tests`),
+		);
+	});
+
+	/// spec: UPG#the-dashboard
+	test("a failure is named first, and tints the group", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await seedVersion(sql, { major: 2, minor: 60, patch: 0 });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		const central = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		const facility = await seedServer(sql, {
+			name: "kamaka-facility",
+			type: "tamanu-facility",
+			groupId: group.id,
+			rank: "production",
+		});
+		for (const server of [central, facility]) {
+			await seedStatus(sql, { serverId: server.id, version: "2.60.0" });
+		}
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+		});
+		const consumer = await declareUpgradeReplica(sql, group.id);
+		await seedMigrationTest(sql, {
+			consumerDeviceId: consumer,
+			groupId: group.id,
+			machineId: central.machineId,
+			applicationId: central.id,
+			targetVersionId: target.id,
+		});
+		await seedMigrationTest(sql, {
+			consumerDeviceId: consumer,
+			groupId: group.id,
+			machineId: facility.machineId,
+			applicationId: facility.id,
+			targetVersionId: target.id,
+			failedMigration: "backfillNoteTypeIds",
+			error: 'column "note_type_id" does not exist',
+		});
+
+		await page.goto("/upgrades");
+
+		const header = plannedGroup(page, "kamaka").getByTestId(
+			"planned-group-header",
+		);
+		const verdict = header.getByTestId("migration-verdict");
+		await expect(verdict).toHaveText("Migrations failed");
+		await expect(header.getByTestId("migration-verdict-detail")).toContainText(
+			"kamaka-facility · backfillNoteTypeIds · 1 of 2 passed",
+		);
+		await expect(header).toHaveCSS("background-color", "rgba(237, 108, 2, 0.08)");
+
+		// Which application broke and why, without opening the group.
+		await verdict.hover();
+		const tip = page.getByRole("tooltip");
+		await expect(tip).toContainText("kamaka-facility");
+		await expect(tip).toContainText('column "note_type_id" does not exist');
+	});
+
+	/// spec: UPG#the-dashboard
+	test("environments going to different versions say so per row", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
+		await runningAt(sql, group.id, "2.60.0", "clone");
+		const older = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		const newer = await seedVersion(sql, { major: 2, minor: 62, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: older.id,
+		});
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "clone",
+			targetVersionId: newer.id,
+		});
+
+		await page.goto("/upgrades");
+
+		const block = plannedGroup(page, "kamaka");
+		const header = block.getByTestId("planned-group-header");
+		await expect(header).toContainText("on 2.60.0");
+		await expect(header).not.toContainText("to 2.6");
+		await expect(
+			block.getByRole("columnheader", { name: "Going to" }),
+		).toBeVisible();
+		await expect(
+			block.getByRole("columnheader", { name: "Running", exact: true }),
+		).toHaveCount(0);
+		await expect(
+			block.getByTestId("planned-upgrade-row").filter({ hasText: "clone" }),
+		).toContainText("2.62.0");
+		await expect(
+			block
+				.getByTestId("planned-upgrade-row")
+				.filter({ hasText: "production" }),
+		).toContainText("2.61.0");
+	});
+
+	/// spec: UPG#the-dashboard
+	test("environments on different versions say so per row", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.59.0");
+		await runningAt(sql, group.id, "2.60.0", "clone");
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		for (const rank of ["production", "clone"] as const) {
+			await seedUpgradePlan(sql, {
+				groupId: group.id,
+				rank,
+				targetVersionId: target.id,
+			});
+		}
+
+		await page.goto("/upgrades");
+
+		const block = plannedGroup(page, "kamaka");
+		const header = block.getByTestId("planned-group-header");
+		await expect(header).toContainText("to 2.61.0");
+		await expect(header).not.toContainText("→");
+		await expect(
+			block.getByRole("columnheader", { name: "Running", exact: true }),
+		).toBeVisible();
+		await expect(
+			block.getByTestId("planned-upgrade-row").filter({ hasText: "clone" }),
+		).toContainText("2.60.0");
+		await expect(
+			block
+				.getByTestId("planned-upgrade-row")
+				.filter({ hasText: "production" }),
+		).toContainText("2.59.0");
+	});
+
+	/// spec: UPG#the-dashboard
+	test("a restore under way and how the group is tested sit in the header", async ({
+		page,
+		sql,
+	}) => {
+		const weekly = await seedServerGroup(sql, { name: "kamaka" });
+		const asked = await seedServerGroup(sql, { name: "drifting" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		for (const group of [weekly, asked]) {
+			await runningAt(sql, group.id, "2.60.0");
+			await seedUpgradePlan(sql, {
+				groupId: group.id,
+				targetVersionId: target.id,
+			});
+		}
+		const consumer = await declareUpgradeReplica(sql, weekly.id);
+		await seedBackupCredentialIssuance(sql, {
+			deviceId: consumer,
+			groupId: weekly.id,
+			purpose: "restore",
+			issuedAgoSecs: 600,
+		});
+		const onRequest = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: onRequest.id,
+			intents: [{ intent: "upgrade", semantics: ["check", "once", "migrate"] }],
+		});
+		await seedRestoreReplica(sql, {
+			consumerDeviceId: onRequest.id,
+			groupId: asked.id,
+			intent: "upgrade",
+			migratesOnRequest: true,
+		});
+
+		await page.goto("/upgrades");
+
+		const scheduled = plannedGroup(page, "kamaka").getByTestId(
+			"planned-group-header",
+		);
+		await expect(scheduled.getByTestId("migration-testing")).toHaveText("weekly");
+		await expect(scheduled.getByText("testing", { exact: true })).toBeVisible();
+		const requested = plannedGroup(page, "drifting").getByTestId(
+			"planned-group-header",
+		);
+		await expect(requested.getByTestId("migration-testing")).toHaveText(
+			"on request",
+		);
+		await expect(requested.getByRole("button", { name: "Test now" })).toBeVisible();
 	});
 
 	test("says so when nothing is planned", async ({ page, sql }) => {
@@ -205,7 +466,7 @@ test.describe("upgrades dashboard", () => {
 		);
 	});
 
-	test("withdrawing a plan puts the group back to unplanned", async ({
+	test("withdrawing a plan moves it to the past plans", async ({
 		page,
 		sql,
 	}) => {
@@ -222,29 +483,14 @@ test.describe("upgrades dashboard", () => {
 		});
 
 		await page.goto("/upgrades");
-		await expect(
-			page
-				.getByTestId("planned-upgrade-row")
-				.filter({ hasText: "kamaka" }),
-		).toBeVisible();
+		await expect(plannedGroup(page, "kamaka")).toBeVisible();
 
 		page.once("dialog", (dialog) => dialog.accept());
-		await page
-			.getByRole("button", { name: "Withdraw kamaka's plan" })
-			.click();
+		await planAction(page, "kamaka", "Withdraw plan");
 
-		// Withdrawn, so it moves to the unplanned list and stops being tested.
 		await expect(page.getByTestId("planned-upgrades")).toContainText(
 			"No group has a recorded plan",
 		);
-		await page
-			.getByRole("button", { name: "Show environments with no plan" })
-			.click();
-		await expect(
-			page
-				.getByTestId("unplanned-upgrade-row")
-				.filter({ hasText: "kamaka" }),
-		).toBeVisible();
 
 		// The plan is kept, so where kamaka was going stays readable.
 		await page.getByRole("button", { name: "Show past plans" }).click();
@@ -286,9 +532,7 @@ test.describe("upgrades dashboard", () => {
 		);
 		// The plan that replaced it is where the group is going, so it stays
 		// out of the history.
-		await expect(
-			page.getByTestId("planned-upgrade-row").filter({ hasText: "kamaka" }),
-		).toContainText("2.63.0");
+		await expect(plannedGroup(page, "kamaka")).toContainText("2.63.0");
 	});
 
 	test("amending a plan changes its date and note but not where it is going", async ({
@@ -310,13 +554,11 @@ test.describe("upgrades dashboard", () => {
 		});
 
 		await page.goto("/upgrades");
-		const row = page
-			.getByTestId("planned-upgrade-row")
-			.filter({ hasText: "kamaka" });
+		const row = plannedGroup(page, "kamaka");
 		const note = page.getByTestId("planned-upgrade-note");
 		await expect(note).toContainText("waiting on the site");
 
-		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
+		await planAction(page, "kamaka", "Edit plan");
 		const dialog = page.getByTestId("edit-plan");
 		// Prefilled from the plan, so an operator amends rather than retypes.
 		await expect(dialog.getByLabel("Planned for")).toHaveValue(
@@ -354,12 +596,10 @@ test.describe("upgrades dashboard", () => {
 		});
 
 		await page.goto("/upgrades");
-		const row = page
-			.getByTestId("planned-upgrade-row")
-			.filter({ hasText: "kamaka" });
+		const row = page.getByTestId("planned-upgrade-row");
 		await expect(row).toContainText("late");
 
-		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
+		await planAction(page, "kamaka", "Edit plan");
 		const dialog = page.getByTestId("edit-plan");
 		await dialog.getByLabel("Planned for").fill("");
 		// The hour was an hour of that day, so it goes with it.
@@ -393,24 +633,14 @@ test.describe("upgrades dashboard", () => {
 		await page.getByRole("option", { name: "2.61.0" }).click();
 		await form.getByRole("button", { name: "Record" }).click();
 
-		// The clone's row names its rank; production, still unplanned, stays
-		// in the list of gaps.
-		const row = page
-			.getByTestId("planned-upgrade-row")
-			.filter({ hasText: "kamaka" });
+		// The clone's row names its rank; production, still unplanned, has none.
+		const block = plannedGroup(page, "kamaka");
+		const row = block.getByTestId("planned-upgrade-row");
 		await expect(row).toHaveCount(1);
 		await expect(row).toContainText("clone");
-		await expect(row).toContainText("2.61.0");
+		await expect(block).toContainText("2.61.0");
 		await expect(
-			page.getByRole("button", { name: "Withdraw kamaka clone's plan" }),
-		).toBeVisible();
-		await page
-			.getByRole("button", { name: "Show environments with no plan" })
-			.click();
-		await expect(
-			page
-				.getByTestId("unplanned-upgrade-row")
-				.filter({ hasText: "kamaka" }),
+			page.getByRole("button", { name: "More actions for kamaka clone" }),
 		).toBeVisible();
 	});
 
@@ -447,9 +677,7 @@ test.describe("upgrades dashboard", () => {
 		await page.getByRole("option", { name: "2.54.0" }).click();
 		await form.getByRole("button", { name: "Record" }).click();
 
-		await expect(
-			page.getByTestId("planned-upgrade-row").filter({ hasText: "kamaka" }),
-		).toContainText("2.54.0");
+		await expect(plannedGroup(page, "kamaka")).toContainText("2.54.0");
 	});
 
 	test("a minor is suggested at its newest patch clear of known issues", async ({
@@ -502,13 +730,11 @@ test.describe("upgrades dashboard", () => {
 		});
 
 		await page.goto("/upgrades");
-		const row = page
-			.getByTestId("planned-upgrade-row")
-			.filter({ hasText: "kamaka" });
+		const row = page.getByTestId("planned-upgrade-row");
 		// Whose midnight it is, without the reader having to know the group.
 		await expect(row).toContainText("12am FJT");
 
-		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
+		await planAction(page, "kamaka", "Edit plan");
 		const dialog = page.getByTestId("edit-plan");
 		await expect(dialog.getByLabel("Starts")).toHaveValue("00:00");
 		await expect(dialog.getByLabel("Timezone")).toHaveValue("Pacific/Fiji");
@@ -549,13 +775,11 @@ test.describe("upgrades dashboard", () => {
 		await expect(form.getByLabel("Timezone")).toHaveValue("Pacific/Fiji");
 		await form.getByRole("button", { name: "Record" }).click();
 
-		const row = page
-			.getByTestId("planned-upgrade-row")
-			.filter({ hasText: "kamaka" });
+		const row = page.getByTestId("planned-upgrade-row");
 		await expect(row).toContainText("11pm-12am FJT");
 
 		// An hour that is no longer settled comes off without losing the day.
-		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
+		await planAction(page, "kamaka", "Edit plan");
 		const dialog = page.getByTestId("edit-plan");
 		await dialog.getByLabel("Starts").fill("");
 		await expect(dialog.getByLabel("Ends")).toHaveValue("");
@@ -565,37 +789,7 @@ test.describe("upgrades dashboard", () => {
 		await expect(row).not.toContainText("FJT");
 	});
 
-	/// An environment that has reported no version cannot be placed against the
-	/// newest one, so it has no distance and nothing to plan towards. The list
-	/// exists to name what is behind, and a row that cannot say how far behind
-	/// it is would sit there permanently with nothing anyone can do about it.
-	///
-	/// spec: UPG#the-dashboard
-	test("an environment that has reported no version is not listed as behind", async ({
-		page,
-		sql,
-	}) => {
-		const behind = await seedServerGroup(sql, { name: "drifting" });
-		const silent = await seedServerGroup(sql, { name: "silent" });
-		await runningAt(sql, behind.id, "2.60.0");
-		// A server with no status row has reported nothing.
-		await seedServer(sql, { groupId: silent.id, rank: "production" });
-		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
-
-		await page.goto("/upgrades");
-		await page
-			.getByRole("button", { name: "Show environments with no plan" })
-			.click();
-
-		await expect(
-			page.getByTestId("unplanned-upgrade-row").filter({ hasText: "drifting" }),
-		).toBeVisible();
-		await expect(page.getByTestId("unplanned-upgrades")).not.toContainText(
-			"silent",
-		);
-	});
-
-	/// The tables carry seven columns and a note, so at a narrow width they have
+	/// The tables carry several columns and a note, so at a narrow width they have
 	/// to scroll inside their own card. Before this they ran out past the card's
 	/// border and under the edge of the window, with the last columns
 	/// unreachable.
@@ -847,9 +1041,9 @@ test.describe("upgrade windows", () => {
 
 		// A window closing before it opened is the next morning, not a plan
 		// that runs backwards.
-		await expect(
-			page.getByTestId("planned-upgrade-row").filter({ hasText: "kamaka" }),
-		).toContainText("10pm-2am FJT");
+		await expect(page.getByTestId("planned-upgrade-row")).toContainText(
+			"10pm-2am FJT",
+		);
 	});
 
 	test("the week view draws the window, and carries it past midnight", async ({
@@ -953,6 +1147,9 @@ test.describe("upgrade windows", () => {
 
 		// The operator reading the row is the one in the work, so the mark is the
 		// way back into it.
+		await page
+			.getByRole("button", { name: "More actions for kamaka" })
+			.click();
 		await page.getByTestId("amend-maintenance").click();
 		await expect(
 			page.getByRole("heading", { name: "Amend maintenance" }),
@@ -1000,9 +1197,7 @@ test.describe("upgrade windows", () => {
 		});
 
 		await page.goto("/upgrades");
-		await page
-			.getByRole("button", { name: "Declare maintenance for kamaka" })
-			.click();
+		await planAction(page, "kamaka", "Declare maintenance");
 
 		await expect(page.getByTestId("confirm-declare")).toHaveCount(0);
 		await expect(page.getByLabel("Expected to end")).toBeVisible();
@@ -1033,9 +1228,7 @@ test.describe("upgrade windows", () => {
 		});
 
 		await page.goto("/upgrades");
-		await page
-			.getByRole("button", { name: "Declare maintenance for kamaka" })
-			.click();
+		await planAction(page, "kamaka", "Declare maintenance");
 
 		// A confirmation, not the form: the hours are already known, and they
 		// are under way, which is what a declaration opening now can stand for.

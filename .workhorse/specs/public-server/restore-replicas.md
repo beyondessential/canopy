@@ -294,10 +294,11 @@ A snapshot that already has a verdict for the version is never due, so backups t
 A week is counted from when the last test's report reached Canopy, since a consumer's clock is not one the schedule can rest on.
 The schedule is the default; asking is for trying a version out, and for a group too large to restore weekly.
 
-An operator asks from the environment's row in the upgrades view, and the ask covers every machine a testing declaration restores whose application the plan applies to.
+An operator asks from the group's header in the upgrades view, which asks for each of the group's planned environments set up for testing, or from a server's row on the group's page, which asks for that server's environment.
+An ask covers every machine of its environment a testing declaration restores whose application the plan applies to.
 A machine nothing tests is left out, since no test would ever answer its ask.
 An ask puts each of those machines on the worklist against its latest snapshot, including one whose pair is already settled, since an ask after a fix to the pipeline or to the data is a request for a new answer.
-It is answered for a machine once a verdict for that machine and version lands from a test that began after the ask, and until then the environment's row says it is waiting.
+It is answered for a machine once a verdict for that machine and version lands from a test that began after the ask, and until then both places say it is waiting.
 A test begins when its consumer is first issued credentials for its run, so a run already under way when the ask is made does not answer it; a report naming no run is taken to have begun its elapsed time before it finished.
 An ask on a declaration on the schedule never puts off a test already owed: the pair is due from whichever came first.
 A declaration building reporting schemas migrates without testing the plan, so on its own it leaves an environment with nothing to ask for.
@@ -334,6 +335,9 @@ A consumer reports it where the version records it; a version that records only 
 
 Canopy derives a verdict for each candidate pair of application and version: not yet tested, passed, or failed.
 Verdicts are presented per group, as the set of versions tested against that group's applications, so whether a version is safe for a group is answered in one place instead of by assembling reports.
+An application is set up for testing where a declaration that tests the plan restores its machine.
+Only those are listed with their verdicts; the rest are counted on one line and listed on request, since nothing will ever test them and showing each as not yet tested reads as a fault.
+Where every listed application is going to the same version, that version is named once beside the heading rather than on every row.
 
 A verdict names the snapshot it was reached against and when that was, because a pass against a month-old snapshot is a weaker statement than one against last night's.
 A newer test of the same pair supersedes the previous verdict, and the superseded reports remain.

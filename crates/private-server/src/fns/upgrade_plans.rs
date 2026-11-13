@@ -55,15 +55,8 @@ pub struct PlannedUpgrade {
 	/// The rank of the environment this concerns: the group's applications at
 	/// that rank.
 	pub rank: ServerRank,
-	/// Whether this is the group's highest-ranked environment, the one the
-	/// group's own version is read from.
-	pub headline: bool,
 	/// The version the environment runs now, where it has reported one.
 	pub current_version: Option<String>,
-	/// How far that is behind the newest published version, as majors times a
-	/// thousand plus minors. Zero where it is current; `null` where it has
-	/// reported no version.
-	pub behind: Option<u64>,
 	/// The plan, absent for an environment with none.
 	pub plan: Option<UpgradePlan>,
 	/// The plan's target as semver.
@@ -71,26 +64,15 @@ pub struct PlannedUpgrade {
 	/// Whether the planned date has passed without the upgrade happening.
 	/// Presentational: a slipping upgrade is normal operational reality.
 	pub late: bool,
-	/// Where the environment's data stands against the planned version, rolled
-	/// up from its applications: any failure makes the environment a failure,
-	/// since one application whose data breaks is enough to stop the upgrade.
-	/// `null` without a plan.
-	pub verdict: Option<String>,
-	/// Whether a restore attempt is under way, carried beside the verdict rather
-	/// than folded into it: a restore takes hours, so a group mid-test would
+	/// Whether a restore attempt is under way, carried beside the verdicts rather
+	/// than folded into them: a restore takes hours, so a group mid-test would
 	/// otherwise read as untested for the whole window.
 	pub attempt: Option<crate::fns::migration_tests::AttemptState>,
-	/// The failing test behind a `failed` verdict. `null` for any other verdict.
-	pub failed_test: Option<FailedTest>,
-	/// How many of the environment's applications have passed, out of how many
-	/// are under test. `null` without a plan, or where the environment has no
-	/// application the migrations apply to.
-	pub tally: Option<Tally>,
-	/// Whether anything is declared to migrate this group's data. A plan on a
-	/// group with nothing declared is never dispatched, so its verdict would sit
-	/// at "not tested" indefinitely with nothing on its way. `null` without a
-	/// plan.
-	pub testable: Option<bool>,
+	/// The environment's applications a testing declaration restores, each with
+	/// where it stands against the planned version. Empty without a plan, and
+	/// where nothing tests the environment.
+	// spec: RST#verdicts
+	pub tests: Vec<TestedServer>,
 	/// The most recent ask for this environment to be tested against its plan
 	/// that has yet to be answered for every machine it covers. `null` where
 	/// none is pending.
@@ -115,9 +97,8 @@ pub struct PlannedUpgrade {
 
 /// Planned upgrades across the fleet.
 ///
-/// Every environment of every live group, whether or not it has a plan. A
-/// group several minors behind with no plan is the thing this view exists to
-/// surface, so its environments are listed rather than omitted.
+/// Every environment of every live group, whether or not it has a plan, since
+/// recording a plan starts from an environment listed here.
 // spec: UPG#the-dashboard
 #[utoipa::path(
 	post,
@@ -165,9 +146,6 @@ pub async fn fleet(
 		HashMap::new();
 	let mut members: HashMap<Uuid, Vec<database::applications::Application>> = HashMap::new();
 	let mut migrating: HashMap<Uuid, database::restore::MigratingEnvironments> = HashMap::new();
-	let newest = database::versions::Version::newest_published(&mut conn)
-		.await?
-		.map(|version| version.as_semver());
 	// Including drafts: a target yanked since the plan was recorded still has to
 	// render as the version the environment is going to.
 	let versions: HashMap<Uuid, database::versions::Version> =
@@ -229,75 +207,69 @@ pub async fn fleet(
 			.as_ref()
 			.is_some_and(|plan| database::upgrade_plans::is_late(plan, today));
 
-		// The plan says where the environment is going; the verdict says whether
-		// its data survives getting there. Pairing them is what makes this view
-		// worth reading.
-		let mut failed_test = None;
-		let mut tally = None;
+		// The plan says where the environment is going; the verdicts say whether
+		// its data survives getting there, from each application a declaration
+		// tests. One nothing tests has nothing to say, so it is left out.
+		let mut testing = None;
+		let mut tests = Vec::new();
 		let mut test_request = None;
-		let verdict = match &plan {
-			None => None,
-			Some(_) => {
-				if !members.contains_key(&env.group_id) {
-					let live = database::applications::Application::list_live_in_group(
-						&mut conn,
-						env.group_id,
-					)
-					.await?;
-					members.insert(env.group_id, live);
-				}
-				let applications: Vec<_> = members[&env.group_id]
-					.iter()
-					.filter(|application| application.rank == Some(env.rank))
-					.cloned()
-					.collect();
-				let per_server = database::migration_tests::verdicts_against(
+		if let Some(plan) = &plan {
+			let declared = match migrating.entry(env.group_id) {
+				Entry::Occupied(held) => held.into_mut(),
+				Entry::Vacant(slot) => slot.insert(
+					database::restore::migrating_environments(&mut conn, env.group_id).await?,
+				),
+			};
+			testing = declared.testing(env.rank);
+			if !members.contains_key(&env.group_id) {
+				let live = database::applications::Application::list_live_in_group(
 					&mut conn,
-					applications.clone(),
-					planned,
+					env.group_id,
 				)
 				.await?;
-				failed_test = newest_failure(&per_server, |server_id| {
+				members.insert(env.group_id, live);
+			}
+			let applications: Vec<_> = members[&env.group_id]
+				.iter()
+				.filter(|application| {
+					application.rank == Some(env.rank)
+						&& application
+							.machine_id
+							.is_some_and(|machine_id| declared.tests_machine(machine_id))
+				})
+				.cloned()
+				.collect();
+			tests = database::migration_tests::verdicts_against(
+				&mut conn,
+				applications.clone(),
+				planned,
+			)
+			.await?
+			.into_iter()
+			.map(|verdict| TestedServer {
+				name: applications
+					.iter()
+					.find(|application| application.id == verdict.server_id)
+					.map(database::applications::Application::display_name)
+					.unwrap_or_else(|| "Unknown application".to_string()),
+				verdict,
+			})
+			.collect();
+			test_request = requests
+				.get(&plan.id)
+				.into_iter()
+				.flatten()
+				.filter(|request| {
 					applications
 						.iter()
-						.find(|application| application.id == server_id)
-						.map(database::applications::Application::display_name)
-						.unwrap_or_else(|| "Unknown application".to_string())
+						.any(|application| application.machine_id == Some(request.machine_id))
+				})
+				.max_by_key(|request| request.requested_at)
+				.map(|request| TestRequest {
+					requested_at: request.requested_at,
+					requested_by: request.requested_by.clone(),
 				});
-				tally = tested_tally(&per_server);
-				test_request = plan
-					.as_ref()
-					.and_then(|plan| requests.get(&plan.id))
-					.into_iter()
-					.flatten()
-					.filter(|request| {
-						applications
-							.iter()
-							.any(|application| application.machine_id == Some(request.machine_id))
-					})
-					.max_by_key(|request| request.requested_at)
-					.map(|request| TestRequest {
-						requested_at: request.requested_at,
-						requested_by: request.requested_by.clone(),
-					});
-				Some(roll_up(&per_server).to_owned())
-			}
-		};
-
-		let mut testing = None;
-		let testable = match &plan {
-			None => None,
-			Some(_) => {
-				let declared = match migrating.entry(env.group_id) {
-					Entry::Occupied(held) => held.into_mut(),
-					Entry::Vacant(slot) => slot.insert(
-						database::restore::migrating_environments(&mut conn, env.group_id).await?,
-					),
-				};
-				testing = declared.testing(env.rank);
-				Some(declared.covers(env.rank))
-			}
-		};
+		}
 
 		// Issuances carry no intent, so another intent's restore traffic would
 		// read as a test under way. They carry no rank either, so an attempt is
@@ -307,8 +279,8 @@ pub async fn fleet(
 			Some(database::restore::Testing::OnRequest) => test_request.is_some(),
 			None => false,
 		};
-		let attempt = match testable {
-			Some(true) if dispatchable => match attempts.get(&env.group_id) {
+		let attempt = if dispatchable {
+			match attempts.get(&env.group_id) {
 				Some(attempt) => *attempt,
 				None => {
 					let attempt =
@@ -317,30 +289,21 @@ pub async fn fleet(
 					attempts.insert(env.group_id, attempt);
 					attempt
 				}
-			},
-			_ => None,
+			}
+		} else {
+			None
 		};
 
-		let behind = env
-			.version
-			.as_ref()
-			.zip(newest.as_ref())
-			.map(|(current, latest)| database::statuses::version_distance(&current.0, latest));
 		out.push(PlannedUpgrade {
 			group_id: env.group_id,
 			group_name: names.get(&env.group_id).cloned().unwrap_or_default(),
 			rank: env.rank,
-			headline: env.headline,
 			current_version: env.version.map(|v| v.to_string()),
-			behind,
 			plan,
 			target_version: target,
 			late,
-			verdict,
-			failed_test,
-			tally,
 			attempt,
-			testable,
+			tests,
 			test_request,
 			testing,
 			planned_window,
@@ -354,57 +317,15 @@ pub async fn fleet(
 	Ok(Json(out))
 }
 
-/// The group's standing against its planned version: the worst of its applications'.
-///
-/// One server whose data breaks the migrations is enough to stop the upgrade, so
-/// a failure anywhere is the group's answer. Short of that, an environment part
-/// way through is its own answer rather than the untested one: a central that
-/// passed is most of what an operator wants to know before the window opens,
-/// and reading it as untested hides work that has already been done.
-fn roll_up(per_server: &[database::migration_tests::GroupVerdict]) -> &'static str {
-	use database::migration_tests::Verdict;
-
-	if per_server.is_empty() {
-		return "nottested";
-	}
-	if per_server.iter().any(|v| v.verdict == Verdict::Failed) {
-		return "failed";
-	}
-	if per_server.iter().any(|v| v.verdict == Verdict::NotTested) {
-		return if per_server.iter().any(|v| v.verdict == Verdict::Passed) {
-			"partial"
-		} else {
-			"nottested"
-		};
-	}
-	"passed"
-}
-
-/// How far through an environment's applications the testing has got, so a
-/// partial verdict can say so rather than leaving the reader to guess.
-fn tested_tally(per_server: &[database::migration_tests::GroupVerdict]) -> Option<Tally> {
-	use database::migration_tests::Verdict;
-
-	if per_server.is_empty() {
-		return None;
-	}
-	Some(Tally {
-		passed: per_server
-			.iter()
-			.filter(|v| v.verdict == Verdict::Passed)
-			.count() as i32,
-		total: per_server.len() as i32,
-	})
-}
-
-/// How many of an environment's applications have passed, out of how many the
-/// migrations apply to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
-pub struct Tally {
-	/// How many have a passing verdict against the planned version.
-	pub passed: i32,
-	/// How many the migrations apply to, passed or not.
-	pub total: i32,
+/// One of an environment's applications that a declaration tests, and where it
+/// stands against the environment's planned version.
+#[derive(Serialize, ToSchema)]
+pub struct TestedServer {
+	/// The application's name, so the view reads without a second lookup.
+	pub name: String,
+	/// Where it stands.
+	#[serde(flatten)]
+	pub verdict: database::migration_tests::GroupVerdict,
 }
 
 /// An ask for an environment to be migration-tested, still waiting on a verdict.
@@ -415,38 +336,6 @@ pub struct TestRequest {
 	pub requested_at: jiff::Timestamp,
 	/// Who asked.
 	pub requested_by: Option<String>,
-}
-
-/// The failing test behind a `failed` verdict, so the fleet view can say what
-/// broke without a second lookup.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
-pub struct FailedTest {
-	/// The application whose data broke, since the verdict rolls up several.
-	pub application: String,
-	/// The migration it stopped at, absent when the runner named none.
-	pub migration: Option<String>,
-	/// Why it stopped, redacted by the runner that reported it.
-	pub error: Option<String>,
-}
-
-/// The most recently reported failure among an environment's applications.
-/// Where several failed, the newest is shown and the rest stay on the group page.
-fn newest_failure(
-	per_server: &[database::migration_tests::GroupVerdict],
-	name_of: impl Fn(Uuid) -> String,
-) -> Option<FailedTest> {
-	use database::migration_tests::Verdict;
-
-	per_server
-		.iter()
-		.filter(|v| v.verdict == Verdict::Failed)
-		.filter_map(|v| v.latest.as_ref().map(|test| (v.server_id, test)))
-		.max_by_key(|(_, test)| test.reported_at)
-		.map(|(server_id, test)| FailedTest {
-			application: name_of(server_id),
-			migration: test.failed_migration.clone(),
-			error: test.error.clone(),
-		})
 }
 
 /// One plan that has closed, in the fleet's plan history.
@@ -858,157 +747,4 @@ pub async fn withdraw(
 	})
 	.await?;
 	Ok(Json(()))
-}
-
-#[cfg(test)]
-mod failure_tests {
-	use super::*;
-	use database::{
-		migration_tests::{GroupVerdict, LatestTest, Verdict},
-		pg_duration::PgDuration,
-	};
-	use jiff::{SignedDuration, Timestamp};
-
-	fn verdict(
-		server_id: Uuid,
-		verdict: Verdict,
-		reported_at: &str,
-		migration: &str,
-	) -> GroupVerdict {
-		GroupVerdict {
-			server_id,
-			target_version_id: Uuid::nil(),
-			target_version: "2.9.3".to_owned(),
-			verdict,
-			latest: Some(LatestTest {
-				verdict,
-				failed_migration: (verdict == Verdict::Failed).then(|| migration.to_owned()),
-				error: (verdict == Verdict::Failed)
-					.then(|| "42703: column \"…\" does not exist".to_owned()),
-				snapshot_id: None,
-				reported_at: reported_at.parse::<Timestamp>().expect("timestamp parses"),
-				total_elapsed: PgDuration(SignedDuration::from_secs(11)),
-				data_bytes_before: 0,
-				data_bytes_after: 0,
-				timings: Vec::new(),
-				post_migration_elapsed: None,
-				post_migration_timings: vec![],
-			}),
-		}
-	}
-
-	#[test]
-	fn the_newest_failure_is_the_one_shown() {
-		let older = Uuid::from_u128(1);
-		let newer = Uuid::from_u128(2);
-		let failed = newest_failure(
-			&[
-				verdict(
-					older,
-					Verdict::Failed,
-					"2026-09-13T04:51:00Z",
-					"0001-older.ts",
-				),
-				verdict(
-					newer,
-					Verdict::Failed,
-					"2026-09-13T16:52:00Z",
-					"0002-newer.ts",
-				),
-			],
-			|id| {
-				if id == newer {
-					"Facility A".to_owned()
-				} else {
-					"Central".to_owned()
-				}
-			},
-		);
-
-		assert_eq!(
-			failed,
-			Some(FailedTest {
-				application: "Facility A".to_owned(),
-				migration: Some("0002-newer.ts".to_owned()),
-				error: Some("42703: column \"…\" does not exist".to_owned()),
-			})
-		);
-	}
-
-	#[test]
-	fn a_passing_environment_has_no_failing_test() {
-		let passed = verdict(
-			Uuid::from_u128(3),
-			Verdict::Passed,
-			"2026-09-13T16:52:00Z",
-			"",
-		);
-		assert_eq!(newest_failure(&[passed], |_| "Central".to_owned()), None);
-	}
-}
-
-#[cfg(test)]
-mod rollup_tests {
-	use super::*;
-	use database::migration_tests::{GroupVerdict, Verdict};
-
-	fn at(verdict: Verdict) -> GroupVerdict {
-		GroupVerdict {
-			server_id: Uuid::nil(),
-			target_version_id: Uuid::nil(),
-			target_version: "2.63.0".to_owned(),
-			verdict,
-			latest: None,
-		}
-	}
-
-	/// An environment part way through says so. A central that passed is most of
-	/// what an operator wants to know before the window opens, and rolling it up
-	/// as untested hides testing that has already happened.
-	#[test]
-	fn some_passed_and_some_untested_is_partial() {
-		let per_server = [at(Verdict::Passed), at(Verdict::NotTested)];
-		assert_eq!(roll_up(&per_server), "partial");
-		assert_eq!(
-			tested_tally(&per_server),
-			Some(Tally {
-				passed: 1,
-				total: 2
-			})
-		);
-	}
-
-	/// One application whose data breaks the migrations is enough to stop the
-	/// upgrade, so a failure outranks anything that passed alongside it.
-	#[test]
-	fn a_failure_outranks_a_pass() {
-		assert_eq!(
-			roll_up(&[
-				at(Verdict::Passed),
-				at(Verdict::Failed),
-				at(Verdict::NotTested)
-			]),
-			"failed"
-		);
-	}
-
-	/// Nothing tested at all is still untested: partial is about work done, not
-	/// about how many applications there are.
-	#[test]
-	fn nothing_tested_is_not_partial() {
-		assert_eq!(
-			roll_up(&[at(Verdict::NotTested), at(Verdict::NotTested)]),
-			"nottested"
-		);
-		assert_eq!(roll_up(&[]), "nottested");
-		assert_eq!(tested_tally(&[]), None);
-	}
-
-	#[test]
-	fn every_application_passing_is_a_pass() {
-		assert_eq!(
-			roll_up(&[at(Verdict::Passed), at(Verdict::Passed)]),
-			"passed"
-		);
-	}
 }
