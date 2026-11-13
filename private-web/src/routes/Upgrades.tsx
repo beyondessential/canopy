@@ -1299,9 +1299,15 @@ function PlannedGroup({
 		new Set(rows.map((row) => row.target_version)).size === 1
 			? first.target_version
 			: null;
-	const failed = rows.some((row) =>
-		row.tests.some((test) => test.verdict === "failed"),
-	);
+	const running =
+		first.current_version &&
+		rows.every((row) => row.current_version === first.current_version)
+			? first.current_version
+			: null;
+	const tests = rows.flatMap((row) => row.tests);
+	const failed = tests.some((test) => test.verdict === "failed");
+	const passed =
+		tests.length > 0 && tests.every((test) => test.verdict === "passed");
 	return (
 		<Box
 			component="section"
@@ -1320,7 +1326,9 @@ function PlannedGroup({
 					py: 1.5,
 					bgcolor: failed
 						? alpha(theme.palette.warning.main, 0.08)
-						: theme.palette.action.hover,
+						: passed
+							? alpha(theme.palette.success.main, 0.08)
+							: theme.palette.action.hover,
 				})}
 			>
 				<MuiLink
@@ -1332,26 +1340,35 @@ function PlannedGroup({
 				>
 					{first.group_name}
 				</MuiLink>
-				{target && (
+				{(running || target) && (
 					<Typography variant="body2" color="text.secondary">
-						to {target}
+						{running && target
+							? `${running} → ${target}`
+							: target
+								? `to ${target}`
+								: `on ${running}`}
 					</Typography>
 				)}
-				<Box sx={{ flexGrow: 1 }} />
 				<TestSummary groupId={first.group_id} rows={rows} />
-				<RequestTest
-					groupId={first.group_id}
-					groupName={first.group_name}
-					rows={rows}
-					onRequested={onChanged}
-				/>
+				<Stack
+					direction="row"
+					spacing={1}
+					sx={{ alignItems: "center", ml: "auto" }}
+				>
+					<RequestTest
+						groupId={first.group_id}
+						groupName={first.group_name}
+						rows={rows}
+						onRequested={onChanged}
+					/>
+				</Stack>
 			</Stack>
 			<TableContainer>
 				<Table size="small" sx={GROUP_TABLE}>
 					<TableHead>
 						<TableRow>
 							<TableCell sx={{ width: "18%" }}>Environment</TableCell>
-							<TableCell sx={{ width: "12%" }}>Running</TableCell>
+							{!running && <TableCell sx={{ width: "12%" }}>Running</TableCell>}
 							{!target && <TableCell sx={{ width: "12%" }}>Going to</TableCell>}
 							<TableCell sx={{ width: "18%" }}>Planned for</TableCell>
 							<TableCell sx={{ width: "20%" }}>Window</TableCell>
@@ -1367,7 +1384,9 @@ function PlannedGroup({
 									<TableCell>
 										<ServerRankChip rank={row.rank} />
 									</TableCell>
-									<TableCell>{row.current_version ?? "unknown"}</TableCell>
+									{!running && (
+										<TableCell>{row.current_version ?? "unknown"}</TableCell>
+									)}
 									{!target && <TableCell>{row.target_version}</TableCell>}
 									<TableCell>
 										<PlannedFor

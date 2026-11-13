@@ -101,10 +101,13 @@ test.describe("upgrades dashboard", () => {
 
 		const group = plannedGroup(page, "kamaka");
 		const header = group.getByTestId("planned-group-header");
-		await expect(header).toContainText("to 2.61.0");
+		// Every environment runs the same version, so the header says it once.
+		await expect(header).toContainText("2.60.0 → 2.61.0");
+		await expect(
+			group.getByRole("columnheader", { name: "Running", exact: true }),
+		).toHaveCount(0);
 		const row = group.getByTestId("planned-upgrade-row");
 		await expect(row).toContainText("production");
-		await expect(row).toContainText("2.60.0");
 		await expect(row).toContainText("late");
 		await expect(group.getByTestId("planned-upgrade-note")).toContainText(
 			"site can absorb 2.61 only",
@@ -114,6 +117,7 @@ test.describe("upgrades dashboard", () => {
 		await expect(header.getByTestId("migration-verdict")).toHaveText(
 			"Not yet tested",
 		);
+		await expect(header).toHaveCSS("background-color", "rgba(0, 0, 0, 0.04)");
 
 		// A group with nothing recorded is not one of the planned.
 		await expect(page.getByTestId("planned-group")).toHaveCount(1);
@@ -253,6 +257,7 @@ test.describe("upgrades dashboard", () => {
 			"kamaka-central · 2 migrations in 1.5h",
 		);
 		await expect(header).not.toContainText("of 2");
+		await expect(header).toHaveCSS("background-color", "rgba(46, 125, 50, 0.08)");
 		await expect(header.getByRole("button", { name: "Test again" })).toBeVisible();
 		await expect(block.getByTestId("planned-upgrade-row")).toHaveCount(2);
 
@@ -345,12 +350,15 @@ test.describe("upgrades dashboard", () => {
 		await page.goto("/upgrades");
 
 		const block = plannedGroup(page, "kamaka");
-		await expect(block.getByTestId("planned-group-header")).not.toContainText(
-			"to 2.6",
-		);
+		const header = block.getByTestId("planned-group-header");
+		await expect(header).toContainText("on 2.60.0");
+		await expect(header).not.toContainText("to 2.6");
 		await expect(
 			block.getByRole("columnheader", { name: "Going to" }),
 		).toBeVisible();
+		await expect(
+			block.getByRole("columnheader", { name: "Running", exact: true }),
+		).toHaveCount(0);
 		await expect(
 			block.getByTestId("planned-upgrade-row").filter({ hasText: "clone" }),
 		).toContainText("2.62.0");
@@ -359,6 +367,42 @@ test.describe("upgrades dashboard", () => {
 				.getByTestId("planned-upgrade-row")
 				.filter({ hasText: "production" }),
 		).toContainText("2.61.0");
+	});
+
+	/// spec: UPG#the-dashboard
+	test("environments on different versions say so per row", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.59.0");
+		await runningAt(sql, group.id, "2.60.0", "clone");
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		for (const rank of ["production", "clone"] as const) {
+			await seedUpgradePlan(sql, {
+				groupId: group.id,
+				rank,
+				targetVersionId: target.id,
+			});
+		}
+
+		await page.goto("/upgrades");
+
+		const block = plannedGroup(page, "kamaka");
+		const header = block.getByTestId("planned-group-header");
+		await expect(header).toContainText("to 2.61.0");
+		await expect(header).not.toContainText("→");
+		await expect(
+			block.getByRole("columnheader", { name: "Running", exact: true }),
+		).toBeVisible();
+		await expect(
+			block.getByTestId("planned-upgrade-row").filter({ hasText: "clone" }),
+		).toContainText("2.60.0");
+		await expect(
+			block
+				.getByTestId("planned-upgrade-row")
+				.filter({ hasText: "production" }),
+		).toContainText("2.59.0");
 	});
 
 	/// spec: UPG#the-dashboard

@@ -103,17 +103,21 @@ The plan is read at the moment someone declares, so a planned hour arriving susp
 Canopy presents planned upgrades across the fleet in one view, so the question "what is moving, and when" is answered without reading each group.
 
 Open plans are shown a group at a time.
-Each group has a header naming it, with the target version where every planned environment of the group is going to the same one, and beneath the header each environment with an open plan is a row giving its rank, the version it runs now, the planned date and window where there are ones, and the note.
-Where a group's environments are going to different versions, each row names its own target instead.
+Each group has a header naming it, and beneath the header each environment with an open plan is a row giving its rank, the version it runs now, the planned date and window where there are ones, and the note.
+A group's environments usually move together, so a version they all share is said once in the header and left off the rows.
+Where every planned environment runs the same version and is going to the same one, the header reads as the move from one to the other.
+Where they share only the target, the header names the target and each row its running version; where they share only the running version, the header names that and each row its own target.
+An environment whose running version is unknown has nothing to share, so its group's rows keep the running version.
 The window is shown with its timezone abbreviated, so a reader can tell which site's midnight it is.
 An environment's own actions, amending its plan, declaring maintenance over it, and withdrawing the plan, sit behind one control on its row.
 
-The header gives the group's pre-upgrade verdict once, so an operator sees both the intent and whether the group's data survives it.
+The header gives the group's pre-upgrade verdict once, beside the group's name and versions, so an operator sees both the intent and whether the group's data survives it.
 It counts only the applications a testing declaration restores (see [RST](../public-server/restore-replicas.md), "Verdicts").
 Testing is usually set up on one server of a group, often only its production central, and an application nothing tests would read as not yet tested for good, which looks like a problem when nothing is wrong.
 With one such application the header names it and its result: passed with how many migrations ran, how long they took and when, failed with the migration that failed, or not yet tested.
 With several it says how many of them passed, naming a failure first.
-A failure tints the header, and the error it produced is a hover away.
+A failure tints the header as a warning, and the error it produced is a hover away.
+Where every application it counts has passed the header is tinted as a success, so a group ready to move reads as such at a glance; until then it carries no tint.
 The verdict links to the group's own migration tests.
 Where nothing tests any of the group's planned environments the header says so quietly in place of a verdict, since such a plan is never dispatched and a reader would otherwise wait on a result that cannot arrive; it is not presented as a warning, since a group with no testing set up is a choice rather than a fault.
 The header also says whether the group is tested on the schedule or only when asked.
