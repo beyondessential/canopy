@@ -17,6 +17,17 @@ Delivered as a Claude plugin in this repo, attached to the Claude Tag bundle for
   - If it can't, the fallback is to run triage from an hourly routine in the triage channel that sweeps the alerts channel, which loses immediacy.
   - The other fallback is a second Canopy webhook that posts each alert to the triage channel too.
 - **Workflow mentions.** Confirm that a Workflow Builder message can mention the Claude app so that it reaches Claude as a real `@Claude`. Claude Tag replies to a bot's mention unless the channel's **Respond automatically** setting is off.
+- **Finding the incident from the post.** The open workflow's message reads as follows:
+  - a `:deciduous_tree::rotating_light: <server>` line
+  - `Severity:`
+  - `Source:`, which carries the counts
+  - the issue list
+  - an **Open in Canopy** button linking to `https://canopy.tail53aef.ts.net/incidents/<id>`
+
+  That link is on the tailnet, which Claude Tag can't reach. The skill takes the incident id from the URL and reads the incident through the public MCP mount, never by fetching the link. The open question is whether Claude Tag sees a button's URL at all, or only the message text.
+  - Test it in the spike by asking Claude for the incident id.
+  - If it can't see the URL, put the link (or the bare id) in the message text too, beside the `@Claude` mention.
+  - The last resort is matching `server` against Find incidents, which is ambiguous when a group has more than one open incident across its environments.
 - **Health data.** Claude Tag isn't covered by Anthropic's BAA. Canopy alerts are infrastructure, but check messages are free text. Confirm no check puts patient data in its message, and keep raw output out of memory entries (TRI already says so).
 - **Spend.** Triage costs one session per alert, which on a noisy day could be dozens. Set a spend limit on the bundle and watch the first week.
 
