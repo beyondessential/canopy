@@ -9,7 +9,7 @@ Applies to how Claude Tag, Anthropic's Claude agent in Slack, triages the incide
 ## Channels
 
 - Canopy's [incident notifications](incidents.md#notification) and maintenance announcements post to the **alerts channel**.
-- Each of those posts mentions Claude and writes out the link to its incident, so Claude triages every one as it arrives, in a thread under the post.
+- Each of those posts mentions Claude, so Claude triages every one as it arrives, in a thread under the post.
 - What needs a person now goes to the **triage channel**, which holds escalations and one write-up thread per day and nothing else.
 - Both channels are public and Claude is a member of both.
 - Which channels these are, and how posts in them are laid out, is set in Claude Tag's channel configuration.

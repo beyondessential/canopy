@@ -30,25 +30,27 @@ The triage rules live in Canopy, served through two new MCP tools. Claude Tag ca
 
 ### Claude Tag (configuration, documented in a README)
 
-- Add a written-out `@Claude triage this incident: {link}` line to the incident open and resolve workflows. Maintenance workflows get just the mention.
-- Alerts channel instructions: take the id from the link (never fetch it), call `triage_alert`, follow it, post, call `record_alert_triage`, then reply with one line.
+- Add an `@Claude` mention, picked from the message editor's autocomplete, to the incident open, incident resolve and both maintenance workflows. Claude reads the incident id from the **Open in Canopy** button, so no written-out link is needed.
+- Alerts channel instructions: take the incident id from the Open in Canopy button's URL (never fetch it), call `triage_alert`, follow it, post, call `record_alert_triage`, then reply with one line.
 - Triage channel instructions: the escalation thread behaviour, memory recording and the daily write-up.
 - The 8am Pacific/Auckland routine in the triage channel.
 - A token with the notes grant in the bundle's credential for `meta.tamanu.app`.
 
-## Risks to settle before building
+## Spike results (2026-11-13)
 
-- **Cross-channel posting from a reply-triggered session.** The docs allow a *routine* to post into another public channel. They're silent on whether a thread session started by a bot's `@Claude` can post at the top level of another channel, or reply in one of its threads. Spike it in scratch channels.
-  - Fallback: an hourly routine in the triage channel that sweeps the alerts channel, which loses immediacy.
-  - Alternatively: a second Canopy webhook that also posts each alert to the triage channel.
-- **Workflow mentions.** Confirmed in the spike (2026-11-13): Claude Tag replies to a Workflow Builder message that mentions it. **Respond automatically** must be on in the alerts channel.
-- **Finding the incident from the post.** The **Open in Canopy** button links to `https://canopy.tail53aef.ts.net/incidents/<id>`, which is on the tailnet and unreachable. The written-out link line gives Claude the id either way. The spike also checks whether Claude sees a button's URL at all.
+All three unknowns passed in scratch channels, so the design stands with no fallback:
+- Claude Tag replies to a Workflow Builder message that mentions it, using the `@` autocomplete in the message editor. **Respond automatically** must be on in the alerts channel.
+- From the thread under that message, Claude posted at the top level of the other public channel and replied inside an existing thread there.
+- Claude read the right incident id from the **Open in Canopy** button's URL alone. That URL (`https://canopy.tail53aef.ts.net/incidents/<id>`) is on the tailnet, so Claude takes the id from it and never fetches it.
+
+## Remaining risks
+
 - **Health data.** Claude Tag isn't covered by Anthropic's BAA. Check messages are free text, so confirm none carries patient data. Memory entries never hold raw output (TRI).
 - **Spend.** Each alert costs one session. Set a spend limit on the bundle and watch the first week.
 
 ## Checklist
 
-- [ ] Spike in scratch channels: workflow mention, cross-channel post and thread reply, button URL visibility
+- [x] Spike in scratch channels: workflow mention, cross-channel post and thread reply, button URL visibility
 - [ ] Migration and model for triage verdicts in `crates/database`
 - [ ] Must-escalate reasons and shared-cause candidates in `crates/database`, with tests covering each reason, the baseline comparison across two triages, and a machine and application seeded under one id
 - [ ] `triage_alert` and `record_alert_triage` in `crates/canopy-mcp`, with the refusal rules and the notes-grant check
