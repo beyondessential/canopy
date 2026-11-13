@@ -1,9 +1,9 @@
-//! Alert triage: the escalations Canopy decides, recording verdicts against a
-//! revision, the harmless-pattern exception, the write-up day, and the
-//! self-alert for incidents left untriaged.
+//! Alert triage: what triage reads of an incident, what has changed since its
+//! last verdict, recording verdicts against a revision, the write-up day, and
+//! the self-alert for incidents left untriaged.
 
 use database::{
-	alert_triage::{self, Assessment, NewVerdict, Reason, Recorded, Severity, Verdict},
+	alert_triage::{self, Assessment, CheckKey, NewVerdict, Recorded, Severity, Verdict},
 	memory::{self, Link, NewEntry},
 	notes::AuthorKind,
 	notes_log::Author,
@@ -38,16 +38,6 @@ async fn incident(conn: &mut AsyncPgConnection, group: Uuid, rank: &str) -> Uuid
 	))
 	.await
 	.expect("seed incident");
-	id
-}
-
-async fn canopy_incident(conn: &mut AsyncPgConnection) -> Uuid {
-	let id = Uuid::new_v4();
-	conn.batch_execute(&format!(
-		"INSERT INTO incidents (id, opened_at) VALUES ('{id}', NOW());"
-	))
-	.await
-	.expect("seed canopy incident");
 	id
 }
 
@@ -96,7 +86,7 @@ async fn member(
 	issue
 }
 
-/// Catalogue a check with documentation, so it is familiar.
+/// Catalogue a check with documentation.
 async fn documented(conn: &mut AsyncPgConnection, check: &str) {
 	conn.batch_execute(&format!(
 		"INSERT INTO check_policies (source, check_name, ceiling, escalates, documentation) \
@@ -119,7 +109,6 @@ fn verdict(a: &Assessment, verdict: Verdict, entries: Vec<Uuid>) -> NewVerdict {
 	NewVerdict {
 		incident_id: a.incident.id,
 		revision: a.state.revision.clone(),
-		read_at: Timestamp::now(),
 		verdict,
 		reasoning: "because".into(),
 		memory_entry_ids: entries,
@@ -132,136 +121,165 @@ async fn record(conn: &mut AsyncPgConnection, new: &NewVerdict) -> Recorded {
 		.expect("record")
 }
 
-fn kinds(reasons: &[Reason]) -> Vec<&'static str> {
-	reasons
-		.iter()
-		.map(|r| match r {
-			Reason::ProductionOpening => "production_opening",
-			Reason::CanopyOpening => "canopy_opening",
-			Reason::EscalatingFailure { .. } => "escalating_failure",
-			Reason::Worse { .. } => "worse",
-			Reason::NewFailingCheck { .. } => "new_failing_check",
-			Reason::SharedCheck { .. } => "shared_check",
-			Reason::Unfamiliar { .. } => "unfamiliar",
-		})
-		.collect()
+fn key(name: &str) -> CheckKey {
+	CheckKey {
+		source: "alertd".into(),
+		name: name.into(),
+	}
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn first_triage_escalates_production_and_canopy_but_not_a_lesser_environment() {
+async fn triage_reads_the_incidents_checks_documentation_and_memory() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		documented(&mut conn, "disk").await;
-		let (prod, prod_app) = group(&mut conn, "Pacific", "production").await;
-		let (test, test_app) = group(&mut conn, "Highlands", "test").await;
-		let prod_incident = incident(&mut conn, prod, "production").await;
-		let test_incident = incident(&mut conn, test, "test").await;
-		failing(&mut conn, prod_incident, prod_app, "disk", false, 5).await;
-		failing(&mut conn, test_incident, test_app, "disk", false, 300).await;
-		let canopy = canopy_incident(&mut conn).await;
-
-		let a = alert_triage::assess(&mut conn, prod_incident)
-			.await
-			.unwrap();
-		assert_eq!(kinds(&a.reasons), ["production_opening"]);
-		assert!(a.exception_can_answer);
-		assert_eq!(a.target, "Pacific");
-
-		let a = alert_triage::assess(&mut conn, test_incident)
-			.await
-			.unwrap();
-		assert!(a.reasons.is_empty(), "{:?}", a.reasons);
-		assert_eq!(a.target, "Highlands test");
-
-		let a = alert_triage::assess(&mut conn, canopy).await.unwrap();
-		assert_eq!(kinds(&a.reasons), ["canopy_opening"]);
-		assert!(!a.exception_can_answer);
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn an_escalating_or_unfamiliar_check_requires_escalation() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let (g, app) = group(&mut conn, "Pacific", "test").await;
+		let (other_group, _) = group(&mut conn, "Highlands", "test").await;
 		let i = incident(&mut conn, g, "test").await;
-		failing(&mut conn, i, app, "mystery", true, 5).await;
+		failing(&mut conn, i, app, "disk", true, 5).await;
+		failing(&mut conn, i, app, "mystery", false, 5).await;
+		member(&mut conn, i, app, "cpu", "warning", false, 5).await;
+
+		let author = Author::token("triage-bot");
+		let entry = |title: &str, link| NewEntry {
+			title: title.into(),
+			body: "body".into(),
+			link: Some(link),
+		};
+		let on_check = memory::record(
+			&mut conn,
+			entry(
+				"disk",
+				Link::Check {
+					source: "alertd".into(),
+					name: "disk".into(),
+				},
+			),
+			author,
+		)
+		.await
+		.unwrap();
+		conn.batch_execute(
+			"INSERT INTO check_policies (source, check_name, ceiling, escalates) \
+			 VALUES ('elsewhere', 'disk', 'failed', false);",
+		)
+		.await
+		.unwrap();
+		memory::record(
+			&mut conn,
+			entry(
+				"other source",
+				Link::Check {
+					source: "elsewhere".into(),
+					name: "disk".into(),
+				},
+			),
+			author,
+		)
+		.await
+		.unwrap();
+		let on_group = memory::record(&mut conn, entry("site", Link::Group { id: g }), author)
+			.await
+			.unwrap();
+		memory::record(
+			&mut conn,
+			entry("another site", Link::Group { id: other_group }),
+			author,
+		)
+		.await
+		.unwrap();
+		let retired = memory::record(&mut conn, entry("old", Link::Incident { id: i }), author)
+			.await
+			.unwrap();
+		memory::retire(&mut conn, retired.id, "stale", author)
+			.await
+			.unwrap();
 
 		let a = alert_triage::assess(&mut conn, i).await.unwrap();
-		assert_eq!(kinds(&a.reasons), ["escalating_failure", "unfamiliar"]);
+		assert_eq!(a.target, "Pacific test");
 		assert_eq!(a.state.worst, Some(Severity::EscalatingFailure));
+		assert!(a.changes.is_none(), "no verdict yet, so nothing to compare");
+		let checks: Vec<(&str, bool, bool)> = a
+			.checks
+			.iter()
+			.map(|c| {
+				(
+					c.check.name.as_str(),
+					c.escalates,
+					c.documentation.is_some(),
+				)
+			})
+			.collect();
+		assert_eq!(checks, [("disk", true, true), ("mystery", false, false)]);
+		let mut memory: Vec<Uuid> = a.memory.iter().map(|e| e.id).collect();
+		memory.sort();
+		let mut expected = vec![on_check.id, on_group.id];
+		expected.sort();
+		assert_eq!(memory, expected);
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_closed_or_resolved_incident_has_no_reasons() {
+async fn changes_since_the_last_verdict_are_read_as_facts() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let (g, app) = group(&mut conn, "Pacific", "production").await;
-		let closed = incident(&mut conn, g, "production").await;
-		failing(&mut conn, closed, app, "mystery", true, 5).await;
-		conn.batch_execute(&format!(
-			"UPDATE incidents SET closed_at = NOW() WHERE id = '{closed}';"
-		))
-		.await
-		.unwrap();
-		let a = alert_triage::assess(&mut conn, closed).await.unwrap();
-		assert!(!a.state.open);
-		assert!(a.reasons.is_empty());
-
-		let resolved = incident(&mut conn, g, "production").await;
-		conn.batch_execute(&format!(
-			"UPDATE incidents SET resolved_at = NOW(), resolved_by = 'op' WHERE id = '{resolved}';"
-		))
-		.await
-		.unwrap();
-		let a = alert_triage::assess(&mut conn, resolved).await.unwrap();
-		assert!(a.reasons.is_empty());
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_verdict_is_the_baseline_for_the_next_triage() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		documented(&mut conn, "disk").await;
-		documented(&mut conn, "cpu").await;
 		let (g, app) = group(&mut conn, "Pacific", "production").await;
 		let i = incident(&mut conn, g, "production").await;
+		let cpu = failing(&mut conn, i, app, "cpu", false, 5).await;
 		member(&mut conn, i, app, "disk", "warning", false, 5).await;
-		failing(&mut conn, i, app, "cpu", false, 5).await;
 
 		let first = alert_triage::assess(&mut conn, i).await.unwrap();
-		assert_eq!(kinds(&first.reasons), ["production_opening"]);
-		let Recorded::Done { verdict, note, .. } =
-			record(&mut conn, &verdict(&first, Verdict::Escalated, vec![])).await
+		let Recorded::Done { verdict, note } =
+			record(&mut conn, &verdict(&first, Verdict::Logged, vec![])).await
 		else {
 			panic!("expected the verdict to be recorded");
 		};
 		assert_eq!(verdict.worst_result, Some(Severity::Failure));
 		assert_eq!(verdict.note_id, Some(note.id));
-		assert!(note.body.contains("Alert triage: escalated"));
+		assert!(note.body.contains("Alert triage: logged"));
 
 		// A repeated alert at the same state finds the verdict already given.
 		let again = alert_triage::assess(&mut conn, i).await.unwrap();
-		assert!(again.reasons.is_empty(), "{:?}", again.reasons);
 		assert_eq!(again.already_triaged.map(|v| v.id), Some(verdict.id));
+		let unchanged = again.changes.unwrap();
+		assert!(unchanged.newly_failing.is_empty() && unchanged.no_longer_failing.is_empty());
 
-		// A newly failing check is a new reason, and so is the worst result
-		// rising once it escalates.
-		let disk = failing(&mut conn, i, app, "disk", false, 1).await;
-		let worse = alert_triage::assess(&mut conn, i).await.unwrap();
-		assert!(worse.already_triaged.is_none());
-		assert_eq!(kinds(&worse.reasons), ["new_failing_check"]);
-
+		failing(&mut conn, i, app, "disk", true, 1).await;
 		conn.batch_execute(&format!(
-			"UPDATE issues SET escalates = true WHERE id = '{disk}';"
+			"UPDATE issues SET effective_result = 'passed' WHERE id = '{cpu}';"
 		))
 		.await
 		.unwrap();
-		let escalating = alert_triage::assess(&mut conn, i).await.unwrap();
-		assert_eq!(
-			kinds(&escalating.reasons),
-			["escalating_failure", "worse", "new_failing_check"]
+		let moved = alert_triage::assess(&mut conn, i).await.unwrap();
+		assert!(moved.already_triaged.is_none());
+		let changes = moved.changes.unwrap();
+		assert_eq!(changes.worst_then, Some(Severity::Failure));
+		assert_eq!(changes.worst_now, Some(Severity::EscalatingFailure));
+		assert_eq!(changes.newly_failing, [key("disk")]);
+		assert_eq!(changes.newly_escalating, [key("disk")]);
+		assert_eq!(changes.no_longer_failing, [key("cpu")]);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn closing_an_incident_is_a_new_state() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let (g, app) = group(&mut conn, "Pacific", "production").await;
+		let i = incident(&mut conn, g, "production").await;
+		failing(&mut conn, i, app, "disk", false, 5).await;
+		let open = alert_triage::assess(&mut conn, i).await.unwrap();
+		record(&mut conn, &verdict(&open, Verdict::Escalated, vec![])).await;
+
+		conn.batch_execute(&format!(
+			"UPDATE incidents SET closed_at = NOW() WHERE id = '{i}';"
+		))
+		.await
+		.unwrap();
+		let closed = alert_triage::assess(&mut conn, i).await.unwrap();
+		assert!(!closed.state.open);
+		assert!(
+			closed.already_triaged.is_none(),
+			"the close is news to report"
 		);
 	})
 	.await;
@@ -270,19 +288,16 @@ async fn a_verdict_is_the_baseline_for_the_next_triage() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_verdict_against_a_changed_incident_is_stale() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		documented(&mut conn, "disk").await;
 		let (g, app) = group(&mut conn, "Pacific", "test").await;
 		let i = incident(&mut conn, g, "test").await;
 		failing(&mut conn, i, app, "disk", false, 5).await;
 		let read = alert_triage::assess(&mut conn, i).await.unwrap();
 
 		failing(&mut conn, i, app, "disk", false, 1).await;
-		let Recorded::Stale { current } =
-			record(&mut conn, &verdict(&read, Verdict::Logged, vec![])).await
-		else {
-			panic!("expected a stale revision to be refused");
-		};
-		assert_ne!(current, read.state.revision);
+		assert!(matches!(
+			record(&mut conn, &verdict(&read, Verdict::Logged, vec![])).await,
+			Recorded::Stale
+		));
 		assert!(
 			alert_triage::verdicts_for(&mut conn, i)
 				.await
@@ -294,173 +309,43 @@ async fn a_verdict_against_a_changed_incident_is_stale() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn logging_what_canopy_requires_escalated_is_refused() {
+async fn a_verdict_names_the_memory_it_relies_on() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let (g, app) = group(&mut conn, "Pacific", "test").await;
-		let i = incident(&mut conn, g, "test").await;
-		failing(&mut conn, i, app, "mystery", false, 5).await;
-		let a = alert_triage::assess(&mut conn, i).await.unwrap();
-		let Recorded::Refused { reasons, .. } =
-			record(&mut conn, &verdict(&a, Verdict::Logged, vec![])).await
-		else {
-			panic!("expected the logged verdict to be refused");
-		};
-		assert_eq!(kinds(&reasons), ["unfamiliar"]);
-		assert!(matches!(
-			record(&mut conn, &verdict(&a, Verdict::Escalated, vec![])).await,
-			Recorded::Done { .. }
-		));
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_harmless_pattern_exception_needs_a_current_entry_for_each_failing_check() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		documented(&mut conn, "disk").await;
-		documented(&mut conn, "cpu").await;
 		let (g, app) = group(&mut conn, "Pacific", "production").await;
 		let i = incident(&mut conn, g, "production").await;
 		failing(&mut conn, i, app, "disk", false, 5).await;
-		failing(&mut conn, i, app, "cpu", false, 5).await;
-		let a = alert_triage::assess(&mut conn, i).await.unwrap();
-		assert_eq!(kinds(&a.reasons), ["production_opening"]);
-
-		let author = Author::token("triage-bot");
-		let entry = |title: &str, link| NewEntry {
-			title: title.into(),
-			body: "harmless".into(),
-			link: Some(link),
-		};
-		let check = |name: &str| Link::Check {
-			source: "alertd".into(),
-			name: name.into(),
-		};
-		let disk = memory::record(&mut conn, entry("disk", check("disk")), author)
-			.await
-			.unwrap();
-		let cpu = memory::record(&mut conn, entry("cpu", check("cpu")), author)
-			.await
-			.unwrap();
-		let site = memory::record(&mut conn, entry("site", Link::Group { id: g }), author)
-			.await
-			.unwrap();
-		let a = alert_triage::assess(&mut conn, i).await.unwrap();
-
-		for entries in [vec![], vec![disk.id], vec![disk.id, site.id]] {
-			assert!(
-				matches!(
-					record(&mut conn, &verdict(&a, Verdict::Logged, entries.clone())).await,
-					Recorded::Refused { .. }
-				),
-				"{entries:?} should not answer every failing check"
-			);
-		}
-
-		memory::retire(&mut conn, cpu.id, "no longer true", author)
-			.await
-			.unwrap();
-		assert!(matches!(
-			record(
-				&mut conn,
-				&verdict(&a, Verdict::Logged, vec![disk.id, cpu.id])
-			)
-			.await,
-			Recorded::Refused { .. }
-		));
-
-		let cpu = memory::record(&mut conn, entry("cpu again", check("cpu")), author)
-			.await
-			.unwrap();
-		let a = alert_triage::assess(&mut conn, i).await.unwrap();
-		let Recorded::Done {
-			verdict: logged, ..
-		} = record(
+		let entry = memory::record(
 			&mut conn,
-			&verdict(&a, Verdict::Logged, vec![disk.id, cpu.id]),
+			NewEntry {
+				title: "Disk fills during the weekly export".into(),
+				body: "recovers on its own".into(),
+				link: Some(Link::Group { id: g }),
+			},
+			Author::token("triage-bot"),
 		)
 		.await
-		else {
-			panic!("expected the exception to answer the production opening");
-		};
-		assert_eq!(logged.verdict, Verdict::Logged);
-		assert_eq!(logged.memory_entry_ids, vec![disk.id, cpu.id]);
-	})
-	.await;
-}
+		.unwrap();
+		let a = alert_triage::assess(&mut conn, i).await.unwrap();
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_shared_check_requires_escalation_only_when_the_failures_are_close_in_time() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		documented(&mut conn, "disk").await;
-		documented(&mut conn, "cpu").await;
-		let (a_group, a_app) = group(&mut conn, "Pacific", "test").await;
-		let (b_group, b_app) = group(&mut conn, "Highlands", "test").await;
-		let (c_group, c_app) = group(&mut conn, "Islands", "test").await;
-		let (d_group, d_app) = group(&mut conn, "Coast", "test").await;
-		let here = incident(&mut conn, a_group, "test").await;
-		let near = incident(&mut conn, b_group, "test").await;
-		let chronic = incident(&mut conn, c_group, "test").await;
-		let candidate = incident(&mut conn, d_group, "test").await;
-		failing(&mut conn, here, a_app, "disk", false, 5).await;
-		failing(&mut conn, near, b_app, "disk", false, 20).await;
-		failing(&mut conn, chronic, c_app, "disk", false, 60 * 24 * 7).await;
-		failing(&mut conn, candidate, d_app, "cpu", false, 10).await;
-
-		let a = alert_triage::assess(&mut conn, here).await.unwrap();
-		assert_eq!(kinds(&a.reasons), ["shared_check"]);
-		let Reason::SharedCheck { incident_id, .. } = &a.reasons[0] else {
-			unreachable!()
-		};
-		assert_eq!(*incident_id, near);
-
-		let mut shared: Vec<Uuid> = a.shared.iter().map(|r| r.incident_id).collect();
-		shared.sort();
-		let mut expected = vec![near, chronic];
-		expected.sort();
-		assert_eq!(shared, expected, "both share the check; only one forces it");
-		assert_eq!(
-			a.candidates
-				.iter()
-				.map(|r| r.incident_id)
-				.collect::<Vec<_>>(),
-			vec![candidate]
+		assert!(
+			alert_triage::record(
+				&mut conn,
+				&verdict(&a, Verdict::Logged, vec![Uuid::new_v4()]),
+				"triage-bot",
+				AuthorKind::Agent,
+			)
+			.await
+			.is_err(),
+			"an unknown memory entry is refused"
 		);
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn related_escalations_since_the_read_are_returned_with_the_verdict() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		documented(&mut conn, "disk").await;
-		let (a_group, a_app) = group(&mut conn, "Pacific", "test").await;
-		let (b_group, b_app) = group(&mut conn, "Highlands", "test").await;
-		let here = incident(&mut conn, a_group, "test").await;
-		let there = incident(&mut conn, b_group, "test").await;
-		failing(&mut conn, here, a_app, "disk", false, 5).await;
-		failing(&mut conn, there, b_app, "disk", false, 6).await;
-
-		let read_here = alert_triage::assess(&mut conn, here).await.unwrap();
-		let mut new_here = verdict(&read_here, Verdict::Escalated, vec![]);
-		new_here.read_at = Timestamp::now();
-
-		let read_there = alert_triage::assess(&mut conn, there).await.unwrap();
-		record(&mut conn, &verdict(&read_there, Verdict::Escalated, vec![])).await;
-
 		let Recorded::Done {
-			escalated_since, ..
-		} = record(&mut conn, &new_here).await
+			verdict: logged, ..
+		} = record(&mut conn, &verdict(&a, Verdict::Logged, vec![entry.id])).await
 		else {
 			panic!("expected the verdict to be recorded");
 		};
-		assert_eq!(
-			escalated_since
-				.iter()
-				.map(|r| r.incident_id)
-				.collect::<Vec<_>>(),
-			vec![there]
-		);
+		assert_eq!(logged.verdict, Verdict::Logged);
+		assert_eq!(logged.memory_entry_ids, vec![entry.id]);
 	})
 	.await;
 }
@@ -478,7 +363,6 @@ async fn a_write_up_day_lists_its_verdicts_and_untriaged_published_incidents() {
 		failing(&mut conn, untriaged, other, "disk", false, 5).await;
 		published(&mut conn, untriaged, 1).await;
 
-		// The two share a check failing close in time, so this one is escalated.
 		let a = alert_triage::assess(&mut conn, triaged).await.unwrap();
 		let Recorded::Done { verdict: v, .. } =
 			record(&mut conn, &verdict(&a, Verdict::Escalated, vec![])).await

@@ -215,25 +215,24 @@ All four are held by the notes grant, and each is audited as the action it takes
 
 ### Alert triage
 
-These tools carry [alert triage](../monitoring/alert-triage.md), whose rules decide what each tool returns and refuses.
+These tools carry [alert triage](../monitoring/alert-triage.md).
 
-**Triage alert** takes an incident identifier and returns what a triage of it needs, in one result:
+**Triage alert** takes an incident identifier and returns what a triage of it reads, in one result:
 
 - the incident with its live issues, its notes, its verdicts, and the revision it was read at
 - whether it has already been triaged at its current state, and if so that verdict and where it was reported
-- for each failing check, its documentation, its stability record, and the current incident memory entries linked to it, its group, or the incident
-- the incidents on other targets sharing a failing check with it, and the candidates for a shared cause, each with its latest verdict and where that was reported
-- whether the incident must be escalated, each reason with what it rests on, and whether the harmless-pattern exception can answer them
-- the guidance for what is left to the agent's judgement and for how the verdict is reported
+- what has changed since its latest verdict
+- for each failing check, its documentation and stability record, and the current incident memory entries linked to a failing check, the incident's group, or the incident
+- the guidance the agent decides and reports by
 
 It reads only.
 Its description tells an agent to call it for every incident notification before deciding anything.
 
-**Record alert triage** takes an incident identifier, the revision read, a verdict of escalated or logged, the reasoning, and any memory entries relied on, and returns the verdict with the related incidents escalated since the revision read.
-It is refused, without effect, on the terms alert triage sets: the incident having changed since the revision, or a logged verdict where Canopy requires an escalation.
+**Record alert triage** takes an incident identifier, the revision read, a verdict of escalated or logged, the reasoning, and any memory entries relied on, and returns the verdict.
+It is refused, without effect, when the incident has changed since the revision read.
 **Attach alert triage report** takes a verdict's identifier and a link to where it was reported.
 
-**Find alert triage verdicts** takes a write-up day, defaulting to the current one, and returns the verdicts recorded in it, each with its incident's target, verdict, reasons, and where it was reported, together with the published incidents of that day that have no verdict.
+**Find alert triage verdicts** takes a write-up day, defaulting to the current one, and returns the verdicts recorded in it, each with its incident's target, verdict, and where it was reported, together with the published incidents of that day that have no verdict.
 
 Recording and attaching are held by the notes grant.
 

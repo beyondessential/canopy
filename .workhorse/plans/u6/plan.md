@@ -1,14 +1,14 @@
 # Alert triage with Claude Tag
 
-The triage rules live in Canopy, served through new MCP tools (TRI, MCP "Alert triage"). Claude Tag calls them from the thread under each alert. Its channel configuration holds only the Slack side: the workflow mentions, which channels are which, and the 8am routine. How an escalation or a write-up line reads is guidance Canopy serves.
+Claude makes every triage decision. Canopy gathers the incident's context, serves the guidance Claude decides by (kept as markdown in `crates/canopy-mcp/src/alert_triage_guidance.md`), and keeps the record (TRI, MCP "Alert triage"). Claude Tag calls the tools from the thread under each alert. Its channel configuration holds only the Slack side: the workflow mentions, which channels are which, and the 8am routine. How an escalation or a write-up line reads is guidance Canopy serves.
 
 ## Shape
 
 ### Canopy (this repo)
 
 - **Tools** in `crates/canopy-mcp`:
-  - `triage_alert(incident_id)`: read-only. Returns everything in MCP's list: the incident, its revision, an already-triaged short-circuit, check context, related incidents with their verdicts, the must-escalate reasons, and the served guidance text.
-  - `record_alert_triage(incident_id, revision, verdict, reasoning, memory_entry_ids)`: refuses on a stale revision or a disallowed "logged". Stores the verdict and baseline, adds the agent note, and returns related incidents escalated since the revision.
+  - `triage_alert(incident_id)`: read-only. Returns the incident and its live issues, its revision, an already-triaged short-circuit, what changed since the last verdict, check documentation and stability, memory for its checks, group and incident, its verdicts and notes, and the guidance.
+  - `record_alert_triage(incident_id, revision, verdict, reasoning, memory_entry_ids)`: refuses only on a stale revision. Stores the verdict and the state it was given at, and adds the agent note.
   - `attach_alert_triage_report(verdict_id, link)`.
   - `find_alert_triage_verdicts(day)`: the write-up day's verdicts and the published incidents with none.
   - Record and attach are held by the notes grant.
@@ -21,16 +21,8 @@ The triage rules live in Canopy, served through new MCP tools (TRI, MCP "Alert t
   - the note it wrote (`ON DELETE SET NULL`, so deleting the note leaves the verdict), the caller and the time
 
   Created with `diesel migration generate` (what `just migration` runs; `just` isn't installed on this machine). `schema.rs` was edited to match, since generating it needs a migrated database.
-- **Mechanical rules**, all in the database crate so they can be tested without MCP:
-  - Each rule applies only to an open incident. A closed or resolved one returns no reasons.
-  - First triage of a production or Canopy-wide incident: no earlier verdict, and the target is production (via the environment rank, `Machine::environment_rank`, never the raw `rank`) or Canopy.
-  - Escalating failure newly live: a failing check with escalates set that wasn't escalating in the baseline set.
-  - Worse: escalating failure > failure > warning, with broken counted as a warning, compared with the baseline's worst.
-  - New failing check: in the live failing set, not in the baseline's.
-  - Shared check: an open incident on another target failing the same source and presented name, where the two failures' degraded-since times are within 30 minutes.
-  - Unfamiliar: no documentation, no current (unretired) memory entry linked to the check, and no *other* published incident fleet-wide that contained it.
-  - Harmless-pattern check: the only reason is the production opening (not Canopy-wide), and every failing check has a current memory entry among those given that is linked to it.
-- **Shared-cause candidates:** incidents on other targets with a failure that began within 30 minutes of this one's and that share no check with it.
+- **Changes since the last verdict:** facts, never a decision: the worst result then and now, and the checks newly failing, newly escalating and no longer failing.
+- **No escalation rules in code.** An earlier version had Canopy force escalations (production openings, escalating checks, worsening, the same check failing on another environment within 30 minutes, unfamiliar checks) and refuse "logged" verdicts against them. That was dropped: triage weighs too many factors for fixed rules, and comparing across environments is rarely meaningful. The considerations live in the guidance instead.
 - **Write-up day:** from 08:00 Pacific/Auckland to the next 08:00. Use jiff with the zone, never a fixed offset, so daylight saving is handled. The database crate bundles the tz database (`tzdb-bundle-always`) so this works in images without `/usr/share/zoneinfo`.
 - **Self-alert:** a job condition listing published incidents still open an hour past their notification with no verdict. It's live only while any verdict exists from the past week. It warns, and clears once each has a verdict or has closed.
 - **Audit:** two new actions, recording a verdict and attaching its report. The note is audited as the existing note action.

@@ -1,19 +1,16 @@
-//! Tools carrying alert triage: what Canopy decides about an incident
-//! notification, what it leaves to the agent, and the verdicts agents record.
+//! Tools carrying alert triage: what an agent reads to triage an incident
+//! notification, the guidance it decides by, and the verdicts it records.
 //!
 //! Spec: `.workhorse/specs/private-server/mcp.md` (id `MCP`), "Alert triage",
 //! and `.workhorse/specs/monitoring/alert-triage.md` (id `TRI`).
 //!
-//! The revision handed to the agent is the incident's state digest and the time
-//! it was read, joined by `@`: the digest is what a verdict is held to, and the
-//! time is what "escalated since the triage read" is measured from.
+//! Canopy makes no triage decision: it gathers the incident's context, serves
+//! the guidance in `alert_triage_guidance.md`, and keeps the record.
 
 use commons_errors::AppError;
 use commons_types::{Uuid, server::rank::ServerRank, status::CheckResult};
 use database::{
-	alert_triage::{
-		self, NewVerdict, Reason, Recorded, Related, Severity, Verdict, VerdictRow, WriteUpDay,
-	},
+	alert_triage::{self, Changes, NewVerdict, Recorded, Severity, Verdict, VerdictRow},
 	audit::{self, Action, Record},
 	diesel_async::AsyncConnection,
 	memory::{self, MemoryEntryData},
@@ -37,51 +34,10 @@ use crate::{
 	util::{is_not_found, mcp_err, not_found, ok_json, parse_uuid},
 };
 
-/// What the agent is told to do with a triage, served with every one so the
-/// rules change with Canopy rather than with each channel's configuration.
-// spec: TRI#reporting
-pub const GUIDANCE: &str = "\
-Canopy has decided what follows mechanically from the incident's state; `reasons` lists \
-each escalation it requires, and `must_escalate` is true when there is any.
-
-What is left to you:
-- `candidates` are incidents on other targets whose failures began close in time to this one's \
-without sharing a check. Judge whether they share a cause (a common release, cluster, or \
-upstream service). One you judge does is escalated with this incident.
-- Escalate any failure you cannot explain with confidence from what you read here (the check \
-documentation, stability records, memory and notes), and say that the escalation is out of \
-uncertainty.
-- The harmless-pattern exception: when `harmless_exception_available` is true, you may log \
-instead of escalating only if every failing check has a current memory entry linked to it that \
-names the pattern as harmless, and each check's stability record shows that pattern recovering \
-on its own. Name those entries in `memory_entry_ids` when recording.
-
-Order of work: record the verdict with record_alert_triage first, then report it, then attach \
-where you reported it with attach_alert_triage_report. If recording is refused because the \
-incident changed, call triage_alert again. If a logged verdict is refused, escalate instead.
-
-If `already_triaged` is set, this state has been triaged before: report nothing new, and reply \
-under the notification with a link to where it was reported.
-
-Reporting an escalation: a top-level post in the triage channel giving, in plain language, what \
-is wrong and where (group and environment), the worst live result, why it is escalated, what to \
-look at first, the related incidents, and a link to the incident. If a related incident has \
-already been escalated, escalate in that escalation's thread instead, naming every environment \
-involved. If this incident was escalated before and has worsened, post a new escalation linking \
-the earlier one, even when the alert is also a reminder. Other news on an escalated incident \
-(a reminder that changes nothing, its close) is a reply in its escalation's thread.
-
-Every alert, escalated or logged, adds one reply to the day's write-up thread: the incident's \
-group and environment, what happened, and how it was triaged and why, an escalated one linking \
-its escalation. Reply under the notification itself with one line: escalated or logged, and \
-where.
-
-A closed or resolved incident is logged, and reported in its escalation's thread when it has \
-one. A maintenance notification links no incident and is logged without calling these tools.
-
-When an operator confirms a cause or says a pattern is harmless, record it in incident memory \
-(record_memory_entry), linked to the check, group or incident it concerns, describing the \
-pattern and how to recognise it in your own words.";
+/// What the agent decides and reports by, served with every triage. Kept as
+/// markdown beside this module so it can be revised without touching the code.
+// spec: TRI#how-the-agent-decides
+pub const GUIDANCE: &str = include_str!("alert_triage_guidance.md");
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct TriageAlertArgs {
@@ -108,8 +64,8 @@ pub struct RecordAlertTriageArgs {
 	/// Why, in a few lines (at most 4,000 characters). Shown on the incident as
 	/// your note.
 	pub reasoning: String,
-	/// The memory entries the verdict relies on: required for a logged verdict
-	/// under the harmless-pattern exception, one linked to each failing check.
+	/// The memory entries the verdict relies on, such as one naming a pattern
+	/// as harmless.
 	pub memory_entry_ids: Option<Vec<String>>,
 }
 
@@ -156,21 +112,12 @@ struct LiveIssueOut {
 }
 
 #[derive(Serialize)]
-struct ReasonOut {
-	#[serde(flatten)]
-	reason: Reason,
-	summary: String,
-}
-
-#[derive(Serialize)]
 struct CheckOut {
 	source: String,
 	check_name: String,
 	escalates: bool,
 	failing_since: Option<Timestamp>,
 	documentation: Option<String>,
-	linked_memory_entries: usize,
-	other_published_incidents: usize,
 	stability: Vec<IssueStabilityOut>,
 }
 
@@ -195,14 +142,11 @@ struct TriageOut {
 	revision: String,
 	worst_result: Option<Severity>,
 	already_triaged: Option<AlreadyTriagedOut>,
-	must_escalate: bool,
-	reasons: Vec<ReasonOut>,
-	harmless_exception_available: bool,
+	/// What has changed since the latest verdict; null before the first.
+	changes: Option<Changes>,
 	live_issues: Vec<LiveIssueOut>,
 	checks: Vec<CheckOut>,
 	memory: Vec<MemoryEntryData>,
-	shared: Vec<Related>,
-	candidates: Vec<Related>,
 	verdicts: Vec<VerdictRow>,
 	notes: Vec<NoteOut>,
 	guidance: &'static str,
@@ -212,9 +156,6 @@ struct TriageOut {
 struct RecordedOut {
 	verdict: VerdictRow,
 	note_id: Uuid,
-	/// Related incidents escalated since triage_alert read: link the two
-	/// escalations.
-	escalated_since: Vec<Related>,
 }
 
 fn status_of(incident: &database::issues::Incident) -> &'static str {
@@ -225,23 +166,6 @@ fn status_of(incident: &database::issues::Incident) -> &'static str {
 	} else {
 		"open"
 	}
-}
-
-fn token(revision: &str, read_at: Timestamp) -> String {
-	format!("{revision}@{}", read_at.as_millisecond())
-}
-
-fn parse_token(token: &str) -> Result<(String, Timestamp), McpError> {
-	let invalid = || {
-		McpError::invalid_params(
-			"invalid revision: give the `revision` triage_alert returned",
-			None,
-		)
-	};
-	let (revision, millis) = token.rsplit_once('@').ok_or_else(invalid)?;
-	let millis: i64 = millis.parse().map_err(|_| invalid())?;
-	let read_at = Timestamp::from_millisecond(millis).map_err(|_| invalid())?;
-	Ok((revision.to_owned(), read_at))
 }
 
 fn refused(error: AppError) -> Result<CallToolResult, McpError> {
@@ -260,15 +184,11 @@ impl CanopyMcp {
 		               notification before deciding anything, with the incident id read from \
 		               the notification's link (never fetch the link). Returns, in one result: \
 		               the incident and its live issues; `revision`, to give back when recording; \
-		               `already_triaged` when this state has been triaged before; whether Canopy \
-		               requires an escalation (`must_escalate`) and each reason; whether the \
-		               harmless-pattern exception is available; each failing check's \
-		               documentation, stability and familiarity; current memory entries for the \
-		               checks, group and incident; incidents on other targets sharing a failing \
-		               check (`shared`) and candidates for a shared cause (`candidates`), each \
-		               with its latest verdict and where it was reported; the incident's earlier \
-		               verdicts and notes; and `guidance` on what is left to your judgement and \
-		               how to report. Reads only."
+		               `already_triaged` when this state has been triaged before; `changes` since \
+		               its last triage; each failing check's documentation and stability; current \
+		               memory entries for its checks, group and incident; its earlier verdicts \
+		               and notes; and `guidance`, which you decide and report by. You make the \
+		               decision. Reads only."
 	)]
 	async fn triage_alert(
 		&self,
@@ -276,7 +196,6 @@ impl CanopyMcp {
 	) -> Result<CallToolResult, McpError> {
 		let incident_id = parse_uuid(&args.incident_id, "incident_id")?;
 		let mut conn = self.conn().await?;
-		let read_at = Timestamp::now();
 		let assessment = match alert_triage::assess(&mut conn, incident_id).await {
 			Ok(assessment) => assessment,
 			Err(error) if is_not_found(&error) => {
@@ -328,8 +247,6 @@ impl CanopyMcp {
 				escalates: check.escalates,
 				failing_since: check.began,
 				documentation: check.documentation.clone(),
-				linked_memory_entries: check.familiarity.linked_entries,
-				other_published_incidents: check.familiarity.other_published_incidents,
 				stability: check
 					.issue_ids
 					.iter()
@@ -366,7 +283,7 @@ impl CanopyMcp {
 				resolved_at: incident.resolved_at,
 				resolved_by: incident.resolved_by.clone(),
 			},
-			revision: token(&assessment.state.revision, read_at),
+			revision: assessment.state.revision.clone(),
 			worst_result: assessment.state.worst,
 			already_triaged: assessment
 				.already_triaged
@@ -378,21 +295,10 @@ impl CanopyMcp {
 					report_link: row.report_link.clone(),
 					reasoning: row.reasoning.clone(),
 				}),
-			must_escalate: !assessment.reasons.is_empty(),
-			reasons: assessment
-				.reasons
-				.iter()
-				.map(|reason| ReasonOut {
-					summary: alert_triage::describe_reason(reason),
-					reason: reason.clone(),
-				})
-				.collect(),
-			harmless_exception_available: assessment.exception_can_answer,
+			changes: assessment.changes.clone(),
 			live_issues,
 			checks,
 			memory,
-			shared: assessment.shared.clone(),
-			candidates: assessment.candidates.clone(),
 			verdicts: assessment.verdicts.clone(),
 			notes,
 			guidance: GUIDANCE,
@@ -405,16 +311,14 @@ impl CanopyMcp {
 			destructive_hint = false,
 			idempotent_hint = false
 		),
-		description = "Record an alert triage verdict on an incident, before reporting it. Give \
+		description = "Record your alert triage verdict on an incident, before reporting it. Give \
 		               the `revision` triage_alert returned, `escalated` or `logged`, the \
-		               `reasoning` (shown on the incident as your note), and for a logged verdict \
-		               under the harmless-pattern exception the `memory_entry_ids` it relies on. \
-		               Refused, with no effect, when the incident changed since the revision (call \
-		               triage_alert again), or when it logs an incident Canopy requires be \
-		               escalated (escalate instead). Returns the verdict, with any related \
-		               incidents escalated since triage_alert read, whose escalations you link. \
-		               Then attach where you reported it with attach_alert_triage_report. Needs \
-		               an administrator, or a token with the notes grant."
+		               `reasoning` (shown on the incident as your note), and any \
+		               `memory_entry_ids` it relies on. Refused, with no effect, when the \
+		               incident changed since the revision: call triage_alert again. Returns the \
+		               verdict; then attach where you reported it with \
+		               attach_alert_triage_report. Needs an administrator, or a token with the \
+		               notes grant."
 	)]
 	async fn record_alert_triage(
 		&self,
@@ -423,7 +327,6 @@ impl CanopyMcp {
 	) -> Result<CallToolResult, McpError> {
 		let caller = require_notes(parts).await?;
 		let incident_id = parse_uuid(&args.incident_id, "incident_id")?;
-		let (revision, read_at) = parse_token(&args.revision)?;
 		let memory_entry_ids = args
 			.memory_entry_ids
 			.unwrap_or_default()
@@ -432,8 +335,7 @@ impl CanopyMcp {
 			.collect::<Result<Vec<_>, _>>()?;
 		let new = NewVerdict {
 			incident_id,
-			revision,
-			read_at,
+			revision: args.revision,
 			verdict: match args.verdict {
 				VerdictArg::Escalated => Verdict::Escalated,
 				VerdictArg::Logged => Verdict::Logged,
@@ -448,14 +350,15 @@ impl CanopyMcp {
 				let recorded =
 					alert_triage::record(conn, &new, caller.name(), caller.note_author_kind())
 						.await?;
-				if let Recorded::Done { verdict, note, .. } = &recorded {
+				if let Recorded::Done { verdict, note } = &recorded {
 					let incident = Record::incident(conn, incident_id).await?;
+					let note_record = Record::note(note.id, &note.author);
 					audit::record(
 						conn,
 						&actor,
 						&Action::IncidentNoteAdded {
 							incident: incident.clone(),
-							note: Record::note(note.id, &note.author),
+							note: note_record.clone(),
 							author_kind: note.author_kind.as_str().to_owned(),
 						},
 					)
@@ -465,14 +368,9 @@ impl CanopyMcp {
 						&actor,
 						&Action::AlertTriageRecorded {
 							incident,
-							note: Record::note(note.id, &note.author),
+							note: note_record,
 							verdict_id: verdict.id,
 							verdict: verdict.verdict.as_str().to_owned(),
-							reasons: verdict
-								.reasons
-								.iter()
-								.map(alert_triage::describe_reason)
-								.collect(),
 						},
 					)
 					.await?;
@@ -481,33 +379,16 @@ impl CanopyMcp {
 			})
 			.await;
 		match result {
-			Ok(Recorded::Done {
-				verdict,
-				note,
-				escalated_since,
-			}) => ok_json(&RecordedOut {
+			Ok(Recorded::Done { verdict, note }) => ok_json(&RecordedOut {
 				verdict: *verdict,
 				note_id: note.id,
-				escalated_since,
 			}),
 			// No fresh revision is handed back: the agent reads the incident
 			// again before deciding, rather than recording against a state it
 			// has not seen.
-			Ok(Recorded::Stale { .. }) => Ok(refusal(
+			Ok(Recorded::Stale) => Ok(refusal(
 				"the incident changed since triage_alert read it; call triage_alert again",
 				json!(null),
-			)),
-			Ok(Recorded::Refused { reasons, why }) => Ok(refusal(
-				why,
-				json!({
-					"reasons": reasons
-						.iter()
-						.map(|reason| ReasonOut {
-							summary: alert_triage::describe_reason(reason),
-							reason: reason.clone(),
-						})
-						.collect::<Vec<_>>(),
-				}),
 			)),
 			Err(error) if is_not_found(&error) => {
 				Ok(not_found(format!("no incident with id {incident_id}")))
@@ -524,8 +405,8 @@ impl CanopyMcp {
 		),
 		description = "Attach where an alert triage verdict was reported (the escalation post or \
 		               the write-up reply) to the verdict record_alert_triage returned, so a \
-		               later triage of the same or a related incident can link to it. Needs an \
-		               administrator, or a token with the notes grant."
+		               later triage of the same incident can link to it. Needs an administrator, \
+		               or a token with the notes grant."
 	)]
 	async fn attach_alert_triage_report(
 		&self,
@@ -565,13 +446,12 @@ impl CanopyMcp {
 	#[tool(
 		annotations(read_only_hint = true),
 		description = "The alert triage verdicts recorded in a write-up day, oldest first, each \
-		               with its incident's target, verdict, reasons and where it was reported, \
-		               and the incidents published that day with no verdict. A write-up day runs \
-		               from 8am New Zealand time to 8am the next day; `date` (YYYY-MM-DD) names \
-		               the day it begins on, defaulting to the current one. Draw the morning \
-		               summary from this: how many were escalated and how many logged, which \
-		               incidents are still open, and which published incidents were never \
-		               triaged."
+		               with its incident's target, verdict and where it was reported, and the \
+		               incidents published that day with no verdict. A write-up day runs from \
+		               8am New Zealand time to 8am the next day; `date` (YYYY-MM-DD) names the \
+		               day it begins on, defaulting to the current one. Draw the morning summary \
+		               from this: how many were escalated and how many logged, which incidents \
+		               are still open, and which published incidents were never triaged."
 	)]
 	async fn find_alert_triage_verdicts(
 		&self,
@@ -584,7 +464,7 @@ impl CanopyMcp {
 			None => alert_triage::write_up_date(Timestamp::now()).map_err(mcp_err)?,
 		};
 		let mut conn = self.conn().await?;
-		let day: WriteUpDay = alert_triage::find_day(&mut conn, date)
+		let day = alert_triage::find_day(&mut conn, date)
 			.await
 			.map_err(mcp_err)?;
 		let escalated = day

@@ -1,5 +1,6 @@
-//! Alert triage: what Canopy decides about an incident notification before an
-//! agent judges the rest, and the verdicts agents record on incidents.
+//! Alert triage: what Canopy reads for an agent triaging an incident
+//! notification, and the verdicts agents record on incidents. The agent makes
+//! every decision; Canopy gathers, records, and keeps the write-up day.
 //!
 //! Spec: `.workhorse/specs/monitoring/alert-triage.md` (id `TRI`).
 //!
@@ -7,13 +8,13 @@
 //! failing, whether each escalates, and the worst live result. That state is
 //! digested into a revision, so a verdict can be refused when the incident moved
 //! between the read and the record, and so a repeated alert at an unchanged
-//! state finds the verdict already given. The latest verdict's state is the
-//! baseline the next triage compares against.
+//! state finds the verdict already given. The latest verdict's state is what the
+//! next triage's changes are measured from.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use commons_errors::{AppError, Result};
-use commons_types::{server::rank::ServerRank, status::CheckResult};
+use commons_types::status::CheckResult;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::{SignedDuration, Timestamp, civil, tz::TimeZone};
@@ -25,17 +26,10 @@ use crate::{
 	issues::{Incident, IncidentIssue, IncidentTarget, Issue},
 	memory::MemoryEntry,
 	notes::{AuthorKind, IncidentNote},
-	schema::{
-		alert_triage_verdicts, check_policies, incident_issues, incidents, issues, memory_entries,
-		slack_outbox,
-	},
+	schema::{alert_triage_verdicts, check_policies, incidents, memory_entries, slack_outbox},
 	server_groups::{ServerGroup, environment_name},
-	slack_outbox::{KIND_INCIDENT_OPEN, SlackOutbox},
+	slack_outbox::KIND_INCIDENT_OPEN,
 };
-
-/// Two failures are close in time when they began within this of each other.
-// spec: TRI#what-is-triaged
-pub const CLOSE_IN_TIME: SignedDuration = SignedDuration::from_mins(30);
 
 /// How long a published incident may stay open past its notification with no
 /// verdict before the self-alert names it.
@@ -87,7 +81,7 @@ impl Verdict {
 
 /// A live result's severity, least severe first, so the derived ordering ranks
 /// them: a broken check counts as a warning.
-// spec: TRI#what-is-triaged
+// spec: TRI#what-triage-reads
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
@@ -127,7 +121,7 @@ impl Severity {
 }
 
 /// A check, by its source and name, as an incident memory entry links one.
-// spec: TRI#what-is-triaged
+// spec: TRI#what-triage-reads
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct CheckKey {
 	pub source: String,
@@ -230,127 +224,49 @@ pub fn state_of(incident: &Incident, rows: &[(IncidentIssue, Issue)]) -> State {
 	}
 }
 
-/// Why Canopy requires an incident to be escalated.
-// spec: TRI#what-canopy-decides-must-be-escalated
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "reason", rename_all = "snake_case")]
-pub enum Reason {
-	/// A first triage of an incident on a production environment.
-	ProductionOpening,
-	/// A first triage of an incident on Canopy as a whole.
-	CanopyOpening,
-	/// An escalating check is failing that was not failing as one at the
-	/// baseline.
-	EscalatingFailure { check: CheckKey },
-	/// The worst live result is more severe than at the baseline.
-	Worse {
-		from: Option<Severity>,
-		to: Severity,
-	},
-	/// A check is failing that was not failing at the baseline.
-	NewFailingCheck { check: CheckKey },
-	/// The same check is failing in an open incident on another target, the
-	/// two failures close in time.
-	SharedCheck {
-		check: CheckKey,
-		incident_id: Uuid,
-		target: String,
-		began_here: Timestamp,
-		began_there: Timestamp,
-	},
-	/// A failing check with no documentation, no current memory entry linked
-	/// to it, and no other published incident it has been part of.
-	Unfamiliar { check: CheckKey },
+/// What has changed since an incident's latest verdict: facts for the agent to
+/// weigh, never a decision.
+// spec: TRI#what-triage-reads
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Changes {
+	pub worst_then: Option<Severity>,
+	pub worst_now: Option<Severity>,
+	pub newly_failing: Vec<CheckKey>,
+	pub newly_escalating: Vec<CheckKey>,
+	pub no_longer_failing: Vec<CheckKey>,
 }
 
-/// What is known of a failing check, for judging it.
-#[derive(Clone, Debug, Default)]
-pub struct Familiarity {
-	pub documented: bool,
-	pub linked_entries: usize,
-	pub other_published_incidents: usize,
-}
-
-/// The reasons Canopy requires the incident be escalated, from its state, its
-/// baseline, the incidents on other targets sharing a failing check close in
-/// time, and what is known of each failing check. A closed or resolved
-/// incident has none.
-// spec: TRI#what-canopy-decides-must-be-escalated
-pub fn reasons(
-	incident: &Incident,
-	state: &State,
-	baseline: Option<&VerdictRow>,
-	shared: &[SharedFailure],
-	familiarity: &BTreeMap<CheckKey, Familiarity>,
-) -> Vec<Reason> {
-	let mut out = Vec::new();
-	if !state.open {
-		return out;
+/// What has changed between `before`, the latest verdict, and `now`.
+pub fn changes(before: &VerdictRow, now: &State) -> Changes {
+	let then: BTreeMap<&CheckKey, bool> = before
+		.failing_checks
+		.iter()
+		.map(|f| (&f.check, f.escalates))
+		.collect();
+	let current: BTreeMap<&CheckKey, bool> = now
+		.failing
+		.iter()
+		.map(|f| (&f.check, f.escalates))
+		.collect();
+	Changes {
+		worst_then: before.worst_result,
+		worst_now: now.worst,
+		newly_failing: current
+			.keys()
+			.filter(|check| !then.contains_key(*check))
+			.map(|check| (*check).clone())
+			.collect(),
+		newly_escalating: current
+			.iter()
+			.filter(|(check, escalates)| **escalates && then.get(*check) != Some(&true))
+			.map(|(check, _)| (*check).clone())
+			.collect(),
+		no_longer_failing: then
+			.keys()
+			.filter(|check| !current.contains_key(*check))
+			.map(|check| (*check).clone())
+			.collect(),
 	}
-	match (baseline, IncidentTarget::of_incident(incident)) {
-		(None, IncidentTarget::Global) => out.push(Reason::CanopyOpening),
-		(None, IncidentTarget::Environment(_, ServerRank::Production)) => {
-			out.push(Reason::ProductionOpening)
-		}
-		_ => {}
-	}
-	let before: BTreeMap<&CheckKey, bool> = baseline
-		.map(|row| {
-			row.failing_checks
-				.iter()
-				.map(|f| (&f.check, f.escalates))
-				.collect()
-		})
-		.unwrap_or_default();
-	for failing in &state.failing {
-		if failing.escalates && before.get(&failing.check) != Some(&true) {
-			out.push(Reason::EscalatingFailure {
-				check: failing.check.clone(),
-			});
-		}
-	}
-	if let Some(row) = baseline {
-		if let Some(to) = state.worst
-			&& Some(to) > row.worst_result
-		{
-			out.push(Reason::Worse {
-				from: row.worst_result,
-				to,
-			});
-		}
-		for failing in &state.failing {
-			if !before.contains_key(&failing.check) {
-				out.push(Reason::NewFailingCheck {
-					check: failing.check.clone(),
-				});
-			}
-		}
-	}
-	for share in shared {
-		out.push(Reason::SharedCheck {
-			check: share.check.clone(),
-			incident_id: share.incident_id,
-			target: share.target.clone(),
-			began_here: share.began_here,
-			began_there: share.began_there,
-		});
-	}
-	for failing in &state.failing {
-		let known = familiarity.get(&failing.check).cloned().unwrap_or_default();
-		if !known.documented && known.linked_entries == 0 && known.other_published_incidents == 0 {
-			out.push(Reason::Unfamiliar {
-				check: failing.check.clone(),
-			});
-		}
-	}
-	out
-}
-
-/// Whether the harmless-pattern exception can answer `reasons`: the production
-/// opening is the only reason.
-// spec: TRI#the-harmless-pattern-exception
-pub fn exception_can_answer(reasons: &[Reason]) -> bool {
-	matches!(reasons, [Reason::ProductionOpening])
 }
 
 /// A verdict as recorded.
@@ -368,7 +284,6 @@ struct VerdictStored {
 	open: bool,
 	worst_result: Option<String>,
 	failing_checks: serde_json::Value,
-	reasons: serde_json::Value,
 	memory_entry_ids: Vec<Uuid>,
 	note_id: Option<Uuid>,
 	report_link: Option<String>,
@@ -389,7 +304,6 @@ pub struct VerdictRow {
 	pub open: bool,
 	pub worst_result: Option<Severity>,
 	pub failing_checks: Vec<FailingCheck>,
-	pub reasons: Vec<Reason>,
 	pub memory_entry_ids: Vec<Uuid>,
 	pub note_id: Option<Uuid>,
 	pub report_link: Option<String>,
@@ -409,7 +323,6 @@ impl From<VerdictStored> for VerdictRow {
 			open: row.open,
 			worst_result: row.worst_result.as_deref().and_then(Severity::parse),
 			failing_checks: serde_json::from_value(row.failing_checks).unwrap_or_default(),
-			reasons: serde_json::from_value(row.reasons).unwrap_or_default(),
 			memory_entry_ids: row.memory_entry_ids,
 			note_id: row.note_id,
 			report_link: row.report_link,
@@ -437,31 +350,6 @@ pub async fn verdicts_for(
 	Ok(rows.into_iter().map(VerdictRow::from).collect())
 }
 
-/// The latest verdict of each of `incident_ids`.
-pub async fn latest_verdicts(
-	conn: &mut AsyncPgConnection,
-	incident_ids: &[Uuid],
-) -> Result<HashMap<Uuid, VerdictRow>> {
-	if incident_ids.is_empty() {
-		return Ok(HashMap::new());
-	}
-	let rows: Vec<VerdictStored> = alert_triage_verdicts::table
-		.filter(alert_triage_verdicts::incident_id.eq_any(incident_ids))
-		.distinct_on(alert_triage_verdicts::incident_id)
-		.order((
-			alert_triage_verdicts::incident_id,
-			alert_triage_verdicts::created_at.desc(),
-		))
-		.select(VerdictStored::as_select())
-		.load(conn)
-		.await
-		.map_err(AppError::from)?;
-	Ok(rows
-		.into_iter()
-		.map(|row| (row.incident_id, VerdictRow::from(row)))
-		.collect())
-}
-
 /// A verdict by its identifier.
 pub async fn get_verdict(conn: &mut AsyncPgConnection, id: Uuid) -> Result<VerdictRow> {
 	alert_triage_verdicts::table
@@ -471,48 +359,6 @@ pub async fn get_verdict(conn: &mut AsyncPgConnection, id: Uuid) -> Result<Verdi
 		.await
 		.map(VerdictRow::from)
 		.map_err(AppError::from)
-}
-
-/// A failure on another open incident's target that shares a check with this
-/// incident and began close in time to it.
-#[derive(Clone, Debug, Serialize)]
-pub struct SharedFailure {
-	pub check: CheckKey,
-	pub incident_id: Uuid,
-	pub target: String,
-	pub began_here: Timestamp,
-	pub began_there: Timestamp,
-}
-
-/// An incident on another target related to this one, for the agent to read.
-#[derive(Clone, Debug, Serialize)]
-pub struct Related {
-	pub incident_id: Uuid,
-	pub target: String,
-	pub opened_at: Timestamp,
-	/// The checks it shares with this incident; empty for a candidate.
-	pub shared_checks: Vec<CheckKey>,
-	/// Its failing checks, for judging whether a candidate shares a cause.
-	pub failing_checks: Vec<CheckKey>,
-	pub latest_verdict: Option<RelatedVerdict>,
-}
-
-/// A related incident's latest verdict and where it was reported.
-#[derive(Clone, Debug, Serialize)]
-pub struct RelatedVerdict {
-	pub verdict: Verdict,
-	pub recorded_at: Timestamp,
-	pub report_link: Option<String>,
-}
-
-impl From<&VerdictRow> for RelatedVerdict {
-	fn from(row: &VerdictRow) -> Self {
-		Self {
-			verdict: row.verdict,
-			recorded_at: row.created_at,
-			report_link: row.report_link.clone(),
-		}
-	}
 }
 
 /// What a failing check carries for judging it.
@@ -525,10 +371,9 @@ pub struct CheckContext {
 	pub issue_ids: Vec<Uuid>,
 	/// Its documentation, from any catalogue entry under its source and name.
 	pub documentation: Option<String>,
-	pub familiarity: Familiarity,
 }
 
-/// Everything a triage of one incident needs.
+/// Everything a triage of one incident reads.
 #[derive(Clone, Debug)]
 pub struct Assessment {
 	pub incident: Incident,
@@ -538,44 +383,12 @@ pub struct Assessment {
 	pub verdicts: Vec<VerdictRow>,
 	/// The latest verdict, when it was given at this same state.
 	pub already_triaged: Option<VerdictRow>,
-	pub reasons: Vec<Reason>,
-	pub exception_can_answer: bool,
+	/// What has changed since the latest verdict; none before the first.
+	pub changes: Option<Changes>,
 	pub checks: Vec<CheckContext>,
 	/// Current memory entries linked to a failing check, the incident's group,
 	/// or the incident.
 	pub memory: Vec<MemoryEntry>,
-	pub shared: Vec<Related>,
-	pub candidates: Vec<Related>,
-}
-
-/// An open incident's live failing members, for comparing across incidents.
-struct OpenFailure {
-	incident: Incident,
-	check: CheckKey,
-	began: Timestamp,
-}
-
-async fn open_failures(conn: &mut AsyncPgConnection) -> Result<Vec<OpenFailure>> {
-	let rows: Vec<(Incident, Issue)> = incident_issues::table
-		.inner_join(incidents::table)
-		.inner_join(issues::table)
-		.filter(incidents::closed_at.is_null())
-		.filter(incidents::resolved_at.is_null())
-		.filter(incident_issues::left_at.is_null())
-		.filter(issues::active.eq(true))
-		.select((Incident::as_select(), Issue::as_select()))
-		.load(conn)
-		.await
-		.map_err(AppError::from)?;
-	Ok(rows
-		.into_iter()
-		.filter(|(_, issue)| is_failing(issue))
-		.map(|(incident, issue)| OpenFailure {
-			began: issue.degraded_since.unwrap_or(issue.first_seen),
-			check: CheckKey::of(&issue),
-			incident,
-		})
-		.collect())
 }
 
 async fn target_labels(
@@ -600,80 +413,23 @@ async fn target_labels(
 		.collect())
 }
 
-/// Read what a triage of `incident_id` needs, and decide what Canopy requires.
-// spec: TRI
+/// Read what a triage of `incident_id` reads.
+// spec: TRI#what-triage-reads
 pub async fn assess(conn: &mut AsyncPgConnection, incident_id: Uuid) -> Result<Assessment> {
 	let (incident, rows) = Incident::get_with_issues(conn, incident_id).await?;
 	let state = state_of(&incident, &rows);
 	let verdicts = verdicts_for(conn, incident_id).await?;
-	let baseline = <[VerdictRow]>::first(&verdicts);
-	let already_triaged = baseline
-		.filter(|row| row.revision == state.revision)
-		.cloned();
-	let here = IncidentTarget::of_incident(&incident);
+	let latest = <[VerdictRow]>::first(&verdicts);
+	let already_triaged = latest.filter(|row| row.revision == state.revision).cloned();
+	let changes = latest.map(|row| changes(row, &state));
+	let target = target_labels(conn, [&incident])
+		.await?
+		.remove(&incident.id)
+		.unwrap_or_default();
 
-	// Open failures on other targets, for shared checks and candidates.
-	let others: Vec<OpenFailure> = if state.open {
-		open_failures(conn)
-			.await?
-			.into_iter()
-			.filter(|f| IncidentTarget::of_incident(&f.incident) != here)
-			.collect()
-	} else {
-		Vec::new()
-	};
-	let mut labels = target_labels(conn, others.iter().map(|f| &f.incident)).await?;
-	labels.extend(target_labels(conn, [&incident]).await?);
-	let target = labels.get(&incident.id).cloned().unwrap_or_default();
-
-	let close = |a: Timestamp, b: Timestamp| a.duration_since(b).abs() <= CLOSE_IN_TIME;
-	let mut shared_failures: Vec<SharedFailure> = Vec::new();
-	let mut shared_ids: BTreeMap<Uuid, BTreeSet<CheckKey>> = BTreeMap::new();
-	let mut candidate_ids: BTreeSet<Uuid> = BTreeSet::new();
-	for other in &others {
-		if let Some(&began_here) = state.began.get(&other.check) {
-			if close(began_here, other.began) {
-				shared_failures.push(SharedFailure {
-					check: other.check.clone(),
-					incident_id: other.incident.id,
-					target: labels.get(&other.incident.id).cloned().unwrap_or_default(),
-					began_here,
-					began_there: other.began,
-				});
-			}
-			shared_ids
-				.entry(other.incident.id)
-				.or_default()
-				.insert(other.check.clone());
-		} else if state.began.values().any(|&at| close(at, other.began)) {
-			candidate_ids.insert(other.incident.id);
-		}
-	}
-	candidate_ids.retain(|id| !shared_ids.contains_key(id));
-
-	// What is known of each failing check.
 	let keys: Vec<CheckKey> = state.failing.iter().map(|f| f.check.clone()).collect();
 	let documentation = documentation_for(conn, &keys).await?;
 	let memory = current_memory(conn, &incident, &keys).await?;
-	let others_published = other_published_incidents(conn, incident_id, &keys).await?;
-	let mut familiarity: BTreeMap<CheckKey, Familiarity> = BTreeMap::new();
-	for key in &keys {
-		familiarity.insert(
-			key.clone(),
-			Familiarity {
-				documented: documentation.contains_key(key),
-				linked_entries: memory
-					.iter()
-					.filter(|entry| entry_links_check(entry, key))
-					.count(),
-				other_published_incidents: others_published.get(key).copied().unwrap_or(0),
-			},
-		);
-	}
-
-	let reasons = reasons(&incident, &state, baseline, &shared_failures, &familiarity);
-	let exception = exception_can_answer(&reasons);
-
 	let checks = state
 		.failing
 		.iter()
@@ -686,45 +442,7 @@ pub async fn assess(conn: &mut AsyncPgConnection, incident_id: Uuid) -> Result<A
 				.map(|issue| issue.id)
 				.collect(),
 			documentation: documentation.get(&failing.check).cloned(),
-			familiarity: familiarity.get(&failing.check).cloned().unwrap_or_default(),
 		})
-		.collect();
-
-	let related_ids: Vec<Uuid> = shared_ids
-		.keys()
-		.chain(candidate_ids.iter())
-		.copied()
-		.collect();
-	let latest = latest_verdicts(conn, &related_ids).await?;
-	let related = |id: Uuid, shared_checks: Vec<CheckKey>| {
-		let mut failing: Vec<CheckKey> = others
-			.iter()
-			.filter(|f| f.incident.id == id)
-			.map(|f| f.check.clone())
-			.collect();
-		failing.sort();
-		failing.dedup();
-		let opened_at = others
-			.iter()
-			.find(|f| f.incident.id == id)
-			.map(|f| f.incident.opened_at)
-			.unwrap_or_else(Timestamp::now);
-		Related {
-			incident_id: id,
-			target: labels.get(&id).cloned().unwrap_or_default(),
-			opened_at,
-			shared_checks,
-			failing_checks: failing,
-			latest_verdict: latest.get(&id).map(RelatedVerdict::from),
-		}
-	};
-	let shared = shared_ids
-		.iter()
-		.map(|(id, checks)| related(*id, checks.iter().cloned().collect()))
-		.collect();
-	let candidates = candidate_ids
-		.iter()
-		.map(|id| related(*id, Vec::new()))
 		.collect();
 
 	Ok(Assessment {
@@ -734,12 +452,9 @@ pub async fn assess(conn: &mut AsyncPgConnection, incident_id: Uuid) -> Result<A
 		state,
 		verdicts,
 		already_triaged,
-		reasons,
-		exception_can_answer: exception,
+		changes,
 		checks,
 		memory,
-		shared,
-		candidates,
 	})
 }
 
@@ -827,59 +542,12 @@ async fn current_memory(
 		.collect())
 }
 
-/// For each check, how many other published incidents across the fleet it has
-/// been part of.
-async fn other_published_incidents(
-	conn: &mut AsyncPgConnection,
-	incident_id: Uuid,
-	keys: &[CheckKey],
-) -> Result<HashMap<CheckKey, usize>> {
-	if keys.is_empty() {
-		return Ok(HashMap::new());
-	}
-	let names: Vec<&str> = keys.iter().map(|k| k.name.as_str()).collect();
-	let rows: Vec<(Uuid, String, Option<String>, String)> = incident_issues::table
-		.inner_join(issues::table)
-		.filter(incident_issues::incident_id.ne(incident_id))
-		.filter(
-			issues::check_name
-				.eq_any(&names)
-				.or(issues::ref_.eq_any(&names)),
-		)
-		.select((
-			incident_issues::incident_id,
-			issues::source,
-			issues::check_name,
-			issues::ref_,
-		))
-		.distinct()
-		.load(conn)
-		.await
-		.map_err(AppError::from)?;
-	let ids: Vec<Uuid> = rows.iter().map(|(id, ..)| *id).collect();
-	let published = SlackOutbox::delivered_open_ids(conn, &ids).await?;
-	let wanted: HashSet<&CheckKey> = keys.iter().collect();
-	let mut seen: HashMap<CheckKey, HashSet<Uuid>> = HashMap::new();
-	for (id, source, check_name, r#ref) in rows {
-		let key = CheckKey {
-			source,
-			name: check_name.unwrap_or(r#ref),
-		};
-		if wanted.contains(&key) && published.contains(&id) {
-			seen.entry(key).or_default().insert(id);
-		}
-	}
-	Ok(seen.into_iter().map(|(k, v)| (k, v.len())).collect())
-}
-
 /// What a verdict records.
 #[derive(Clone, Debug)]
 pub struct NewVerdict {
 	pub incident_id: Uuid,
 	/// The revision the triage read.
 	pub revision: String,
-	/// When the triage read it, so related escalations since can be returned.
-	pub read_at: Timestamp,
 	pub verdict: Verdict,
 	pub reasoning: String,
 	pub memory_entry_ids: Vec<Uuid>,
@@ -888,55 +556,18 @@ pub struct NewVerdict {
 /// What recording a verdict did.
 #[derive(Clone, Debug)]
 pub enum Recorded {
-	/// The verdict, the note showing it, and the related incidents escalated
-	/// since the triage read.
+	/// The verdict, and the note showing it.
 	Done {
 		verdict: Box<VerdictRow>,
 		note: IncidentNote,
-		escalated_since: Vec<Related>,
 	},
-	/// The incident changed since the revision read; this is its revision now.
-	Stale { current: String },
-	/// A logged verdict where Canopy requires an escalation.
-	Refused { reasons: Vec<Reason>, why: String },
+	/// The incident changed since the revision read.
+	Stale,
 }
 
 /// The note showing a verdict on its incident.
-fn note_body(verdict: Verdict, reasons: &[Reason], reasoning: &str) -> String {
-	let mut body = format!("**Alert triage: {}**\n\n{reasoning}", verdict.as_str());
-	if !reasons.is_empty() {
-		body.push_str("\n\nCanopy required escalation: ");
-		body.push_str(
-			&reasons
-				.iter()
-				.map(describe_reason)
-				.collect::<Vec<_>>()
-				.join("; "),
-		);
-		body.push('.');
-	}
-	body
-}
-
-/// A reason in a few words, for the note and for refusals.
-pub fn describe_reason(reason: &Reason) -> String {
-	match reason {
-		Reason::ProductionOpening => "first triage of a production incident".to_owned(),
-		Reason::CanopyOpening => "first triage of a Canopy-wide incident".to_owned(),
-		Reason::EscalatingFailure { check } => {
-			format!("escalating check {} is failing", check.name)
-		}
-		Reason::Worse { from, to } => format!(
-			"worst result rose from {} to {}",
-			from.map_or("none", Severity::as_str),
-			to.as_str()
-		),
-		Reason::NewFailingCheck { check } => format!("{} is newly failing", check.name),
-		Reason::SharedCheck { check, target, .. } => {
-			format!("{} is also failing on {target}", check.name)
-		}
-		Reason::Unfamiliar { check } => format!("{} is an unfamiliar check", check.name),
-	}
+fn note_body(verdict: Verdict, reasoning: &str) -> String {
+	format!("**Alert triage: {}**\n\n{reasoning}", verdict.as_str())
 }
 
 /// Lock the incident's row, so two verdicts on one incident are recorded one
@@ -953,8 +584,8 @@ async fn lock_incident(conn: &mut AsyncPgConnection, incident_id: Uuid) -> Resul
 }
 
 /// Record a verdict, refusing it when the incident changed since the revision
-/// read or when it logs what Canopy requires be escalated. Runs inside the
-/// caller's transaction; the note it adds is the caller's to audit.
+/// read. Runs inside the caller's transaction; the note it adds is the
+/// caller's to audit.
 // spec: TRI#recording-a-verdict
 pub async fn record(
 	conn: &mut AsyncPgConnection,
@@ -972,41 +603,24 @@ pub async fn record(
 		)));
 	}
 	lock_incident(conn, new.incident_id).await?;
-	let assessment = assess(conn, new.incident_id).await?;
-	if assessment.state.revision != new.revision {
-		return Ok(Recorded::Stale {
-			current: assessment.state.revision,
-		});
+	let (incident, rows) = Incident::get_with_issues(conn, new.incident_id).await?;
+	let state = state_of(&incident, &rows);
+	if state.revision != new.revision {
+		return Ok(Recorded::Stale);
 	}
 
-	let entries: Vec<MemoryEntry> = if new.memory_entry_ids.is_empty() {
-		Vec::new()
-	} else {
-		memory_entries::table
+	if !new.memory_entry_ids.is_empty() {
+		let known: Vec<Uuid> = memory_entries::table
 			.filter(memory_entries::id.eq_any(&new.memory_entry_ids))
-			.select(MemoryEntry::as_select())
+			.select(memory_entries::id)
 			.load(conn)
 			.await
-			.map_err(AppError::from)?
-	};
-	if let Some(missing) = new
-		.memory_entry_ids
-		.iter()
-		.find(|id| !entries.iter().any(|e| e.id == **id))
-	{
-		return Err(AppError::BadRequest(format!(
-			"no memory entry with id {missing}"
-		)));
-	}
-
-	if new.verdict == Verdict::Logged
-		&& !assessment.reasons.is_empty()
-		&& let Some(why) = exception_refusal(&assessment, &entries)
-	{
-		return Ok(Recorded::Refused {
-			reasons: assessment.reasons,
-			why,
-		});
+			.map_err(AppError::from)?;
+		if let Some(missing) = new.memory_entry_ids.iter().find(|id| !known.contains(id)) {
+			return Err(AppError::BadRequest(format!(
+				"no memory entry with id {missing}"
+			)));
+		}
 	}
 
 	let note = IncidentNote::add(
@@ -1014,10 +628,9 @@ pub async fn record(
 		new.incident_id,
 		author,
 		author_kind,
-		&note_body(new.verdict, &assessment.reasons, reasoning),
+		&note_body(new.verdict, reasoning),
 	)
 	.await?;
-	let state = &assessment.state;
 	let stored: VerdictStored = diesel::insert_into(alert_triage_verdicts::table)
 		.values((
 			alert_triage_verdicts::incident_id.eq(new.incident_id),
@@ -1028,8 +641,6 @@ pub async fn record(
 			alert_triage_verdicts::worst_result.eq(state.worst.map(Severity::as_str)),
 			alert_triage_verdicts::failing_checks.eq(serde_json::to_value(&state.failing)
 				.map_err(|e| AppError::Custom(e.to_string()))?),
-			alert_triage_verdicts::reasons.eq(serde_json::to_value(&assessment.reasons)
-				.map_err(|e| AppError::Custom(e.to_string()))?),
 			alert_triage_verdicts::memory_entry_ids.eq(&new.memory_entry_ids),
 			alert_triage_verdicts::note_id.eq(note.id),
 			alert_triage_verdicts::recorded_by.eq(author),
@@ -1039,62 +650,10 @@ pub async fn record(
 		.await
 		.map_err(AppError::from)?;
 
-	let escalated_since = assessment
-		.shared
-		.iter()
-		.chain(&assessment.candidates)
-		.filter(|related| {
-			related
-				.latest_verdict
-				.as_ref()
-				.is_some_and(|v| v.verdict == Verdict::Escalated && v.recorded_at > new.read_at)
-		})
-		.cloned()
-		.collect();
-
 	Ok(Recorded::Done {
 		verdict: Box::new(stored.into()),
 		note,
-		escalated_since,
 	})
-}
-
-/// Why a logged verdict does not meet the harmless-pattern exception, none when
-/// it does: the production opening is the only reason, and every failing check
-/// has a current entry among those given linked to it.
-// spec: TRI#the-harmless-pattern-exception
-fn exception_refusal(assessment: &Assessment, entries: &[MemoryEntry]) -> Option<String> {
-	let required = assessment
-		.reasons
-		.iter()
-		.map(describe_reason)
-		.collect::<Vec<_>>()
-		.join("; ");
-	if !assessment.exception_can_answer {
-		return Some(format!(
-			"Canopy requires this incident be escalated: {required}"
-		));
-	}
-	let uncovered: Vec<&str> = assessment
-		.state
-		.failing
-		.iter()
-		.filter(|failing| {
-			!entries
-				.iter()
-				.any(|e| !e.is_retired() && entry_links_check(e, &failing.check))
-		})
-		.map(|failing| failing.check.name.as_str())
-		.collect();
-	if uncovered.is_empty() {
-		None
-	} else {
-		Some(format!(
-			"Canopy requires this incident be escalated ({required}) unless a current memory \
-			 entry linked to each failing check names the pattern harmless; none is given for: {}",
-			uncovered.join(", ")
-		))
-	}
 }
 
 /// Attach where a verdict was reported.

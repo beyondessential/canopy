@@ -1,7 +1,7 @@
 -- Alert triage verdicts: what an agent decided about an incident notification,
--- and the incident's state at the revision it read, which is the baseline the
--- next triage of the same incident compares against. The verdict is kept apart
--- from the note that shows it, so editing or deleting the note leaves it.
+-- and the incident's state at the revision it read, which the next triage of the
+-- same incident measures its changes from. The verdict is kept apart from the
+-- note that shows it, so editing or deleting the note leaves it.
 CREATE TABLE alert_triage_verdicts (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -12,7 +12,6 @@ CREATE TABLE alert_triage_verdicts (
 	open BOOLEAN NOT NULL,
 	worst_result TEXT CHECK (worst_result IN ('escalating_failure', 'failure', 'warning')),
 	failing_checks JSONB NOT NULL,
-	reasons JSONB NOT NULL,
 	memory_entry_ids UUID[] NOT NULL DEFAULT '{}',
 	note_id UUID REFERENCES incident_notes(id) ON DELETE SET NULL,
 	report_link TEXT CHECK (char_length(report_link) BETWEEN 1 AND 2000),

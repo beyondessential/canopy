@@ -178,10 +178,9 @@ impl ServerHandler for CanopyMcp {
 			 or a token with the notes grant.\n\n\
 			 Alert triage: for every Canopy incident notification you are asked to triage, \
 			 call triage_alert with the incident id from the notification's link before \
-			 deciding anything, and follow its `guidance`. Canopy decides the escalations \
-			 that follow mechanically from the incident's state; record_alert_triage refuses \
-			 a logged verdict where Canopy requires an escalation. find_alert_triage_verdicts \
-			 gives a write-up day's verdicts for the morning summary."
+			 deciding anything, and follow its `guidance`. You make the decision; Canopy \
+			 gathers the context and keeps the record. find_alert_triage_verdicts gives a \
+			 write-up day's verdicts for the morning summary."
 				.into(),
 		);
 		info.capabilities = ServerCapabilities::builder()

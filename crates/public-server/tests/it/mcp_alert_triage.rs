@@ -1,6 +1,6 @@
-//! Alert triage through the fleet query interface: triage_alert reads what
-//! Canopy decides, recording is held by the notes grant and refused against a
-//! changed incident or a required escalation, and every write is audited.
+//! Alert triage through the fleet query interface: triage_alert reads an
+//! incident's context and serves the guidance, recording is held by the notes
+//! grant and refused against a changed incident, and every write is audited.
 
 use axum_test::TestServer;
 use database::{
@@ -104,9 +104,7 @@ async fn triage_reads_the_required_escalation_and_records_a_verdict() {
 		.await;
 		let triage = ok(&triage).clone();
 		assert_eq!(triage["incident"]["target"], json!("Pacific"));
-		assert_eq!(triage["must_escalate"], json!(true));
-		assert_eq!(triage["reasons"][0]["reason"], json!("production_opening"));
-		assert_eq!(triage["harmless_exception_available"], json!(true));
+		assert_eq!(triage["changes"], json!(null));
 		assert_eq!(
 			triage["checks"][0]["documentation"],
 			json!("The disk is filling")
@@ -143,20 +141,6 @@ async fn triage_reads_the_required_escalation_and_records_a_verdict() {
 			)
 			.await
 		));
-
-		// Canopy requires the escalation, so logging it is refused, naming why.
-		let refusal = call(
-			&public,
-			&scribe,
-			"record_alert_triage",
-			record("logged", &revision),
-		)
-		.await;
-		assert!(refused(&refusal));
-		assert_eq!(
-			refusal["result"]["structuredContent"]["current"]["reasons"][0]["reason"],
-			json!("production_opening")
-		);
 
 		// A revision from before the incident changed is refused too.
 		let stale = revision.replacen(|c: char| c.is_ascii_hexdigit(), "z", 1);
@@ -216,7 +200,6 @@ async fn triage_reads_the_required_escalation_and_records_a_verdict() {
 		)
 		.await;
 		let again = ok(&again);
-		assert_eq!(again["must_escalate"], json!(false));
 		assert_eq!(
 			again["already_triaged"]["report_link"],
 			json!("https://slack.example/archives/C1/p1")

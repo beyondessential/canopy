@@ -24,7 +24,6 @@ diesel::table! {
 		open -> Bool,
 		worst_result -> Nullable<Text>,
 		failing_checks -> Jsonb,
-		reasons -> Jsonb,
 		memory_entry_ids -> Array<Uuid>,
 		note_id -> Nullable<Uuid>,
 		report_link -> Nullable<Text>,

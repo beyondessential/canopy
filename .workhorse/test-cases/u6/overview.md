@@ -2,27 +2,20 @@
 
 Scenarios that verify Canopy's side of alert triage, and a manual run of the Slack side end to end.
 
-## What Canopy decides
+## What triage reads
 
-- [x] A first triage of a production incident requires escalation (production opening), and the harmless-pattern exception is available (verifies spec: TRI)
-- [x] A first triage of a Canopy-wide incident requires escalation, and the exception is not available (verifies spec: TRI)
-- [x] A first triage of a lesser environment with a documented failing check requires nothing (verifies spec: TRI)
-- [x] An escalating failing check requires escalation (verifies spec: TRI)
-- [x] An unfamiliar check (no documentation, no memory, no other published incident) requires escalation (verifies spec: TRI)
-- [x] A closed incident and a resolved incident have no reasons (verifies spec: TRI)
-- [x] After a verdict, a newly failing check, a newly escalating check and a worse worst result are each a reason against the baseline (verifies spec: TRI)
-- [x] The same check failing on another target within thirty minutes requires escalation; one failing for days elsewhere is listed as shared but forces nothing (verifies spec: TRI)
-- [x] A different check failing elsewhere close in time is offered as a shared-cause candidate (verifies spec: TRI)
-- [ ] A check with documentation but no memory and no past incidents is familiar (documentation alone is enough)
-- [ ] A group-scoped issue's incident on a group whose headline rank is production counts as production
+- [x] Triage reads the incident's target, failing checks with whether each escalates, their documentation, and the current memory linked to its checks (same source only), its group and the incident; retired entries and other groups' entries are left out (verifies spec: TRI)
+- [x] Before any verdict there are no changes to read (verifies spec: TRI)
+- [x] After a verdict, the worst result then and now, and the checks newly failing, newly escalating and no longer failing, are read as facts (verifies spec: TRI)
+- [x] The guidance is served with every triage (verifies spec: MCP)
+- [ ] Each live issue is presented with the grain it is filed at, a machine and its application sharing an id told apart (verifies spec: MCP)
 
 ## Recording verdicts
 
-- [x] A repeat triage at an unchanged state returns the verdict already given and no reasons (verifies spec: TRI)
+- [x] A repeat triage at an unchanged state returns the verdict already given (verifies spec: TRI)
+- [x] Closing an incident is a new state, so the close is not mistaken for a repeat (verifies spec: TRI)
 - [x] A verdict against a revision the incident has moved past is refused and records nothing (verifies spec: TRI)
-- [x] A logged verdict against a required escalation is refused, naming the reasons (verifies spec: TRI)
-- [x] The harmless-pattern exception needs a current entry linked to each failing check; a group entry or a retired entry does not count (verifies spec: TRI)
-- [x] Recording returns related incidents escalated since the triage read (verifies spec: TRI)
+- [x] A verdict records the memory entries it relies on, and an unknown entry is refused (verifies spec: TRI)
 - [x] Recording adds an agent note to the incident, and attaching a report link is validated as an http(s) address (verifies spec: TRI)
 - [x] Recording and attaching need the notes grant; reading does not (verifies spec: MCP)
 - [x] Recording audits the verdict and the note; attaching audits the report (verifies spec: TRI)
@@ -39,9 +32,8 @@ Scenarios that verify Canopy's side of alert triage, and a manual run of the Sla
 ## Manual, in Slack
 
 - [ ] An incident opening in the alerts channel gets a one-line reply from Claude, and a verdict note appears on the incident
-- [ ] A production opening is escalated as a top-level post in the triage channel, with the incident link
+- [ ] A production failure Claude cannot explain is escalated as a top-level post in the triage channel, with the incident link
 - [ ] A test environment opening with an explained cause is logged as a reply in the day's write-up thread
 - [ ] A reminder for an unchanged incident adds nothing new beyond a link to the earlier report
-- [ ] Two sites failing the same check together become one escalation naming both
 - [ ] The 8am routine posts the day's thread with yesterday's counts and open incidents
 - [ ] An operator saying "this is harmless" in an escalation thread produces a memory entry linked to the check
