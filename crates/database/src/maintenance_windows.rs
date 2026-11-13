@@ -128,7 +128,8 @@ impl SuspendedTargets {
 			&& !self.holding_applications.contains(&application)
 			&& machine.is_none_or(|machine| {
 				!self.holding_machines.contains(&machine) && !self.in_holding_environment(machine)
-			}) && !group.is_some_and(|g| self.holding_groups.contains(&g))
+			})
+			&& !group.is_some_and(|g| self.holding_groups.contains(&g))
 	}
 
 	/// A window declared over this application in particular, as against one
@@ -1864,7 +1865,8 @@ async fn spans_over_target(
 					.iter()
 					.filter(|later| {
 						later.window_id == moved.window_id
-							&& !later.carried_on && later.moved_at > moved.moved_at
+							&& !later.carried_on
+							&& later.moved_at > moved.moved_at
 					})
 					.map(|later| later.moved_at)
 					.min()
@@ -1876,7 +1878,8 @@ async fn spans_over_target(
 					.iter()
 					.filter(|later| {
 						later.window_id == moved.window_id
-							&& !later.carried_on && later.moved_at == at
+							&& !later.carried_on
+							&& later.moved_at == at
 					})
 					.collect();
 				match left.as_slice() {

@@ -3785,8 +3785,10 @@ async fn re_evaluate_membership(
 			// `by` is known.
 			let check_recovery = !issue.active
 				&& issue.resolved_at.is_none()
-				&& !snoozed && !silenced
-				&& monitored && regraded.is_none();
+				&& !snoozed
+				&& !silenced
+				&& monitored
+				&& regraded.is_none();
 			leave_open_incident(conn, issue, transition_time, by, check_recovery).await?;
 		}
 		_ => {

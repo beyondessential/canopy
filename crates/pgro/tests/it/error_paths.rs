@@ -109,7 +109,8 @@ async fn snapshot_job_fails_for_wrong_bucket() {
 				.list(&ListParams::default().labels(
 					"pgro.bes.au/replica=wrong-bucket-replica,pgro.bes.au/job-type=snapshot-list",
 				))
-				.await && !list.items.is_empty()
+				.await
+				&& !list.items.is_empty()
 			{
 				println!("[wrong-bucket-replica] snapshot-list job exists");
 				return;

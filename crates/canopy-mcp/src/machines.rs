@@ -252,11 +252,12 @@ impl CanopyMcp {
 					detail
 						.platform()
 						.is_some_and(|got| got.to_lowercase().contains(p))
-				}) && q.as_deref().is_none_or(|q| {
-				m.name.to_lowercase().contains(q)
-					|| hostname.as_deref().is_some_and(|h| h.contains(q))
-					|| m.id.to_string().contains(q)
-			})
+				})
+				&& q.as_deref().is_none_or(|q| {
+					m.name.to_lowercase().contains(q)
+						|| hostname.as_deref().is_some_and(|h| h.contains(q))
+						|| m.id.to_string().contains(q)
+				})
 		});
 
 		let total_matched = machines.len();
