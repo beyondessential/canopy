@@ -13,7 +13,7 @@ authors = [
 [dependencies]
 aws-config.workspace = true
 aws-sdk-kms = "1.123.0"
-base64 = "0.22"
+base64 = "0.23"
 jiff = { workspace = true, features = ["serde"] }
 ring = "0.17.14"
 serde = { workspace = true, features = ["derive"] }
