@@ -199,6 +199,21 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		);
 	});
 
+	test("a link to the section opens on it", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "drifting" });
+		await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
+		const server = await seedServer(sql, {
+			name: "drifting-central",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: server.id, version: "2.62.0" });
+
+		await page.setViewportSize({ width: 1280, height: 400 });
+		await page.goto(`/fleet/groups/${group.id}#migration-tests`);
+
+		await expect(page.getByTestId("migration-tests")).toBeInViewport();
+	});
+
 	test("only servers set up for testing get a row", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
 		const consumer = await seedDevice(sql, { role: "backup-restore" });

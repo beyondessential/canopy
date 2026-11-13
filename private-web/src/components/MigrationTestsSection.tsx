@@ -18,7 +18,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { errorPreview } from "../lib/errorText";
@@ -73,6 +73,16 @@ export default function MigrationTestsSection({
 		[groupId, tick],
 	);
 
+	// The section mounts after the browser has already tried the hash.
+	const scrolled = useRef(false);
+	useEffect(() => {
+		const section = document.getElementById("migration-tests");
+		if (scrolled.current || !section) return;
+		if (window.location.hash !== "#migration-tests") return;
+		scrolled.current = true;
+		section.scrollIntoView();
+	}, [verdicts.status]);
+
 	if (verdicts.status === "loading" || verdicts.status === "idle") {
 		return (
 			<Paper variant="outlined" sx={{ p: 2 }}>
@@ -121,51 +131,53 @@ export default function MigrationTestsSection({
 		>
 			<SectionHeading target={target} />
 			{tested.length > 0 && (
-				<Table size="small" sx={{ tableLayout: "fixed" }}>
-					<TableHead>
-						<TableRow>
-							<TableCell sx={{ width: "32%" }}>Server</TableCell>
-							{!target && (
+				<Box sx={{ overflowX: "auto" }}>
+					<Table size="small" sx={{ tableLayout: "fixed", minWidth: 640 }}>
+						<TableHead>
+							<TableRow>
+								<TableCell sx={{ width: "32%" }}>Server</TableCell>
+								{!target && (
+									<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
+										Upgrading to
+									</TableCell>
+								)}
 								<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
-									Upgrading to
+									Verdict
 								</TableCell>
-							)}
-							<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
-								Verdict
-							</TableCell>
-							<TableCell sx={{ width: "22%", whiteSpace: "nowrap" }}>
-								Migrations took
-							</TableCell>
-							<TableCell sx={{ width: "12%", whiteSpace: "nowrap" }}>
-								Tested
-							</TableCell>
-							<TableCell sx={{ width: "16%" }} />
-						</TableRow>
-					</TableHead>
-					<TableBody>
-						{[...tested]
-							.sort(
-								(a, b) =>
-									serverSortKey(byId.get(a.server_id) ?? {}) -
-										serverSortKey(byId.get(b.server_id) ?? {}) ||
-									VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] ||
-									nameOf(a.server_id).localeCompare(nameOf(b.server_id)),
-							)
-							.map((row) => (
-								<TestRow
-									key={row.server_id}
-									row={row}
-									groupId={groupId}
-									server={byId.get(row.server_id)}
-									showTarget={!target}
-									open={openFor === row.server_id}
-									onOpen={() => setOpenFor(row.server_id)}
-									onClose={() => setOpenFor(null)}
-									onRequested={() => setTick((t) => t + 1)}
-								/>
-							))}
-					</TableBody>
-				</Table>
+								<TableCell sx={{ width: "22%", whiteSpace: "nowrap" }}>
+									Migrations took
+								</TableCell>
+								<TableCell sx={{ width: "12%", whiteSpace: "nowrap" }}>
+									Tested
+								</TableCell>
+								<TableCell sx={{ width: "16%" }} />
+							</TableRow>
+						</TableHead>
+						<TableBody>
+							{[...tested]
+								.sort(
+									(a, b) =>
+										serverSortKey(byId.get(a.server_id) ?? {}) -
+											serverSortKey(byId.get(b.server_id) ?? {}) ||
+										VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] ||
+										nameOf(a.server_id).localeCompare(nameOf(b.server_id)),
+								)
+								.map((row) => (
+									<TestRow
+										key={row.server_id}
+										row={row}
+										groupId={groupId}
+										server={byId.get(row.server_id)}
+										showTarget={!target}
+										open={openFor === row.server_id}
+										onOpen={() => setOpenFor(row.server_id)}
+										onClose={() => setOpenFor(null)}
+										onRequested={() => setTick((t) => t + 1)}
+									/>
+								))}
+						</TableBody>
+					</Table>
+				</Box>
 			)}
 			{others.length > 0 && (
 				<NotSetUp
@@ -367,7 +379,7 @@ function TestRow({
 						>
 							{formatDuration(row.latest.total_elapsed)}
 							<Box component="span" sx={{ color: "primary.main", ml: 0.5 }}>
-								· {timings.length} migrations
+								· {timings.length} {timings.length === 1 ? "migration" : "migrations"}
 							</Box>
 						</MuiLink>
 					)}
