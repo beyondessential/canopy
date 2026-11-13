@@ -490,19 +490,22 @@ impl CanopyMcp {
 				note_id: note.id,
 				escalated_since,
 			}),
-			Ok(Recorded::Stale { current }) => Ok(refusal(
+			// No fresh revision is handed back: the agent reads the incident
+			// again before deciding, rather than recording against a state it
+			// has not seen.
+			Ok(Recorded::Stale { .. }) => Ok(refusal(
 				"the incident changed since triage_alert read it; call triage_alert again",
-				json!({ "revision": token(&current, Timestamp::now()) }),
+				json!(null),
 			)),
 			Ok(Recorded::Refused { reasons, why }) => Ok(refusal(
 				why,
 				json!({
 					"reasons": reasons
 						.iter()
-						.map(|reason| json!({
-							"reason": reason,
-							"summary": alert_triage::describe_reason(reason),
-						}))
+						.map(|reason| ReasonOut {
+							summary: alert_triage::describe_reason(reason),
+							reason: reason.clone(),
+						})
 						.collect::<Vec<_>>(),
 				}),
 			)),
