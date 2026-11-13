@@ -5471,9 +5471,8 @@ export interface paths {
         put?: never;
         /**
          * Planned upgrades across the fleet.
-         * @description Every environment of every live group, whether or not it has a plan. A
-         *     group several minors behind with no plan is the thing this view exists to
-         *     surface, so its environments are listed rather than omitted.
+         * @description Every environment of every live group, whether or not it has a plan, since
+         *     recording a plan starts from an environment listed here.
          */
         post: operations["upgrade_plans_fleet"];
         delete?: never;
@@ -8575,18 +8574,6 @@ export interface components {
              *     status update.
              */
             up: components["schemas"]["ShortStatus"];
-        };
-        /**
-         * @description The failing test behind a `failed` verdict, so the fleet view can say what
-         *     broke without a second lookup.
-         */
-        FailedTest: {
-            /** @description The application whose data broke, since the verdict rolls up several. */
-            application: string;
-            /** @description Why it stopped, redacted by the runner that reported it. */
-            error?: string | null;
-            /** @description The migration it stopped at, absent when the runner named none. */
-            migration?: string | null;
         };
         /** @description Both populations the fleet view spreads its figures over. */
         FleetDetailData: {
@@ -11938,16 +11925,8 @@ export interface components {
         /** @description One row of the planned-upgrades view: one of a group's environments. */
         PlannedUpgrade: {
             attempt?: null | components["schemas"]["AttemptState"];
-            /**
-             * Format: int64
-             * @description How far that is behind the newest published version, as majors times a
-             *     thousand plus minors. Zero where it is current; `null` where it has
-             *     reported no version.
-             */
-            behind?: number | null;
             /** @description The version the environment runs now, where it has reported one. */
             current_version?: string | null;
-            failed_test?: null | components["schemas"]["FailedTest"];
             /**
              * Format: uuid
              * @description The group this concerns.
@@ -11955,11 +11934,6 @@ export interface components {
             group_id: string;
             /** @description Its name, so the view reads without a second lookup. */
             group_name: string;
-            /**
-             * @description Whether this is the group's highest-ranked environment, the one the
-             *     group's own version is read from.
-             */
-            headline: boolean;
             /**
              * @description Whether the planned date has passed without the upgrade happening.
              *     Presentational: a slipping upgrade is normal operational reality.
@@ -11973,25 +11947,16 @@ export interface components {
              *     that rank.
              */
             rank: components["schemas"]["ServerRank"];
-            tally?: null | components["schemas"]["Tally"];
             /** @description The plan's target as semver. */
             target_version?: string | null;
             test_request?: null | components["schemas"]["TestRequest"];
-            /**
-             * @description Whether anything is declared to migrate this group's data. A plan on a
-             *     group with nothing declared is never dispatched, so its verdict would sit
-             *     at "not tested" indefinitely with nothing on its way. `null` without a
-             *     plan.
-             */
-            testable?: boolean | null;
             testing?: null | components["schemas"]["Testing"];
             /**
-             * @description Where the environment's data stands against the planned version, rolled
-             *     up from its applications: any failure makes the environment a failure,
-             *     since one application whose data breaks is enough to stop the upgrade.
-             *     `null` without a plan.
+             * @description The environment's applications a testing declaration restores, each with
+             *     where it stands against the planned version. Empty without a plan, and
+             *     where nothing tests the environment.
              */
-            verdict?: string | null;
+            tests: components["schemas"]["TestedServer"][];
         };
         /** @description The hours a plan says its work runs, resolved to instants. */
         PlannedWindow: {
@@ -14188,6 +14153,18 @@ export interface components {
              */
             server_id: string;
         };
+        /**
+         * @description Where one of a group's applications stands against the version it would take
+         *     next, and whether anything will test it.
+         */
+        ServerVerdict: components["schemas"]["GroupVerdict"] & {
+            /**
+             * @description Whether a declaration that tests the plan restores its machine. One
+             *     nothing tests stays at not tested for good.
+             */
+            set_up: boolean;
+            test_request?: null | components["schemas"]["TestRequest"];
+        };
         /** @description The state of an operator's session, as the client presents it. */
         SessionState: {
             /**
@@ -14857,22 +14834,6 @@ export interface components {
             /** @description Take over a lease another operator holds, which is audited. */
             take_over?: boolean;
         };
-        /**
-         * @description How many of an environment's applications have passed, out of how many the
-         *     migrations apply to.
-         */
-        Tally: {
-            /**
-             * Format: int32
-             * @description How many have a passing verdict against the planned version.
-             */
-            passed: number;
-            /**
-             * Format: int32
-             * @description How many the migrations apply to, passed or not.
-             */
-            total: number;
-        };
         /** @description One span of a window over a target, as the target's history reads it. */
         TargetWindow: {
             /**
@@ -14911,6 +14872,14 @@ export interface components {
             requested_at: string;
             /** @description Who asked. */
             requested_by?: string | null;
+        };
+        /**
+         * @description One of an environment's applications that a declaration tests, and where it
+         *     stands against the environment's planned version.
+         */
+        TestedServer: components["schemas"]["GroupVerdict"] & {
+            /** @description The application's name, so the view reads without a second lookup. */
+            name: string;
         };
         /**
          * @description How an environment's data is migration-tested while its plan is open.
@@ -22454,7 +22423,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GroupVerdict"][];
+                    "application/json": components["schemas"]["ServerVerdict"][];
                 };
             };
             401: {

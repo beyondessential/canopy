@@ -4232,33 +4232,6 @@
         ],
         "type": "object"
       },
-      "FailedTest": {
-        "description": "The failing test behind a `failed` verdict, so the fleet view can say what\nbroke without a second lookup.",
-        "properties": {
-          "application": {
-            "description": "The application whose data broke, since the verdict rolls up several.",
-            "type": "string"
-          },
-          "error": {
-            "description": "Why it stopped, redacted by the runner that reported it.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "migration": {
-            "description": "The migration it stopped at, absent when the runner named none.",
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "application"
-        ],
-        "type": "object"
-      },
       "FleetDetailData": {
         "description": "Both populations the fleet view spreads its figures over.",
         "properties": {
@@ -10135,17 +10108,8 @@
               },
               {
                 "$ref": "#/components/schemas/AttemptState",
-                "description": "Whether a restore attempt is under way, carried beside the verdict rather\nthan folded into it: a restore takes hours, so a group mid-test would\notherwise read as untested for the whole window."
+                "description": "Whether a restore attempt is under way, carried beside the verdicts rather\nthan folded into them: a restore takes hours, so a group mid-test would\notherwise read as untested for the whole window."
               }
-            ]
-          },
-          "behind": {
-            "description": "How far that is behind the newest published version, as majors times a\nthousand plus minors. Zero where it is current; `null` where it has\nreported no version.",
-            "format": "int64",
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
             ]
           },
           "current_version": {
@@ -10153,17 +10117,6 @@
             "type": [
               "string",
               "null"
-            ]
-          },
-          "failed_test": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/FailedTest",
-                "description": "The failing test behind a `failed` verdict. `null` for any other verdict."
-              }
             ]
           },
           "group_id": {
@@ -10174,10 +10127,6 @@
           "group_name": {
             "description": "Its name, so the view reads without a second lookup.",
             "type": "string"
-          },
-          "headline": {
-            "description": "Whether this is the group's highest-ranked environment, the one the\ngroup's own version is read from.",
-            "type": "boolean"
           },
           "late": {
             "description": "Whether the planned date has passed without the upgrade happening.\nPresentational: a slipping upgrade is normal operational reality.",
@@ -10220,17 +10169,6 @@
             "$ref": "#/components/schemas/ServerRank",
             "description": "The rank of the environment this concerns: the group's applications at\nthat rank."
           },
-          "tally": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Tally",
-                "description": "How many of the environment's applications have passed, out of how many\nare under test. `null` without a plan, or where the environment has no\napplication the migrations apply to."
-              }
-            ]
-          },
           "target_version": {
             "description": "The plan's target as semver.",
             "type": [
@@ -10249,13 +10187,6 @@
               }
             ]
           },
-          "testable": {
-            "description": "Whether anything is declared to migrate this group's data. A plan on a\ngroup with nothing declared is never dispatched, so its verdict would sit\nat \"not tested\" indefinitely with nothing on its way. `null` without a\nplan.",
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
           "testing": {
             "oneOf": [
               {
@@ -10267,20 +10198,20 @@
               }
             ]
           },
-          "verdict": {
-            "description": "Where the environment's data stands against the planned version, rolled\nup from its applications: any failure makes the environment a failure,\nsince one application whose data breaks is enough to stop the upgrade.\n`null` without a plan.",
-            "type": [
-              "string",
-              "null"
-            ]
+          "tests": {
+            "description": "The environment's applications a testing declaration restores, each with\nwhere it stands against the planned version. Empty without a plan, and\nwhere nothing tests the environment.",
+            "items": {
+              "$ref": "#/components/schemas/TestedServer"
+            },
+            "type": "array"
           }
         },
         "required": [
           "group_id",
           "group_name",
           "rank",
-          "headline",
-          "late"
+          "late",
+          "tests"
         ],
         "type": "object"
       },
@@ -13853,6 +13784,38 @@
         ],
         "type": "object"
       },
+      "ServerVerdict": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/GroupVerdict",
+            "description": "Where it stands."
+          },
+          {
+            "properties": {
+              "set_up": {
+                "description": "Whether a declaration that tests the plan restores its machine. One\nnothing tests stays at not tested for good.",
+                "type": "boolean"
+              },
+              "test_request": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TestRequest",
+                    "description": "The ask for its environment to be tested that this application's machine\nhas yet to answer, where there is one."
+                  }
+                ]
+              }
+            },
+            "required": [
+              "set_up"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "Where one of a group's applications stands against the version it would take\nnext, and whether anything will test it."
+      },
       "SessionState": {
         "description": "The state of an operator's session, as the client presents it.",
         "properties": {
@@ -14906,26 +14869,6 @@
         ],
         "description": "Take the lease on an environment, which a run holds while it runs."
       },
-      "Tally": {
-        "description": "How many of an environment's applications have passed, out of how many the\nmigrations apply to.",
-        "properties": {
-          "passed": {
-            "description": "How many have a passing verdict against the planned version.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "total": {
-            "description": "How many the migrations apply to, passed or not.",
-            "format": "int32",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "passed",
-          "total"
-        ],
-        "type": "object"
-      },
       "TargetWindow": {
         "description": "One span of a window over a target, as the target's history reads it.",
         "properties": {
@@ -15010,6 +14953,27 @@
           "requested_at"
         ],
         "type": "object"
+      },
+      "TestedServer": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/GroupVerdict",
+            "description": "Where it stands."
+          },
+          {
+            "properties": {
+              "name": {
+                "description": "The application's name, so the view reads without a second lookup.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "One of an environment's applications that a declaration tests, and where it\nstands against the environment's planned version."
       },
       "Testing": {
         "description": "How an environment's data is migration-tested while its plan is open.",
@@ -27279,7 +27243,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/GroupVerdict"
+                    "$ref": "#/components/schemas/ServerVerdict"
                   },
                   "type": "array"
                 }
@@ -29150,7 +29114,7 @@
     },
     "/api/upgrade_plans/fleet": {
       "post": {
-        "description": "Every environment of every live group, whether or not it has a plan. A\ngroup several minors behind with no plan is the thing this view exists to\nsurface, so its environments are listed rather than omitted.",
+        "description": "Every environment of every live group, whether or not it has a plan, since\nrecording a plan starts from an environment listed here.",
         "operationId": "upgrade_plans_fleet",
         "responses": {
           "200": {
