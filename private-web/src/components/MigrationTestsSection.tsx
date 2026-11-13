@@ -40,8 +40,7 @@ type ServerVerdict = ApiResponse<"migration_tests", "for_group">[number];
 /// Where each of the group's servers stands against the version it would take
 /// next: the migrations were run against a restore replica of its real data, so
 /// a pass means that data survives the upgrade and the timings say how long the
-/// window needs to be. Only a server set up for testing gets a row; the rest
-/// would sit at not tested for good, so they are counted beneath.
+/// window needs to be.
 // spec: RST#verdicts
 export default function MigrationTestsSection({
 	groupId,
@@ -185,8 +184,6 @@ export default function MigrationTestsSection({
 	);
 }
 
-/// The servers nothing tests, counted on one line and listed on asking: they
-/// would only ever read as not yet tested.
 function NotSetUp({
 	servers,
 	others,
@@ -413,9 +410,7 @@ function TestRow({
 	);
 }
 
-/// Ask for the server's environment to be tested now, or say that an ask is
-/// waiting on a verdict. The ask covers every server of the environment set up
-/// for testing, as asking from the upgrades view does.
+/// The ask covers every server of the environment set up for testing.
 // spec: RST#dispatching-a-migration-test
 function RequestTest({
 	groupId,

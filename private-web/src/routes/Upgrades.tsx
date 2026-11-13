@@ -1284,9 +1284,6 @@ function OutcomeChip({
 	);
 }
 
-/// One group's open plans under one header. The header says the group's
-/// migration tests once: in practice one server is set up to test for the
-/// whole group, so saying it on every environment reads as noise.
 // spec: UPG#the-dashboard
 function PlannedGroup({
 	rows,
@@ -1408,9 +1405,6 @@ function PlannedGroup({
 	);
 }
 
-/// Whether the group's data survives its planned versions, from the servers set
-/// up for testing alone: one nothing tests would sit at not tested for good and
-/// say nothing about the upgrade.
 // spec: UPG#the-dashboard
 function TestSummary({ groupId, rows }: { groupId: string; rows: PlannedRow[] }) {
 	const to = `/fleet/groups/${groupId}#migration-tests`;
@@ -1549,7 +1543,6 @@ function TestSummary({ groupId, rows }: { groupId: string; rows: PlannedRow[] })
 	);
 }
 
-/// How long a passing run took, and over how many migrations where it said.
 function ranFor(latest: NonNullable<TestedServer["latest"]>): string {
 	const took = formatDuration(latest.total_elapsed);
 	const count = latest.timings.length;
@@ -1614,8 +1607,6 @@ function TestingChip({
 	);
 }
 
-/// Ask for the group's planned environments set up for testing to be tested
-/// now, or say that an ask is waiting on a verdict.
 // spec: RST#dispatching-a-migration-test
 function RequestTest({
 	groupId,
@@ -2302,9 +2293,7 @@ function RecordPlanDialog({
 	);
 }
 
-/// A row's own actions behind one control, so the table reads as the plans
-/// rather than as a row of buttons. Amending leaves the target out: moving an
-/// environment somewhere else is a new plan, so it goes through the record form.
+/// Amending leaves the target out: a different target is a new plan.
 // spec: UPG#a-plan
 function PlanActions({
 	row,
