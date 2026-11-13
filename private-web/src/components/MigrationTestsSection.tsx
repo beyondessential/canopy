@@ -1,7 +1,11 @@
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import {
 	Alert,
 	Box,
+	Button,
 	Chip,
+	Collapse,
 	LinearProgress,
 	Link as MuiLink,
 	Paper,
@@ -14,26 +18,30 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import { useState } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
-import { useApi } from "../api";
+import { useApi, useApiAction } from "../api";
 import { errorPreview } from "../lib/errorText";
 import { formatDuration } from "../lib/migrationTests";
 import {
 	type ApiResponse,
 	type ServerInfo,
+	type ServerRank,
 	applicationName,
 	serverSortKey,
 } from "../types";
-
-type GroupVerdict = ApiResponse<"migration_tests", "for_group">[number];
+import { GradedAction } from "./GradedAction";
 import MigrationRunDialog from "./MigrationRunDialog";
 import ServerRankChip from "./ServerRankChip";
 import TimeAgo from "./TimeAgo";
 
+type ServerVerdict = ApiResponse<"migration_tests", "for_group">[number];
+
 /// Where each of the group's servers stands against the version it would take
 /// next: the migrations were run against a restore replica of its real data, so
 /// a pass means that data survives the upgrade and the timings say how long the
-/// window needs to be.
+/// window needs to be. Only a server set up for testing gets a row; the rest
+/// would sit at not tested for good, so they are counted beneath.
 // spec: RST#verdicts
 export default function MigrationTestsSection({
 	groupId,
@@ -58,11 +66,12 @@ export default function MigrationTestsSection({
 			},
 			{ replace: true },
 		);
+	const [tick, setTick] = useState(0);
 	const verdicts = useApi(
 		"migration_tests",
 		"for_group",
 		{ group_id: groupId },
-		[groupId],
+		[groupId, tick],
 	);
 
 	if (verdicts.status === "loading" || verdicts.status === "idle") {
@@ -85,11 +94,11 @@ export default function MigrationTestsSection({
 	if (verdicts.data.length === 0) {
 		return (
 			<Paper
-			id="migration-tests"
-			variant="outlined"
-			sx={{ p: 2, scrollMarginTop: 16 }}
-			data-testid="migration-tests"
-		>
+				id="migration-tests"
+				variant="outlined"
+				sx={{ p: 2, scrollMarginTop: 16 }}
+				data-testid="migration-tests"
+			>
 				<SectionHeading />
 				<Typography variant="body2" color="text.secondary">
 					No upgrade plan is open for this group, so there is nothing to
@@ -99,6 +108,11 @@ export default function MigrationTestsSection({
 		);
 	}
 
+	const tested = verdicts.data.filter((row) => row.set_up);
+	const others = verdicts.data.filter((row) => !row.set_up);
+	const targets = new Set(tested.map((row) => row.target_version));
+	const target = targets.size === 1 ? tested[0].target_version : null;
+
 	return (
 		<Paper
 			id="migration-tests"
@@ -106,47 +120,129 @@ export default function MigrationTestsSection({
 			sx={{ p: 2, scrollMarginTop: 16 }}
 			data-testid="migration-tests"
 		>
-			<SectionHeading />
-			<Table size="small" sx={{ tableLayout: "fixed" }}>
-				<TableHead>
-					<TableRow>
-						<TableCell sx={{ width: "32%" }}>Server</TableCell>
-						<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
-							Upgrading to
-						</TableCell>
-						<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
-							Verdict
-						</TableCell>
-						<TableCell sx={{ width: "26%", whiteSpace: "nowrap" }}>
-							Migrations took
-						</TableCell>
-						<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
-							Tested
-						</TableCell>
-					</TableRow>
-				</TableHead>
-				<TableBody>
-					{[...verdicts.data]
+			<SectionHeading target={target} />
+			{tested.length > 0 && (
+				<Table size="small" sx={{ tableLayout: "fixed" }}>
+					<TableHead>
+						<TableRow>
+							<TableCell sx={{ width: "32%" }}>Server</TableCell>
+							{!target && (
+								<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
+									Upgrading to
+								</TableCell>
+							)}
+							<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
+								Verdict
+							</TableCell>
+							<TableCell sx={{ width: "22%", whiteSpace: "nowrap" }}>
+								Migrations took
+							</TableCell>
+							<TableCell sx={{ width: "12%", whiteSpace: "nowrap" }}>
+								Tested
+							</TableCell>
+							<TableCell sx={{ width: "16%" }} />
+						</TableRow>
+					</TableHead>
+					<TableBody>
+						{[...tested]
+							.sort(
+								(a, b) =>
+									serverSortKey(byId.get(a.server_id) ?? {}) -
+										serverSortKey(byId.get(b.server_id) ?? {}) ||
+									VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] ||
+									nameOf(a.server_id).localeCompare(nameOf(b.server_id)),
+							)
+							.map((row) => (
+								<TestRow
+									key={row.server_id}
+									row={row}
+									groupId={groupId}
+									server={byId.get(row.server_id)}
+									showTarget={!target}
+									open={openFor === row.server_id}
+									onOpen={() => setOpenFor(row.server_id)}
+									onClose={() => setOpenFor(null)}
+									onRequested={() => setTick((t) => t + 1)}
+								/>
+							))}
+					</TableBody>
+				</Table>
+			)}
+			{others.length > 0 && (
+				<NotSetUp
+					servers={others
+						.map((row) => byId.get(row.server_id))
+						.filter((server): server is ServerInfo => server !== undefined)
 						.sort(
 							(a, b) =>
-								serverSortKey(byId.get(a.server_id) ?? {}) -
-									serverSortKey(byId.get(b.server_id) ?? {}) ||
-								VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] ||
-								nameOf(a.server_id).localeCompare(nameOf(b.server_id)),
-						)
-						.map((row) => (
-							<TestRow
-								key={row.server_id}
-								row={row}
-								server={byId.get(row.server_id)}
-								open={openFor === row.server_id}
-								onOpen={() => setOpenFor(row.server_id)}
-								onClose={() => setOpenFor(null)}
-							/>
-						))}
-				</TableBody>
-			</Table>
+								serverSortKey(a) - serverSortKey(b) ||
+								serverName(a).localeCompare(serverName(b)),
+						)}
+					others={tested.length > 0}
+				/>
+			)}
 		</Paper>
+	);
+}
+
+/// The servers nothing tests, counted on one line and listed on asking: they
+/// would only ever read as not yet tested.
+function NotSetUp({
+	servers,
+	others,
+}: {
+	servers: ServerInfo[];
+	others: boolean;
+}) {
+	const [open, setOpen] = useState(false);
+	const count = servers.length;
+	return (
+		<Box data-testid="migration-tests-not-set-up" sx={{ pt: 1.5 }}>
+			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+				{open ? (
+					<ExpandMoreIcon fontSize="small" color="action" />
+				) : (
+					<ChevronRightIcon fontSize="small" color="action" />
+				)}
+				<Typography variant="body2" color="text.secondary">
+					{count} {others ? "other " : ""}
+					{count === 1 ? "server is" : "servers are"} not set up for testing
+				</Typography>
+				<MuiLink
+					component="button"
+					type="button"
+					variant="body2"
+					aria-expanded={open}
+					onClick={() => setOpen((shown) => !shown)}
+				>
+					{open ? "Hide" : "Show"}
+				</MuiLink>
+			</Stack>
+			<Collapse in={open}>
+				<Stack spacing={0.75} sx={{ pt: 1, pl: 3.5 }}>
+					{servers.map((server) => (
+						<Stack
+							key={server.id}
+							direction="row"
+							spacing={1}
+							sx={{ alignItems: "center" }}
+							data-testid="migration-test-not-set-up"
+						>
+							<MuiLink
+								component={RouterLink}
+								to={`/fleet/applications/${server.id}`}
+								underline="hover"
+								color="text.primary"
+								variant="body2"
+							>
+								{serverName(server)}
+							</MuiLink>
+							{server.rank && <ServerRankChip rank={server.rank} />}
+						</Stack>
+					))}
+				</Stack>
+			</Collapse>
+		</Box>
 	);
 }
 
@@ -157,14 +253,16 @@ const VERDICT_ORDER: Record<string, number> = {
 	passed: 2,
 };
 
-function SectionHeading() {
+function SectionHeading({ target }: { target?: string | null }) {
 	return (
 		<Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "baseline" }}>
 			<Typography variant="h6" component="h2">
 				Pre-upgrade migration tests
 			</Typography>
 			<Typography variant="body2" color="text.secondary">
-				run against a restore of each server's own data
+				{target
+					? `to ${target}`
+					: "run against a restore of each server's own data"}
 			</Typography>
 		</Stack>
 	);
@@ -211,16 +309,22 @@ function serverName(server: ServerInfo | undefined): string {
 
 function TestRow({
 	row,
+	groupId,
 	server,
+	showTarget,
 	open,
 	onOpen,
 	onClose,
+	onRequested,
 }: {
-	row: GroupVerdict;
+	row: ServerVerdict;
+	groupId: string;
 	server: ServerInfo | undefined;
+	showTarget: boolean;
 	open: boolean;
 	onOpen: () => void;
 	onClose: () => void;
+	onRequested: () => void;
 }) {
 	const timings = row.latest?.timings ?? [];
 	return (
@@ -239,7 +343,9 @@ function TestRow({
 						{server?.rank && <ServerRankChip rank={server.rank} />}
 					</Stack>
 				</TableCell>
-				<TableCell sx={{ whiteSpace: "nowrap" }}>{row.target_version}</TableCell>
+				{showTarget && (
+					<TableCell sx={{ whiteSpace: "nowrap" }}>{row.target_version}</TableCell>
+				)}
 				<TableCell>
 					<VerdictChip
 						verdict={row.verdict}
@@ -280,6 +386,18 @@ function TestRow({
 						"—"
 					)}
 				</TableCell>
+				<TableCell align="right">
+					{server?.rank && (
+						<RequestTest
+							groupId={groupId}
+							rank={server.rank}
+							name={serverName(server)}
+							tested={row.latest != null}
+							request={row.test_request ?? null}
+							onRequested={onRequested}
+						/>
+					)}
+				</TableCell>
 			</TableRow>
 			{row.latest && (
 				<MigrationRunDialog
@@ -292,5 +410,80 @@ function TestRow({
 				/>
 			)}
 		</>
+	);
+}
+
+/// Ask for the server's environment to be tested now, or say that an ask is
+/// waiting on a verdict. The ask covers every server of the environment set up
+/// for testing, as asking from the upgrades view does.
+// spec: RST#dispatching-a-migration-test
+function RequestTest({
+	groupId,
+	rank,
+	name,
+	tested,
+	request,
+	onRequested,
+}: {
+	groupId: string;
+	rank: ServerRank;
+	name: string;
+	tested: boolean;
+	request: ServerVerdict["test_request"];
+	onRequested: () => void;
+}) {
+	const ask = useApiAction("migration_tests", "request");
+	if (request) {
+		return (
+			<Tooltip
+				title={
+					<>
+						Asked for <TimeAgo timestamp={request.requested_at} />
+						{request.requested_by ? ` by ${request.requested_by}` : ""}
+					</>
+				}
+			>
+				<Chip
+					size="small"
+					color="info"
+					variant="outlined"
+					label="test requested"
+					data-testid="migration-test-requested"
+				/>
+			</Tooltip>
+		);
+	}
+	return (
+		<Stack spacing={0.5} sx={{ alignItems: "flex-end" }}>
+			<GradedAction
+				calls="migration_tests/request"
+				action={`Test migrations for ${name}`}
+			>
+				<Button
+					size="small"
+					variant="outlined"
+					disabled={ask.pending}
+					onClick={async () => {
+						try {
+							await ask.call({ group_id: groupId, rank });
+							onRequested();
+						} catch {
+							/* ask.error is shown beneath the button */
+						}
+					}}
+				>
+					{tested ? "Test again" : "Test now"}
+				</Button>
+			</GradedAction>
+			{ask.error && (
+				<Typography
+					variant="caption"
+					color="error"
+					data-testid="migration-test-request-error"
+				>
+					{ask.error.message}
+				</Typography>
+			)}
+		</Stack>
 	);
 }

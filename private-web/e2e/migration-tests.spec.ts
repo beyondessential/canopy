@@ -3,12 +3,34 @@ import {
 	resetSeededTables,
 	seedDevice,
 	seedMigrationTest,
+	seedRestoreConsumerCapability,
+	seedRestoreReplica,
 	seedServer,
 	seedServerGroup,
 	seedStatus,
 	seedUpgradePlan,
 	seedVersion,
 } from "./seed";
+
+/** Declare a migrating replica for the consumer, over the whole group or over
+ * one machine: what sets a server up for testing. */
+async function declareTesting(
+	sql: Parameters<typeof seedRestoreReplica>[0],
+	consumerDeviceId: string,
+	groupId: string,
+	machineId?: string,
+): Promise<void> {
+	await seedRestoreConsumerCapability(sql, {
+		deviceId: consumerDeviceId,
+		intents: [{ intent: "upgrade", semantics: ["check", "once", "migrate"] }],
+	});
+	await seedRestoreReplica(sql, {
+		consumerDeviceId,
+		groupId,
+		machineId,
+		intent: "upgrade",
+	});
+}
 
 test.describe("pre-upgrade migration tests on the group page", () => {
 	test.beforeEach(async ({ sql }) => {
@@ -39,6 +61,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			groupId: group.id,
 			targetVersionId: target.id,
 		});
+		await declareTesting(sql, consumer.id, group.id);
 
 		// One server has been tried and its migrations failed; the other has not
 		// been tried yet.
@@ -73,12 +96,18 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		await expect(
 			section.getByRole("heading", { name: "Pre-upgrade migration tests" }),
 		).toBeVisible();
+		// Every row is going to the same version, so the heading says it once.
+		await expect(section).toContainText("to 2.63.0");
+		await expect(
+			section.getByRole("columnheader", { name: "Upgrading to" }),
+		).toHaveCount(0);
+		await expect(section.getByTestId("migration-tests-not-set-up")).toHaveCount(0);
 
 		const failedRow = section
 			.getByTestId("migration-test-row")
 			.filter({ hasText: "kamaka-central" });
-		await expect(failedRow).toContainText("2.63.0");
 		await expect(failedRow).toContainText("failed");
+		await expect(failedRow.getByRole("button", { name: "Test again" })).toBeVisible();
 		// The window estimate is the number an operator schedules against.
 		await expect(failedRow).toContainText("1.5h");
 
@@ -86,6 +115,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			.getByTestId("migration-test-row")
 			.filter({ hasText: "kamaka-facility" });
 		await expect(untestedRow).toContainText("not yet tested");
+		await expect(untestedRow.getByRole("button", { name: "Test now" })).toBeVisible();
 
 		// Which migration broke, and what it said.
 		await failedRow.getByText("failed").hover();
@@ -141,6 +171,8 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			groupId: group.id,
 			targetVersionId: target.id,
 		});
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await declareTesting(sql, consumer.id, group.id);
 
 		await page.goto(`/fleet/groups/${group.id}`);
 		const row = page.getByTestId("migration-test-row");
@@ -167,6 +199,77 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		);
 	});
 
+	test("only servers set up for testing get a row", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedVersion(sql, { major: 2, minor: 62, patch: 0 });
+		const target = await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
+		const central = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+		});
+		const facility = await seedServer(sql, {
+			name: "kamaka-facility",
+			type: "tamanu-facility",
+			groupId: group.id,
+		});
+		for (const server of [central, facility]) {
+			await seedStatus(sql, { serverId: server.id, version: "2.62.0" });
+		}
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+		});
+		await declareTesting(sql, consumer.id, group.id, central.machineId);
+
+		await page.goto(`/fleet/groups/${group.id}`);
+
+		const section = page.getByTestId("migration-tests");
+		await expect(section.getByTestId("migration-test-row")).toHaveCount(1);
+		await expect(section.getByTestId("migration-test-row")).toContainText(
+			"kamaka-central",
+		);
+		const rest = section.getByTestId("migration-tests-not-set-up");
+		await expect(rest).toContainText("1 other server is not set up for testing");
+		await expect(rest.getByTestId("migration-test-not-set-up")).toBeHidden();
+		await rest.getByRole("button", { name: "Show" }).click();
+		const listed = rest.getByTestId("migration-test-not-set-up");
+		await expect(listed).toContainText("kamaka-facility");
+		await expect(listed).toContainText("production");
+	});
+
+	/// spec: RST#dispatching-a-migration-test
+	test("a server's environment is tested when asked from its row", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedVersion(sql, { major: 2, minor: 62, patch: 0 });
+		const target = await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
+		const central = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: central.id, version: "2.62.0" });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+		});
+		await declareTesting(sql, consumer.id, group.id);
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const row = page.getByTestId("migration-test-row");
+		await row.getByRole("button", { name: "Test now" }).click();
+
+		await expect(row.getByTestId("migration-test-requested")).toBeVisible();
+		await expect(row.getByRole("button", { name: "Test now" })).toHaveCount(0);
+		const requests = await sql.query<{ machine_id: string }>(
+			"SELECT machine_id FROM migration_test_requests",
+		);
+		expect(requests.map((r) => r.machine_id)).toEqual([central.machineId]);
+	});
+
 	test("the fleet view names the failure and links to the detail", async ({
 		page,
 		sql,
@@ -185,6 +288,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			groupId: group.id,
 			targetVersionId: target.id,
 		});
+		await declareTesting(sql, consumer.id, group.id, failed.machineId);
 		await seedMigrationTest(sql, {
 			consumerDeviceId: consumer.id,
 			groupId: group.id,
@@ -201,10 +305,13 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 
 		await page.goto("/upgrades");
 
-		const row = page
-			.getByTestId("planned-upgrade-row")
+		const header = page
+			.getByTestId("planned-group-header")
 			.filter({ hasText: "kamaka" });
-		const verdict = row.getByText("failed");
+		await expect(header.getByTestId("migration-verdict-detail")).toContainText(
+			"kamaka-central · backfillNoteTypeIds",
+		);
+		const verdict = header.getByTestId("migration-verdict");
 		// Which application broke and why, without opening the group.
 		await verdict.hover();
 		const tip = page.getByRole("tooltip");

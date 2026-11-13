@@ -1,13 +1,12 @@
 import AddIcon from "@mui/icons-material/Add";
-import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import CheckIcon from "@mui/icons-material/Check";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
-import DeleteIcon from "@mui/icons-material/Delete";
-import EditIcon from "@mui/icons-material/Edit";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import ScienceOutlinedIcon from "@mui/icons-material/ScienceOutlined";
+import MoreVertIcon from "@mui/icons-material/MoreVert";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import {
 	Alert,
 	Autocomplete,
@@ -23,6 +22,7 @@ import {
 	DialogTitle,
 	IconButton,
 	LinearProgress,
+	Menu,
 	MenuItem,
 	Paper,
 	Stack,
@@ -63,12 +63,19 @@ import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { errorPreview } from "../lib/errorText";
-import { environmentName, maintenanceTarget, targetOfWindow } from "../types";
+import { formatDuration } from "../lib/migrationTests";
+import {
+	environmentName,
+	maintenanceTarget,
+	serverSortKey,
+	targetOfWindow,
+} from "../types";
 import type { ApiResponse, MaintenanceWindow, ServerRank } from "../types";
 
 type PastPlan = ApiResponse<"upgrade_plans", "history">[number];
 type PlannedUpgrade = ApiResponse<"upgrade_plans", "fleet">[number];
-type FailedTest = NonNullable<PlannedUpgrade["failed_test"]>;
+type PlannedRow = PlannedUpgrade & { plan: NonNullable<PlannedUpgrade["plan"]> };
+type TestedServer = PlannedUpgrade["tests"][number];
 type PlannableVersion = ApiResponse<"upgrade_plans", "targets">[number];
 
 /// Where every group is going. A group with no plan is listed too: one
@@ -89,15 +96,11 @@ export default function Upgrades() {
 		return <Alert severity="error">{fleet.error.message}</Alert>;
 	}
 
-	const planned = fleet.data.filter(
-		(row): row is typeof row & { plan: NonNullable<typeof row.plan> } =>
-			row.plan !== null,
-	);
-	// The gap this list is for: a group's headline environment, behind the
-	// newest version, with nothing recorded.
-	const unplanned = fleet.data.filter(
-		(row) => !row.plan && row.headline && (row.behind ?? 0) > 0,
-	);
+	const planned = fleet.data.filter((row): row is PlannedRow => row.plan !== null);
+	const groups = new Map<string, PlannedRow[]>();
+	for (const row of planned) {
+		groups.set(row.group_id, [...(groups.get(row.group_id) ?? []), row]);
+	}
 
 	return (
 		<Stack spacing={2}>
@@ -133,172 +136,18 @@ export default function Upgrades() {
 						No group has a recorded plan.
 					</Typography>
 				) : (
-					<TableContainer>
-						<Table size="small" sx={TIGHT_TABLE}>
-						<TableHead>
-							<TableRow>
-								<TableCell>Environment</TableCell>
-								<TableCell>Running</TableCell>
-								<TableCell>Going to</TableCell>
-								<TableCell>Data survives it</TableCell>
-								<TableCell>Testing</TableCell>
-								<TableCell>Planned for</TableCell>
-								<TableCell>Window</TableCell>
-								<TableCell>Note</TableCell>
-								{isAdmin && <TableCell />}
-							</TableRow>
-						</TableHead>
-						<TableBody>
-							{planned.map((row) => (
-								<TableRow
-									key={`${row.group_id}:${row.rank}`}
-									data-testid="planned-upgrade-row"
-								>
-										<TableCell>
-											<EnvironmentName
-												groupId={row.group_id}
-												groupName={row.group_name}
-												rank={row.rank}
-											/>
-										</TableCell>
-										<TableCell>{row.current_version ?? "unknown"}</TableCell>
-										<TableCell>{row.target_version}</TableCell>
-										<TableCell>
-											<Stack spacing={0.5} sx={{ alignItems: "flex-start" }}>
-												<VerdictChip
-													verdict={row.verdict}
-													testable={row.testable}
-													groupId={row.group_id}
-													failedTest={row.failed_test}
-													tally={row.tally}
-												/>
-												<AttemptChip attempt={row.attempt} />
-											</Stack>
-										</TableCell>
-										<TableCell>
-											<Stack
-												direction={row.test_request ? "column" : "row"}
-												spacing={0.5}
-												sx={{ alignItems: row.test_request ? "flex-start" : "center" }}
-											>
-												<TestingChip testing={row.testing} />
-												<RequestTest
-													groupId={row.group_id}
-													rank={row.rank}
-													groupName={environmentName(row.group_name, row.rank)}
-													testable={row.testing != null}
-													request={row.test_request}
-													onRequested={() => setTick((t) => t + 1)}
-												/>
-											</Stack>
-										</TableCell>
-										<TableCell>
-											<PlannedFor
-												date={row.plan.planned_for ?? null}
-												late={row.late}
-											/>
-										</TableCell>
-										<TableCell>
-											<Stack spacing={0.25}>
-												<PlannedTime
-													time={row.plan.planned_time ?? null}
-													end={row.plan.planned_end_time ?? null}
-													zone={row.plan.planned_zone ?? null}
-												/>
-												<UnderMaintenance held={row.maintenance_window} />
-											</Stack>
-										</TableCell>
-										<TableCell sx={NOTE_CELL}>
-											<PlanNote
-												note={row.plan.note ?? null}
-												testId="planned-upgrade-note"
-											/>
-										</TableCell>
-										{isAdmin && (
-											<TableCell align="right">
-												<EditPlan
-													planId={row.plan.id}
-													groupName={environmentName(row.group_name, row.rank)}
-													targetVersion={row.target_version ?? ""}
-													plannedFor={row.plan.planned_for ?? null}
-													plannedTime={row.plan.planned_time ?? null}
-													plannedEnd={row.plan.planned_end_time ?? null}
-													plannedZone={row.plan.planned_zone ?? null}
-													note={row.plan.note ?? null}
-													onAmended={() => setTick((t) => t + 1)}
-												/>
-												<WithdrawPlan
-													planId={row.plan.id}
-													groupName={environmentName(row.group_name, row.rank)}
-													targetVersion={row.target_version ?? ""}
-													onWithdrawn={() => setTick((t) => t + 1)}
-												/>
-												<DeclareFromPlan
-													planId={row.plan.id}
-													groupId={row.group_id}
-													rank={row.rank}
-													groupName={environmentName(row.group_name, row.rank)}
-													note={row.plan.note ?? null}
-													held={row.maintenance_window}
-													planned={row.planned_window}
-													onDeclared={() => setTick((t) => t + 1)}
-												/>
-											</TableCell>
-										)}
-								</TableRow>
-							))}
-						</TableBody>
-					</Table>
-				</TableContainer>
+					<Stack spacing={2}>
+						{[...groups.values()].map((rows) => (
+							<PlannedGroup
+								key={rows[0].group_id}
+								rows={rows}
+								isAdmin={isAdmin}
+								onChanged={() => setTick((t) => t + 1)}
+							/>
+						))}
+					</Stack>
 				)}
 			</Paper>
-
-			<Disclosure
-				title="No plan recorded"
-				subject="environments with no plan"
-				caption={
-					unplanned.length === 1
-						? "1 environment is behind with no plan, so it gets no pre-upgrade testing"
-						: `${unplanned.length} environments are behind with no plan, so they get no pre-upgrade testing`
-				}
-				testId="unplanned-upgrades"
-			>
-					{unplanned.length === 0 ? (
-						<Typography variant="body2" color="text.secondary">
-							Every environment that is behind has a plan.
-						</Typography>
-					) : (
-						<TableContainer>
-							<Table size="small" sx={TIGHT_TABLE}>
-							<TableHead>
-								<TableRow>
-									<TableCell>Environment</TableCell>
-									<TableCell>Running</TableCell>
-									<TableCell>Behind by</TableCell>
-								</TableRow>
-							</TableHead>
-							<TableBody>
-								{unplanned.map((row) => (
-									<TableRow
-										key={`${row.group_id}:${row.rank}`}
-										data-testid="unplanned-upgrade-row"
-									>
-										<TableCell>
-											<EnvironmentName
-												groupId={row.group_id}
-												groupName={row.group_name}
-												rank={row.rank}
-											/>
-										</TableCell>
-										<TableCell>{row.current_version ?? "unknown"}</TableCell>
-										<TableCell>{behindLabel(row.behind ?? 0)}</TableCell>
-									</TableRow>
-								))}
-							</TableBody>
-						</Table>
-					</TableContainer>
-					)}
-			</Disclosure>
 
 			<PastPlans plans={past.status === "ok" ? past.data : []} />
 		</Stack>
@@ -306,15 +155,6 @@ export default function Upgrades() {
 }
 
 type FleetRow = ApiResponse<"upgrade_plans", "fleet">[number];
-
-/// The fleet's distance is majors times a thousand plus minors; a major behind
-/// is far enough that the minors no longer matter.
-function behindLabel(behind: number): string {
-	const majors = Math.floor(behind / 1000);
-	const minors = behind % 1000;
-	if (majors > 0) return `${majors} major${majors === 1 ? "" : "s"}`;
-	return `${minors} minor${minors === 1 ? "" : "s"}`;
-}
 
 function EnvironmentName({
 	groupId,
@@ -1444,96 +1284,278 @@ function OutcomeChip({
 	);
 }
 
-/// Whether the environment's own data survives the planned version, rolled up
-/// from its applications. Pairing it with the plan is the point of this view.
-function VerdictChip({
-	verdict,
-	testable,
-	groupId,
-	failedTest,
-	tally,
+/// One group's open plans under one header. The header says the group's
+/// migration tests once: in practice one server is set up to test for the
+/// whole group, so saying it on every environment reads as noise.
+// spec: UPG#the-dashboard
+function PlannedGroup({
+	rows,
+	isAdmin,
+	onChanged,
 }: {
-	verdict: string | null | undefined;
-	testable: boolean | null | undefined;
-	groupId: string;
-	failedTest: FailedTest | null | undefined;
-	tally?: { passed: number; total: number } | null;
+	rows: PlannedRow[];
+	isAdmin: boolean;
+	onChanged: () => void;
 }) {
-	const linked = (chip: ReactElement) => (
-		<MuiLink
-			component={RouterLink}
-			to={`/fleet/groups/${groupId}#migration-tests`}
-			underline="none"
+	const first = rows[0];
+	const target =
+		new Set(rows.map((row) => row.target_version)).size === 1
+			? first.target_version
+			: null;
+	const failed = rows.some((row) =>
+		row.tests.some((test) => test.verdict === "failed"),
+	);
+	return (
+		<Box
+			component="section"
+			data-testid="planned-group"
+			sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}
 		>
-			{chip}
-		</MuiLink>
+			<Stack
+				direction="row"
+				spacing={2}
+				useFlexGap
+				data-testid="planned-group-header"
+				sx={(theme) => ({
+					alignItems: "center",
+					flexWrap: "wrap",
+					px: 2,
+					py: 1.5,
+					bgcolor: failed
+						? alpha(theme.palette.warning.main, 0.08)
+						: theme.palette.action.hover,
+				})}
+			>
+				<MuiLink
+					component={RouterLink}
+					to={`/fleet/groups/${first.group_id}`}
+					color="text.primary"
+					underline="hover"
+					sx={{ fontSize: 16, fontWeight: 500 }}
+				>
+					{first.group_name}
+				</MuiLink>
+				{target && (
+					<Typography variant="body2" color="text.secondary">
+						to {target}
+					</Typography>
+				)}
+				<Box sx={{ flexGrow: 1 }} />
+				<TestSummary groupId={first.group_id} rows={rows} />
+				<RequestTest
+					groupId={first.group_id}
+					groupName={first.group_name}
+					rows={rows}
+					onRequested={onChanged}
+				/>
+			</Stack>
+			<TableContainer>
+				<Table size="small" sx={GROUP_TABLE}>
+					<TableHead>
+						<TableRow>
+							<TableCell sx={{ width: "18%" }}>Environment</TableCell>
+							<TableCell sx={{ width: "12%" }}>Running</TableCell>
+							{!target && <TableCell sx={{ width: "12%" }}>Going to</TableCell>}
+							<TableCell sx={{ width: "18%" }}>Planned for</TableCell>
+							<TableCell sx={{ width: "20%" }}>Window</TableCell>
+							<TableCell>Note</TableCell>
+							{isAdmin && <TableCell sx={{ width: 56 }} />}
+						</TableRow>
+					</TableHead>
+					<TableBody>
+						{[...rows]
+							.sort((a, b) => serverSortKey(a) - serverSortKey(b))
+							.map((row) => (
+								<TableRow key={row.rank} data-testid="planned-upgrade-row">
+									<TableCell>
+										<ServerRankChip rank={row.rank} />
+									</TableCell>
+									<TableCell>{row.current_version ?? "unknown"}</TableCell>
+									{!target && <TableCell>{row.target_version}</TableCell>}
+									<TableCell>
+										<PlannedFor
+											date={row.plan.planned_for ?? null}
+											late={row.late}
+										/>
+									</TableCell>
+									<TableCell>
+										<Stack spacing={0.25}>
+											<PlannedTime
+												time={row.plan.planned_time ?? null}
+												end={row.plan.planned_end_time ?? null}
+												zone={row.plan.planned_zone ?? null}
+											/>
+											<UnderMaintenance held={row.maintenance_window} />
+										</Stack>
+									</TableCell>
+									<TableCell>
+										<PlanNote
+											note={row.plan.note ?? null}
+											testId="planned-upgrade-note"
+										/>
+									</TableCell>
+									{isAdmin && (
+										<TableCell align="right">
+											<PlanActions row={row} onChanged={onChanged} />
+										</TableCell>
+									)}
+								</TableRow>
+							))}
+					</TableBody>
+				</Table>
+			</TableContainer>
+		</Box>
+	);
+}
+
+/// Whether the group's data survives its planned versions, from the servers set
+/// up for testing alone: one nothing tests would sit at not tested for good and
+/// say nothing about the upgrade.
+// spec: UPG#the-dashboard
+function TestSummary({ groupId, rows }: { groupId: string; rows: PlannedRow[] }) {
+	const to = `/fleet/groups/${groupId}#migration-tests`;
+	const modes = [
+		...new Set(rows.flatMap((row) => (row.testing ? [row.testing] : []))),
+	];
+	if (modes.length === 0) {
+		return (
+			<Tooltip title="Nothing is declared to test this group's data against its plan, so no test will run. Declare a restore replica for it on the group's page.">
+				<MuiLink
+					component={RouterLink}
+					to={to}
+					variant="body2"
+					color="text.secondary"
+					underline="hover"
+					data-testid="migration-verdict"
+				>
+					Nothing set up for testing
+				</MuiLink>
+			</Tooltip>
+		);
+	}
+
+	const tests = rows.flatMap((row) => row.tests);
+	const failed = tests
+		.filter((test) => test.verdict === "failed")
+		.sort(
+			(a, b) =>
+				Date.parse(b.latest?.reported_at ?? "") -
+				Date.parse(a.latest?.reported_at ?? ""),
+		);
+	const passed = tests.filter((test) => test.verdict === "passed");
+	const untested = tests.filter((test) => test.verdict === "nottested");
+	const tally = `${passed.length} of ${tests.length} passed`;
+
+	const verdict = (
+		label: string,
+		colour: string,
+		icon: ReactElement | null,
+		tip: ReactNode = "",
+	) => (
+		<Tooltip title={tip}>
+			<MuiLink
+				component={RouterLink}
+				to={to}
+				underline="hover"
+				data-testid="migration-verdict"
+				sx={{
+					display: "inline-flex",
+					alignItems: "center",
+					gap: 0.75,
+					fontWeight: 500,
+					color: colour,
+				}}
+			>
+				{icon}
+				{label}
+			</MuiLink>
+		</Tooltip>
 	);
 
-	if (verdict === "passed") {
-		return linked(
-			<Chip size="small" color="success" label="passed" clickable />,
-		);
-	}
-	if (verdict === "partial") {
-		return (
-			<Tooltip title="some of this environment's applications have passed and the rest have not been tested yet">
-				{linked(
-					<Chip
-						size="small"
-						color="success"
-						variant="outlined"
-						label={
-							tally ? `${tally.passed} of ${tally.total} passed` : "partly passed"
-						}
-						clickable
-					/>,
+	let shown: ReactElement;
+	let detail: ReactNode[] = [];
+	const newest = failed[0];
+	if (newest) {
+		shown = verdict(
+			"Migrations failed",
+			"warning.dark",
+			<WarningAmberIcon fontSize="small" />,
+			<>
+				<Box>
+					{newest.name}
+					{newest.latest?.failed_migration
+						? `: ${newest.latest.failed_migration}`
+						: ""}
+				</Box>
+				{newest.latest?.error && (
+					<Box sx={{ mt: 0.5, fontFamily: "monospace", whiteSpace: "pre-wrap" }}>
+						{errorPreview(newest.latest.error)}
+					</Box>
 				)}
-			</Tooltip>
+			</>,
 		);
-	}
-	if (verdict === "failed") {
-		return (
-			<Tooltip
-				title={
-					failedTest ? (
-						<>
-							<Box>
-								{failedTest.application}
-								{failedTest.migration ? `: ${failedTest.migration}` : ""}
-							</Box>
-							{failedTest.error && (
-								<Box sx={{ mt: 0.5, fontFamily: "monospace", whiteSpace: "pre-wrap" }}>
-									{errorPreview(failedTest.error)}
-								</Box>
-							)}
-						</>
-					) : (
-						"an application's data broke the migrations; the version is held back"
-					)
-				}
-			>
-				{linked(<Chip size="small" color="warning" label="failed" clickable />)}
-			</Tooltip>
+		detail = [
+			newest.name,
+			newest.latest?.failed_migration ?? "no migration named",
+			...(tests.length > 1 ? [tally] : []),
+			...(newest.latest
+				? [<TimeAgo key="ago" timestamp={newest.latest.reported_at} />]
+				: []),
+		];
+	} else if (tests.length > 0 && passed.length === tests.length) {
+		shown = verdict(
+			"Migrations passed",
+			"success.dark",
+			<CheckIcon fontSize="small" />,
 		);
+		const only = tests.length === 1 ? tests[0] : null;
+		detail = only?.latest
+			? [
+					only.name,
+					ranFor(only.latest),
+					<TimeAgo key="ago" timestamp={only.latest.reported_at} />,
+				]
+			: [tally];
+	} else if (passed.length > 0) {
+		shown = verdict(tally, "success.dark", <CheckIcon fontSize="small" />);
+		detail = [`not yet tested: ${untested.map((test) => test.name).join(", ")}`];
+	} else {
+		shown = verdict("Not yet tested", "text.secondary", null);
+		detail = untested.map((test) => test.name);
 	}
-	if (testable === false) {
-		return (
-			<Tooltip title="nothing is declared to migrate this group's data, so no test will run: declare a restore replica for it on the group's page">
-				{linked(
-					<Chip
-						size="small"
-						color="warning"
-						variant="outlined"
-						label="not set up"
-						clickable
-					/>,
-				)}
-			</Tooltip>
-		);
-	}
-	return linked(
-		<Chip size="small" variant="outlined" label="not yet tested" clickable />,
+
+	return (
+		<Stack
+			direction="row"
+			spacing={1}
+			useFlexGap
+			sx={{ alignItems: "center", flexWrap: "wrap" }}
+		>
+			{shown}
+			{detail.length > 0 && (
+				<Typography
+					variant="body2"
+					color="text.secondary"
+					data-testid="migration-verdict-detail"
+				>
+					{detail.flatMap((part, index) => (index === 0 ? [part] : [" · ", part]))}
+				</Typography>
+			)}
+			<AttemptChip attempt={rows.find((row) => row.attempt)?.attempt} />
+			{modes.map((mode) => (
+				<TestingChip key={mode} testing={mode} />
+			))}
+		</Stack>
 	);
+}
+
+/// How long a passing run took, and over how many migrations where it said.
+function ranFor(latest: NonNullable<TestedServer["latest"]>): string {
+	const took = formatDuration(latest.total_elapsed);
+	const count = latest.timings.length;
+	return count === 0
+		? `took ${took}`
+		: `${count} migration${count === 1 ? "" : "s"} in ${took}`;
 }
 
 /// An attempt under way, shown with the verdict rather than replacing it: a row can
@@ -1592,25 +1614,25 @@ function TestingChip({
 	);
 }
 
-/// Ask for the environment's data to be tested against its plan, or say that
-/// an ask is waiting on a verdict.
+/// Ask for the group's planned environments set up for testing to be tested
+/// now, or say that an ask is waiting on a verdict.
 // spec: RST#dispatching-a-migration-test
 function RequestTest({
 	groupId,
-	rank,
 	groupName,
-	testable,
-	request,
+	rows,
 	onRequested,
 }: {
 	groupId: string;
-	rank: ServerRank;
 	groupName: string;
-	testable: boolean;
-	request: { requested_at: string; requested_by?: string | null } | null | undefined;
+	rows: PlannedRow[];
 	onRequested: () => void;
 }) {
 	const ask = useApiAction("migration_tests", "request");
+	const setUp = rows.filter((row) => row.testing);
+	const request = setUp
+		.flatMap((row) => (row.test_request ? [row.test_request] : []))
+		.sort((a, b) => Date.parse(b.requested_at) - Date.parse(a.requested_at))[0];
 	if (request) {
 		return (
 			<Tooltip
@@ -1626,35 +1648,38 @@ function RequestTest({
 					size="small"
 					color="info"
 					variant="outlined"
-					label="requested"
+					label="test requested"
 					data-testid="migration-test-requested"
 				/>
 			</Tooltip>
 		);
 	}
-	if (!testable) return null;
+	if (setUp.length === 0) return null;
+	const tested = setUp.some((row) => row.tests.some((test) => test.latest));
 	return (
 		<>
 			<GradedAction
 				calls="migration_tests/request"
 				action={`Test migrations for ${groupName}`}
 			>
-				<Tooltip title="Test the migrations against this environment's latest backup">
-					<IconButton
+				<Tooltip title="Test the migrations against the latest backup of each server set up for testing">
+					<Button
 						size="small"
-						aria-label={`Test migrations for ${groupName}`}
+						variant="outlined"
 						disabled={ask.pending}
 						onClick={async () => {
 							try {
-								await ask.call({ group_id: groupId, rank });
+								for (const row of setUp) {
+									await ask.call({ group_id: groupId, rank: row.rank });
+								}
 								onRequested();
 							} catch {
 								/* ask.error is shown beside the button */
 							}
 						}}
 					>
-						<ScienceOutlinedIcon fontSize="small" />
-					</IconButton>
+						{tested ? "Test again" : "Test now"}
+					</Button>
 				</Tooltip>
 			</GradedAction>
 			{ask.error && (
@@ -1923,9 +1948,11 @@ const WHEN_FIELDS = {
 
 const NOTE_TEXT = { maxWidth: 240 };
 
-/// A zero max width makes the cell take what the other columns leave and
-/// truncate the note, where a nowrap table would otherwise scroll sideways.
-const NOTE_CELL = { width: "100%", maxWidth: 0 };
+const GROUP_TABLE = {
+	tableLayout: "fixed",
+	minWidth: 720,
+	"& td, & th": { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+};
 
 const TIGHT_TABLE = {
 	"& td, & th": { width: "1%", whiteSpace: "nowrap" },
@@ -2272,55 +2299,128 @@ function RecordPlanDialog({
 	);
 }
 
-/// Amend an open plan's date and note. The target is deliberately absent:
-/// moving a group somewhere else is a new plan, not a correction to this
-/// one, so it goes through the record form.
+/// A row's own actions behind one control, so the table reads as the plans
+/// rather than as a row of buttons. Amending leaves the target out: moving an
+/// environment somewhere else is a new plan, so it goes through the record form.
 // spec: UPG#a-plan
-function EditPlan({
-	planId,
-	groupName,
-	targetVersion,
-	plannedFor,
-	plannedTime,
-	plannedEnd,
-	plannedZone,
-	note,
-	onAmended,
-}: PlanFields & { onAmended: () => void }) {
-	const [open, setOpen] = useState(false);
+function PlanActions({
+	row,
+	onChanged,
+}: {
+	row: PlannedRow;
+	onChanged: () => void;
+}) {
+	const name = environmentName(row.group_name, row.rank);
+	const target = row.target_version ?? "";
+	const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+	const [editing, setEditing] = useState(false);
+	const [declaring, setDeclaring] = useState(false);
+	const withdraw = useApiAction("upgrade_plans", "withdraw");
+	// A window over the whole group is not this row's to amend or lift: ending it
+	// would un-suspend every other environment in the group.
+	const ownWindow = row.maintenance_window?.rank ? row.maintenance_window : null;
+	const amending = useGradedActivation({
+		calls: "upgrade_plans/amend",
+		action: `Amend upgrade plan for ${name}`,
+	});
+	const withdrawing = useGradedActivation({
+		calls: "upgrade_plans/withdraw",
+		action: `Withdraw upgrade plan for ${name}`,
+	});
+	const maintaining = useGradedActivation({
+		opens: ownWindow
+			? ["maintenance/declare", "maintenance/lift"]
+			: "maintenance/declare",
+		action: `${ownWindow ? "Amend" : "Declare"} maintenance for ${name}`,
+	});
+
+	const onWithdraw = async () => {
+		if (
+			!window.confirm(
+				`Withdraw ${name}'s plan to move to ${target}? Pre-upgrade testing stops for this environment until a new plan is recorded.`,
+			)
+		)
+			return;
+		try {
+			await withdraw.call({ id: row.plan.id });
+			onChanged();
+		} catch {
+			/* surfaced by the reload showing the plan still there */
+		}
+	};
+
+	const item = (
+		grade: ReturnType<typeof useGradedActivation>,
+		label: string,
+		run: () => void,
+		testId?: string,
+	) => (
+		<MenuItem
+			data-testid={testId}
+			title={grade.blocked ? blockedTitle(grade.required) : undefined}
+			sx={grade.blocked ? blockedSx(grade.required) : undefined}
+			onClick={() => {
+				setAnchor(null);
+				void grade.activate(run);
+			}}
+		>
+			{label}
+		</MenuItem>
+	);
 
 	return (
 		<>
-			<GradedAction
-				calls="upgrade_plans/amend"
-				action={`Amend upgrade plan for ${groupName}`}
+			<IconButton
+				size="small"
+				aria-label={`More actions for ${name}`}
+				aria-haspopup="menu"
+				onClick={(event) => setAnchor(event.currentTarget)}
 			>
-				<IconButton
-					size="small"
-					aria-label={`Edit ${groupName}'s plan`}
-					onClick={() => setOpen(true)}
-					disabled={!planId}
-				>
-					<EditIcon fontSize="small" />
-				</IconButton>
-			</GradedAction>
-			{open && (
+				<MoreVertIcon fontSize="small" />
+			</IconButton>
+			<Menu
+				anchorEl={anchor}
+				open={anchor !== null}
+				onClose={() => setAnchor(null)}
+			>
+				{item(amending, "Edit plan", () => setEditing(true))}
+				{item(
+					maintaining,
+					ownWindow ? "Amend maintenance" : "Declare maintenance",
+					() => setDeclaring(true),
+					ownWindow ? "amend-maintenance" : undefined,
+				)}
+				{item(withdrawing, "Withdraw plan", () => void onWithdraw())}
+			</Menu>
+			{editing && (
 				<EditPlanDialog
-					planId={planId}
-					groupName={groupName}
-					targetVersion={targetVersion}
-					plannedFor={plannedFor}
-					plannedTime={plannedTime}
-					plannedEnd={plannedEnd}
-					plannedZone={plannedZone}
-					note={note}
-					onClose={() => setOpen(false)}
+					planId={row.plan.id}
+					groupName={name}
+					targetVersion={target}
+					plannedFor={row.plan.planned_for ?? null}
+					plannedTime={row.plan.planned_time ?? null}
+					plannedEnd={row.plan.planned_end_time ?? null}
+					plannedZone={row.plan.planned_zone ?? null}
+					note={row.plan.note ?? null}
+					onClose={() => setEditing(false)}
 					onAmended={() => {
-						setOpen(false);
-						onAmended();
+						setEditing(false);
+						onChanged();
 					}}
 				/>
 			)}
+			<DeclareFromPlan
+				open={declaring}
+				onClose={() => setDeclaring(false)}
+				planId={row.plan.id}
+				groupId={row.group_id}
+				rank={row.rank}
+				groupName={name}
+				note={row.plan.note ?? null}
+				ownWindow={ownWindow}
+				planned={row.planned_window}
+				onDeclared={onChanged}
+			/>
 		</>
 	);
 }
@@ -2456,53 +2556,6 @@ function EditPlanDialog({
 	);
 }
 
-/// Withdraw a plan: the group is no longer going there. This does not say
-/// the upgrade happened; Canopy closes a met plan on its own.
-// spec: UPG#a-plan
-function WithdrawPlan({
-	planId,
-	groupName,
-	targetVersion,
-	onWithdrawn,
-}: {
-	planId: string;
-	groupName: string;
-	targetVersion: string;
-	onWithdrawn: () => void;
-}) {
-	const withdraw = useApiAction("upgrade_plans", "withdraw");
-	const onClick = async () => {
-		if (
-			!window.confirm(
-				`Withdraw ${groupName}'s plan to move to ${targetVersion}? Pre-upgrade testing stops for this group until a new plan is recorded.`,
-			)
-		)
-			return;
-		try {
-			await withdraw.call({ id: planId });
-			onWithdrawn();
-		} catch {
-			/* surfaced by the reload showing the plan still there */
-		}
-	};
-
-	return (
-		<GradedAction
-			calls="upgrade_plans/withdraw"
-			action={`Withdraw upgrade plan for ${groupName}`}
-		>
-			<IconButton
-				size="small"
-				aria-label={`Withdraw ${groupName}'s plan`}
-				onClick={onClick}
-				disabled={withdraw.pending || !planId}
-			>
-				<DeleteIcon fontSize="small" />
-			</IconButton>
-		</GradedAction>
-	);
-}
-
 /// When the plan's window closes, as a reader would say it. A declaration runs
 /// from now, so its end is the only part of the window that bounds it.
 function planWindowLabel(planned: { ends_at: string }): string {
@@ -2535,15 +2588,19 @@ function plannedLength(
  * nothing: this is an operator saying the work is starting now. */
 // spec: MNT#declaring
 function DeclareFromPlan({
+	open,
+	onClose,
 	planId,
 	groupId,
 	rank,
 	groupName,
 	note,
-	held,
+	ownWindow,
 	planned,
 	onDeclared,
 }: {
+	open: boolean;
+	onClose: () => void;
 	/// The plan being declared from. A window it opens stays over the plan's
 	/// environment.
 	// spec: MNT#moving-a-window
@@ -2552,22 +2609,22 @@ function DeclareFromPlan({
 	rank: ServerRank;
 	groupName: string;
 	note: string | null;
-	/// The window holding over this environment, where work is already declared.
-	/// The control then amends that work rather than declaring over it again.
+	/// The window declared over this environment, where work is already under
+	/// way. The dialog then amends that work rather than declaring over it again.
 	// spec: UPG#when-a-plan-is-met
-	held: MaintenanceWindow | null | undefined;
+	ownWindow: MaintenanceWindow | null;
 	/// The hours the plan says the work runs. Declaring over a plan that named
 	/// them is a confirmation rather than a form: the operator already said when.
 	// spec: MNT#declaring
 	planned: { starts_at: string; ends_at: string } | null | undefined;
 	onDeclared: () => void;
 }) {
-	const [open, setOpen] = useState(false);
 	const [adjusting, setAdjusting] = useState(false);
 	const declare = useApiAction("maintenance", "declare");
-	// A window over the whole group is not this row's to amend or lift: ending it
-	// would un-suspend every other environment in the group.
-	const ownWindow = held && held.rank ? held : null;
+	const close = () => {
+		setAdjusting(false);
+		onClose();
+	};
 	// Declaring opens the window now, so only a plan whose own hours are under
 	// way can be confirmed as they stand. One still ahead, or already past, falls
 	// back to the form.
@@ -2578,38 +2635,10 @@ function DeclareFromPlan({
 		new Date(planned.ends_at).getTime() > Date.now();
 	return (
 		<>
-			<GradedAction
-				opens={
-					ownWindow
-						? ["maintenance/declare", "maintenance/lift"]
-						: "maintenance/declare"
-				}
-				action={`${ownWindow ? "Amend" : "Declare"} maintenance for ${groupName}`}
-			>
-				<Tooltip
-					title={
-						ownWindow
-							? "Maintenance is declared over this environment, so its plan stays open until the work is over; amend it here"
-							: "Declare maintenance: suspend this environment's alerting while the upgrade runs"
-					}
-				>
-					<IconButton
-						size="small"
-						aria-label={`${ownWindow ? "Amend" : "Declare"} maintenance for ${groupName}`}
-						onClick={() => {
-							setAdjusting(false);
-							setOpen(true);
-						}}
-						data-testid={ownWindow ? "amend-maintenance" : undefined}
-					>
-						<BuildOutlinedIcon fontSize="small" />
-					</IconButton>
-				</Tooltip>
-			</GradedAction>
 			{confirmable && planned && (
 				<Dialog
 					open={open && !adjusting}
-					onClose={() => setOpen(false)}
+					onClose={close}
 					data-testid="confirm-declare"
 				>
 					<DialogTitle>Declare maintenance — {groupName}</DialogTitle>
@@ -2636,7 +2665,7 @@ function DeclareFromPlan({
 						<Button onClick={() => setAdjusting(true)} sx={{ mr: "auto" }}>
 							Adjust
 						</Button>
-						<Button onClick={() => setOpen(false)}>Cancel</Button>
+						<Button onClick={close}>Cancel</Button>
 						<GradedAction
 							calls="maintenance/declare"
 							action={`Declare maintenance for ${groupName}`}
@@ -2653,7 +2682,7 @@ function DeclareFromPlan({
 											note: note ?? undefined,
 											upgrade_plan_id: planId,
 										});
-										setOpen(false);
+										close();
 										onDeclared();
 									} catch {
 										/* surfaced above */
@@ -2668,7 +2697,7 @@ function DeclareFromPlan({
 			)}
 			<DeclareMaintenanceDialog
 				open={open && (!confirmable || adjusting)}
-				onClose={() => setOpen(false)}
+				onClose={close}
 				start={
 					(ownWindow && targetOfWindow(ownWindow)) ??
 					maintenanceTarget("group", groupId, rank)
