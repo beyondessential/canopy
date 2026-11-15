@@ -1605,7 +1605,7 @@ function TestSummary({
 
 function ranFor(latest: NonNullable<TestedServer["latest"]>): string {
 	const took = formatDuration(latest.total_elapsed);
-	const count = latest.timings.length;
+	const count = latest.migrations;
 	return count === 0
 		? `took ${took}`
 		: `${count} migration${count === 1 ? "" : "s"} in ${took}`;

@@ -14873,13 +14873,32 @@ export interface components {
             /** @description Who asked. */
             requested_by?: string | null;
         };
+        /** @description What the dashboard shows of a server's latest test. */
+        TestedRun: {
+            /** @description What the migration runner said about that failure. */
+            error?: string | null;
+            /** @description The migration that failed, when one did. */
+            failed_migration?: string | null;
+            /** @description How many migrations ran. */
+            migrations: number;
+            /** @description When the consumer reported it. */
+            reported_at: string;
+            /**
+             * Format: int64
+             * @description Whole seconds the migration run took.
+             */
+            total_elapsed: number;
+        };
         /**
          * @description One of an environment's applications that a declaration tests, and where it
          *     stands against the environment's planned version.
          */
-        TestedServer: components["schemas"]["GroupVerdict"] & {
+        TestedServer: {
+            latest?: null | components["schemas"]["TestedRun"];
             /** @description The application's name, so the view reads without a second lookup. */
             name: string;
+            /** @description Where it stands. */
+            verdict: components["schemas"]["Verdict"];
         };
         /**
          * @description How an environment's data is migration-tested while its plan is open.

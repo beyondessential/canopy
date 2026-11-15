@@ -14954,26 +14954,73 @@
         ],
         "type": "object"
       },
-      "TestedServer": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/GroupVerdict",
-            "description": "Where it stands."
+      "TestedRun": {
+        "description": "What the dashboard shows of a server's latest test.",
+        "properties": {
+          "error": {
+            "description": "What the migration runner said about that failure.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
-          {
-            "properties": {
-              "name": {
-                "description": "The application's name, so the view reads without a second lookup.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "name"
-            ],
-            "type": "object"
+          "failed_migration": {
+            "description": "The migration that failed, when one did.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "migrations": {
+            "description": "How many migrations ran.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reported_at": {
+            "description": "When the consumer reported it.",
+            "type": "string"
+          },
+          "total_elapsed": {
+            "description": "Whole seconds the migration run took.",
+            "format": "int64",
+            "type": "integer"
           }
+        },
+        "required": [
+          "reported_at",
+          "total_elapsed",
+          "migrations"
         ],
-        "description": "One of an environment's applications that a declaration tests, and where it\nstands against the environment's planned version."
+        "type": "object"
+      },
+      "TestedServer": {
+        "description": "One of an environment's applications that a declaration tests, and where it\nstands against the environment's planned version.",
+        "properties": {
+          "latest": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TestedRun",
+                "description": "The test that verdict came from, absent when there has not been one."
+              }
+            ]
+          },
+          "name": {
+            "description": "The application's name, so the view reads without a second lookup.",
+            "type": "string"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict",
+            "description": "Where it stands."
+          }
+        },
+        "required": [
+          "name",
+          "verdict"
+        ],
+        "type": "object"
       },
       "Testing": {
         "description": "How an environment's data is migration-tested while its plan is open.",

@@ -252,7 +252,14 @@ pub async fn fleet(
 					.find(|application| application.id == verdict.server_id)
 					.map(database::applications::Application::display_name)
 					.unwrap_or_else(|| "Unknown application".to_string()),
-				verdict,
+				verdict: verdict.verdict,
+				latest: verdict.latest.map(|latest| TestedRun {
+					failed_migration: latest.failed_migration,
+					error: latest.error,
+					reported_at: latest.reported_at,
+					total_elapsed: latest.total_elapsed,
+					migrations: latest.timings.len(),
+				}),
 			})
 			.collect();
 			test_request = requests
@@ -324,8 +331,26 @@ pub struct TestedServer {
 	/// The application's name, so the view reads without a second lookup.
 	pub name: String,
 	/// Where it stands.
-	#[serde(flatten)]
-	pub verdict: database::migration_tests::GroupVerdict,
+	pub verdict: database::migration_tests::Verdict,
+	/// The test that verdict came from, absent when there has not been one.
+	pub latest: Option<TestedRun>,
+}
+
+/// What the dashboard shows of a server's latest test.
+#[derive(Serialize, ToSchema)]
+pub struct TestedRun {
+	/// The migration that failed, when one did.
+	pub failed_migration: Option<String>,
+	/// What the migration runner said about that failure.
+	pub error: Option<String>,
+	/// When the consumer reported it.
+	#[schema(value_type = String)]
+	pub reported_at: Timestamp,
+	/// Whole seconds the migration run took.
+	#[schema(value_type = i64)]
+	pub total_elapsed: database::pg_duration::PgDuration,
+	/// How many migrations ran.
+	pub migrations: usize,
 }
 
 /// An ask for an environment to be migration-tested, still waiting on a verdict.
