@@ -2396,9 +2396,11 @@ function PlanActions({
 		label: string,
 		run: () => void,
 		testId?: string,
+		disabled = false,
 	) => (
 		<MenuItem
 			data-testid={testId}
+			disabled={disabled}
 			title={grade.blocked ? blockedTitle(grade.required) : undefined}
 			sx={grade.blocked ? blockedSx(grade.required) : undefined}
 			onClick={() => {
@@ -2432,7 +2434,13 @@ function PlanActions({
 					() => setDeclaring(true),
 					ownWindow ? "amend-maintenance" : undefined,
 				)}
-				{item(withdrawing, "Withdraw plan", () => void onWithdraw())}
+				{item(
+					withdrawing,
+					"Withdraw plan",
+					() => void onWithdraw(),
+					undefined,
+					withdraw.pending,
+				)}
 			</Menu>
 			{editing && (
 				<EditPlanDialog
