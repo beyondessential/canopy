@@ -195,7 +195,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		await page.goto(`/fleet/groups/${group.id}`);
 
 		await expect(page.getByTestId("migration-tests")).toContainText(
-			"nothing to test against",
+			"Nothing to test against",
 		);
 	});
 

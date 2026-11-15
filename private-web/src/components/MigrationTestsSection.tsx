@@ -110,8 +110,8 @@ export default function MigrationTestsSection({
 			>
 				<SectionHeading />
 				<Typography variant="body2" color="text.secondary">
-					No upgrade plan is open for this group, so there is nothing to
-					test against.
+					Nothing to test against: no upgrade plan is open for this group,
+					or its target is not a published version.
 				</Typography>
 			</Paper>
 		);
