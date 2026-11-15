@@ -1355,7 +1355,7 @@ function PlannedGroup({
 					spacing={1}
 					sx={{ alignItems: "center", ml: "auto" }}
 				>
-					<RequestTest
+					<RequestGroupTest
 						groupId={first.group_id}
 						groupName={first.group_name}
 						rows={rows}
@@ -1668,7 +1668,7 @@ function TestingChip({
 }
 
 // spec: RST#dispatching-a-migration-test
-function RequestTest({
+function RequestGroupTest({
 	groupId,
 	groupName,
 	rows,
