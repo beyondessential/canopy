@@ -1307,9 +1307,6 @@ function PlannedGroup({
 			? first.current_version
 			: null;
 	const summary = summariseTests(rows);
-	const failed = summary.failed.length > 0;
-	const passed =
-		summary.tests.length > 0 && summary.passed.length === summary.tests.length;
 	return (
 		<Box
 			component="section"
@@ -1326,9 +1323,10 @@ function PlannedGroup({
 					flexWrap: "wrap",
 					px: 2,
 					py: 1.5,
-					bgcolor: failed
-						? alpha(theme.palette.warning.main, 0.08)
-						: passed
+					bgcolor:
+						summary.outcome === "failed"
+							? alpha(theme.palette.warning.main, 0.08)
+							: summary.outcome === "passed"
 							? alpha(theme.palette.success.main, 0.08)
 							: theme.palette.action.hover,
 				})}
@@ -1351,7 +1349,7 @@ function PlannedGroup({
 								: `on ${running}`}
 					</Typography>
 				)}
-				<TestSummary groupId={first.group_id} rows={rows} />
+				<TestSummary groupId={first.group_id} rows={rows} summary={summary} />
 				<Stack
 					direction="row"
 					spacing={1}
@@ -1437,22 +1435,41 @@ function testable(rows: PlannedRow[]): PlannedRow[] {
 /// disagree. Failures newest first.
 function summariseTests(rows: PlannedRow[]) {
 	const tests = rows.flatMap((row) => row.tests);
+	const failed = tests
+		.filter((test) => test.verdict === "failed")
+		.sort(
+			(a, b) =>
+				Date.parse(b.latest?.reported_at ?? "") -
+				Date.parse(a.latest?.reported_at ?? ""),
+		);
+	const passed = tests.filter((test) => test.verdict === "passed");
+	const outcome: "failed" | "passed" | "partial" | "untested" =
+		failed.length > 0
+			? "failed"
+			: tests.length > 0 && passed.length === tests.length
+				? "passed"
+				: passed.length > 0
+					? "partial"
+					: "untested";
 	return {
+		outcome,
 		tests,
-		failed: tests
-			.filter((test) => test.verdict === "failed")
-			.sort(
-				(a, b) =>
-					Date.parse(b.latest?.reported_at ?? "") -
-					Date.parse(a.latest?.reported_at ?? ""),
-			),
-		passed: tests.filter((test) => test.verdict === "passed"),
+		failed,
+		passed,
 		untested: tests.filter((test) => test.verdict === "nottested"),
 	};
 }
 
 // spec: UPG#the-dashboard
-function TestSummary({ groupId, rows }: { groupId: string; rows: PlannedRow[] }) {
+function TestSummary({
+	groupId,
+	rows,
+	summary,
+}: {
+	groupId: string;
+	rows: PlannedRow[];
+	summary: ReturnType<typeof summariseTests>;
+}) {
 	const to = `/fleet/groups/${groupId}#migration-tests`;
 	const modes = [
 		...new Set(testable(rows).flatMap((row) => (row.testing ? [row.testing] : []))),
@@ -1480,7 +1497,7 @@ function TestSummary({ groupId, rows }: { groupId: string; rows: PlannedRow[] })
 		);
 	}
 
-	const { tests, failed, passed, untested } = summariseTests(rows);
+	const { outcome, tests, failed, passed, untested } = summary;
 	const tally = `${passed.length} of ${tests.length} passed`;
 
 	const verdict = (
@@ -1512,7 +1529,7 @@ function TestSummary({ groupId, rows }: { groupId: string; rows: PlannedRow[] })
 	let shown: ReactElement;
 	let detail: ReactNode[] = [];
 	const newest = failed[0];
-	if (newest) {
+	if (outcome === "failed") {
 		shown = verdict(
 			"Migrations failed",
 			"warning.dark",
@@ -1539,7 +1556,7 @@ function TestSummary({ groupId, rows }: { groupId: string; rows: PlannedRow[] })
 				? [<TimeAgo key="ago" timestamp={newest.latest.reported_at} />]
 				: []),
 		];
-	} else if (tests.length > 0 && passed.length === tests.length) {
+	} else if (outcome === "passed") {
 		shown = verdict(
 			"Migrations passed",
 			"success.dark",
@@ -1553,7 +1570,7 @@ function TestSummary({ groupId, rows }: { groupId: string; rows: PlannedRow[] })
 					<TimeAgo key="ago" timestamp={only.latest.reported_at} />,
 				]
 			: [tally];
-	} else if (passed.length > 0) {
+	} else if (outcome === "partial") {
 		shown = verdict(tally, "success.dark", <CheckIcon fontSize="small" />);
 		detail = [`not yet tested: ${untested.map((test) => test.name).join(", ")}`];
 	} else {
