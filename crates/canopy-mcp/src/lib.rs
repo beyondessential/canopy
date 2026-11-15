@@ -72,8 +72,6 @@ pub const AUDITED_TOOLS: &[&str] = &[
 	"amend_memory_entry",
 	"retire_memory_entry",
 	"restore_memory_entry",
-	"record_alert_triage",
-	"attach_alert_triage_report",
 ];
 
 #[derive(Clone)]
@@ -176,11 +174,9 @@ impl ServerHandler for CanopyMcp {
 			 investigator would otherwise rediscover with record_memory_entry, amending an \
 			 existing entry rather than adding a duplicate. These writes need an administrator \
 			 or a token with the notes grant.\n\n\
-			 Alert triage: for every Canopy incident notification you are asked to triage, \
-			 call triage_alert with the incident id from the notification's link before \
-			 deciding anything, and follow its `guidance`. You make the decision; Canopy \
-			 gathers the context and keeps the record. find_alert_triage_verdicts gives a \
-			 write-up day's verdicts for the morning summary."
+			 Alert triage: before triaging a Canopy incident notification, call \
+			 get_alert_triage_guidance and follow it. You make the decision and record it as a \
+			 note on the incident."
 				.into(),
 		);
 		info.capabilities = ServerCapabilities::builder()

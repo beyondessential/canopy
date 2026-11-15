@@ -153,6 +153,39 @@ async fn tools_call_needs_no_session() {
 	.await
 }
 
+// spec: MCP#alert-triage
+#[tokio::test(flavor = "multi_thread")]
+async fn alert_triage_guidance_is_served_and_pointed_at() {
+	commons_tests::server::run(async |_conn, _public, private| {
+		let init = private
+			.post("/api/mcp")
+			.add_header("accept", ACCEPT)
+			.json(&serde_json::json!({
+				"jsonrpc": "2.0", "id": 1, "method": "initialize",
+				"params": {
+					"protocolVersion": PROTO,
+					"capabilities": {},
+					"clientInfo": { "name": "canopy-tests", "version": "0" }
+				}
+			}))
+			.await;
+		let instructions = parse_envelope(&init.text())["result"]["instructions"]
+			.as_str()
+			.unwrap()
+			.to_owned();
+		assert!(instructions.contains("get_alert_triage_guidance"));
+
+		let served = call_tool!(private, "get_alert_triage_guidance", serde_json::json!({}));
+		assert!(
+			served["guidance"]
+				.as_str()
+				.unwrap()
+				.contains("add_incident_note")
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn oauth_discovery_is_404_not_spa() {
 	// MCP clients probe `/.well-known/oauth-*` for OAuth metadata. The SPA
@@ -1708,11 +1741,9 @@ async fn every_tool_is_read_only() {
 				"add_incident_note",
 				"add_issue_note",
 				"amend_memory_entry",
-				"attach_alert_triage_report",
 				"delete_note",
 				"edit_note",
 				"edit_vulnerability_decision",
-				"record_alert_triage",
 				"record_memory_entry",
 				"record_vulnerability_decisions",
 				"replace_notes",

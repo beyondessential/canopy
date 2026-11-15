@@ -4,7 +4,7 @@ id: TRI
 
 # Alert triage
 
-Applies to how an agent triages the incident notifications Canopy posts to Slack: the context and guidance Canopy serves for each, how verdicts are recorded, and the daily write-up.
+Applies to how an agent triages the incident notifications Canopy posts to Slack: the guidance Canopy serves for it, how a verdict is recorded on the incident, and the daily write-up.
 
 ## How an alert reaches triage
 
@@ -17,25 +17,14 @@ The agent reads the incident's identifier from the notification's link to it, an
 
 ## What triage reads
 
-Triage of an incident reads that incident and what bears on it:
-
-- the incident, its target, and its live issues with their results and whether each escalates
-- each failing check's documentation and stability record
-- the current incident memory entries linked to a failing check, the incident's group, or the incident
-- the incident's notes and its earlier verdicts
-- what has changed since the incident's latest verdict: its worst live result then and now, and the checks newly failing, newly escalating, and no longer failing
-
-Results are ranked, most severe first, as an escalating failure, a failure, then a warning, a broken check counting as a warning (see [CHK](checks.md#results)).
-A check is failing when its effective result is a live failure, and two checks are the same check when they share a source and a name, the identity an [incident memory](incident-memory.md#what-an-entry-holds) entry links a check by.
-
-Where what is served does not explain a failure, the agent reads further about the incident's own group, machines and applications through the fleet query interface before deciding.
-
-An incident whose live issues and results are unchanged since its latest verdict has already been triaged at that state, and triage returns that verdict and where it was reported, so a repeated alert adds nothing.
+The agent triages through the incident's own record: the incident, its live issues with their results and whether each escalates, and its notes; each failing check's documentation and stability record; and the [incident memory](incident-memory.md) linked to a failing check, the incident's group, or the incident.
+Where that does not explain a failure, the agent reads further about the incident's own group, machines and applications before deciding.
+It compares an incident only with others in the same group and environment.
 
 ## How the agent decides
 
 The agent decides whether each alert is escalated or logged, weighing the incident as a whole.
-Canopy serves the guidance it decides by with every triage, and the guidance is kept in Canopy's codebase, so it changes with Canopy and is reviewed as Canopy is.
+Canopy serves the guidance it decides by through the [fleet query interface](../private-server/mcp.md#alert-triage), and the guidance is kept in Canopy's codebase, so it changes with Canopy and is reviewed as Canopy is.
 
 The guidance sets out what bears on the decision rather than fixed rules:
 
@@ -46,25 +35,24 @@ The guidance sets out what bears on the decision rather than fixed rules:
 - a memory entry naming the pattern as harmless, borne out by the check's stability record
 
 An alert for an incident that has closed or been resolved is logged, and reported in the incident's escalation thread when it has one.
-A maintenance notification links no incident and is logged without a verdict.
+A maintenance notification links no incident and is logged in the write-up alone.
 
 > [!NOTE]
 > Triage leans towards escalating. A false escalation costs a person a minute; a swallowed outage at a clinical site costs far more. The agent escalates what it cannot explain with confidence, and says when an escalation is out of uncertainty, so the reader knows which are judgement and which are clear.
 
 ## Recording a verdict
 
-A verdict is recorded before it is reported.
-It holds whether the incident is escalated or logged, the agent's reasoning, the revision of the incident the triage read, and any memory entries relied on.
-It is refused when the incident has changed since the revision read, so the agent triages again from the incident as it stands.
-Once the verdict is reported, where it was reported is attached to it.
+A verdict is recorded as a note by the agent on the [incident](incidents.md#resolution), after it is reported.
+The note opens with whether the incident was escalated or logged and a link to where it was reported, then the incident's worst live result and failing checks as triaged, then the reasoning and any memory entries relied on.
 
-A verdict records the incident's state as of the revision read, which is what the next triage's changes are measured from.
-It shows on the incident as a note by the agent, and the verdict is kept apart from that note, so editing or deleting the note leaves the verdict as recorded.
-Recording a verdict and attaching where it was reported are audited actions, and the note is audited as adding a note (see [AUD](../platform/audit-log.md)).
+An incident whose latest triage note names the same failing checks at the same worst result has already been triaged at that state, so a repeated alert reports nothing new and the agent replies under it with a link to the earlier report.
+
+> [!NOTE]
+> Canopy keeps no triage record beyond the note. The note is where an operator looking at the incident already reads, and it is what the next triage compares against.
 
 ## Reporting
 
-The guidance Canopy serves with each triage directs how the agent reports it.
+The guidance directs how the agent reports.
 
 An escalation is a top-level post in the triage channel giving, in plain language, what is wrong and where by group and environment, the incident's worst live result, why it is escalated, and what to look at first, with a link to the incident.
 An escalated incident that worsens is escalated again in a new post linking the earlier one, and that holds when the same alert is also a reminder.
@@ -73,17 +61,11 @@ Other news on an escalated incident, such as a reminder that changes nothing or 
 Every alert, escalated or logged, adds one reply to the day's write-up thread naming the incident's group and environment, what happened, and how it was triaged and why, with an escalated alert's reply linking its escalation.
 The agent replies under the notification itself with one line saying whether it was escalated or logged and linking where.
 
-When an operator confirms a cause or says that a pattern is harmless, in an escalation's thread or the write-up thread, the agent records it in the [incident memory](incident-memory.md), linked to the check, group, or incident it concerns.
+When an operator confirms a cause or says that a pattern is harmless, in an escalation's thread or the write-up thread, the agent records it in the incident memory, linked to the check, group, or incident it concerns.
 A memory entry it records describes the pattern and how to recognise it, in the agent's own words.
 
 ## The daily write-up
 
 A write-up day begins at 8am New Zealand time and ends at the next, so overnight alerts fall in the day the morning summary covers.
-Each write-up day opens with a top-level post in the triage channel summarising the day before: how many alerts were escalated and how many logged, which incidents are still open, and the published incidents of that day that have no verdict.
+Each write-up day opens with a top-level post in the triage channel summarising the day before: how many alerts were escalated and how many logged, which incidents are still open, and the published incidents of that day with no triage note.
 An alert in a write-up day whose thread has not been started starts it.
-Canopy serves the verdicts recorded in a write-up day, and the published incidents in it with no verdict, so the summary is drawn from Canopy's record rather than from the channel.
-
-## Untriaged incidents
-
-A published incident still open an hour after it notified, with no verdict, raises a [self-alert](../private-server/self-alerts.md) while alert triage is in use.
-Alert triage is in use while any verdict has been recorded in the past week.

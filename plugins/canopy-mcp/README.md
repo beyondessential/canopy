@@ -28,13 +28,14 @@ https://canopy.tail53aef.ts.net/api/mcp`.
 Claude Tag triages each incident notification Canopy posts to the alerts
 channel: it escalates what needs a person now to a separate triage channel,
 and logs the rest in a daily write-up thread there. The rules live in Canopy
-(spec `TRI`, `.workhorse/specs/monitoring/alert-triage.md`) and are served by
-the `triage_alert` tool, so the Slack side only says where things go.
+(spec `TRI`, `.workhorse/specs/monitoring/alert-triage.md`) and the guidance is
+served by the `get_alert_triage_guidance` tool, so the Slack side only says
+where things go. Claude records each verdict as a note on the incident.
 
 Setup:
 
 1. **Token.** Mint a token in Settings → MCP access with the **notes** grant
-   (recording a verdict writes a note on the incident), and use it as the
+   (each verdict is recorded as a note on the incident), and use it as the
    bundle's `meta.tamanu.app` credential in place of a read-only one.
 2. **Channels.** Create the triage channel as a **public** channel; the alerts
    channel must be public too, since Claude Tag only posts across public
@@ -51,9 +52,8 @@ Setup:
    > You triage the Canopy alerts posted here. For each incident
    > notification, read the incident id from the UUID at the end of its Open
    > in Canopy link (never fetch the link; it is on a private network), call
-   > the canopy `triage_alert` tool, and follow its `guidance` exactly.
-   > Escalations and the daily write-up go in #TRIAGE-CHANNEL. A maintenance
-   > notification is logged in the write-up without calling the tool.
+   > the canopy `get_alert_triage_guidance` tool, and follow it exactly.
+   > Escalations and the daily write-up go in #TRIAGE-CHANNEL.
 
 5. **Triage channel instructions:**
 
@@ -67,12 +67,6 @@ Setup:
 6. **Routine.** In the triage channel, post once:
 
    > @Claude every day at 8am Pacific/Auckland, call the canopy
-   > `find_alert_triage_verdicts` tool for the write-up day that just ended,
-   > and post a new top-level message titled "Alert triage · <weekday>
-   > <d Mon> (NZ)" for today, summarising yesterday: how many alerts were
-   > escalated and how many logged, which incidents are still open (with
-   > links), and any published incidents that were never triaged.
-
-Canopy raises a self-alert when a published incident stays open an hour past
-its notification with no verdict, while triage is in use (any verdict in the
-past week), so a triage that stops working is noticed.
+   > `get_alert_triage_guidance` tool and start today's write-up thread as
+   > its "morning write-up" section describes, titled "Alert triage ·
+   > <weekday> <d Mon> (NZ)".

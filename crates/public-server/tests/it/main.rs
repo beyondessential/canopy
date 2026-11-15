@@ -19,7 +19,6 @@ mod index;
 mod instanced_checks;
 mod machine_enrollment;
 mod mcp;
-mod mcp_alert_triage;
 mod mcp_notes;
 mod names;
 mod openapi_spec;

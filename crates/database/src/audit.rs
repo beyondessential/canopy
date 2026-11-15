@@ -900,21 +900,6 @@ actions! {
 		detail { revision: i64, restored_from: i64, via: String }
 	}
 
-	/// An alert triage verdict was recorded on an incident, shown there as the
-	/// note named.
-	// spec: TRI#recording-a-verdict
-	AlertTriageRecorded = "alert_triage_recorded", "Record alert triage" {
-		records { incident: Record, note: Record }
-		detail { verdict_id: Uuid, verdict: String }
-	}
-
-	/// Where an alert triage verdict was reported was attached to it.
-	// spec: TRI#recording-a-verdict
-	AlertTriageReported = "alert_triage_reported", "Attach alert triage report" {
-		records { incident: Record }
-		detail { verdict_id: Uuid, link: String }
-	}
-
 	/// A machine reported a changed list of installed packages. Pushed whenever a
 	/// machine's list changes, across the fleet, so routine.
 	// spec: PKG#report
