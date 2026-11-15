@@ -703,7 +703,11 @@ async fn a_group_shows_where_each_server_stands() {
 		.await
 		.expect("record failure");
 
-		let verdicts = database::migration_tests::verdicts_for_group(&mut conn, group)
+		let applications =
+			database::applications::Application::list_live_in_group(&mut conn, group)
+				.await
+				.expect("applications");
+		let verdicts = database::migration_tests::verdicts(&mut conn, applications)
 			.await
 			.expect("verdicts");
 

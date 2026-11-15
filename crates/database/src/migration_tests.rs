@@ -1013,20 +1013,6 @@ async fn file_outcome(
 	Ok(())
 }
 
-/// Where every server in `group` stands against the version it would take next.
-///
-/// One row per server that has a candidate at all: with no open plan, or
-/// running another product, there is nothing to be tested against and so
-/// nothing to show.
-// spec: RST#verdicts
-pub async fn verdicts_for_group(
-	db: &mut AsyncPgConnection,
-	group_id: Uuid,
-) -> Result<Vec<GroupVerdict>> {
-	let applications = Application::list_live_in_group(db, group_id).await?;
-	verdicts(db, applications).await
-}
-
 /// Where each of `applications` stands against the version it would take next,
 /// for a caller that has already picked out an environment's applications.
 // spec: RST#verdicts
