@@ -1680,9 +1680,15 @@ function RequestGroupTest({
 	onRequested: () => void;
 }) {
 	const ask = useApiAction("migration_tests", "request");
-	const [failed, setFailed] = useState<string | null>(null);
+	const [failures, setFailures] = useState<{ planId: string; message: string }[]>(
+		[],
+	);
 	const setUp = testable(rows);
 	const unasked = setUp.filter((row) => !row.test_request);
+	const failed = failures
+		.filter((failure) => unasked.some((row) => row.plan.id === failure.planId))
+		.map((failure) => failure.message)
+		.join("; ");
 	const request = setUp
 		.flatMap((row) => (row.test_request ? [row.test_request] : []))
 		.sort((a, b) => Date.parse(b.requested_at) - Date.parse(a.requested_at))[0];
@@ -1705,20 +1711,21 @@ function RequestGroupTest({
 							variant="outlined"
 							disabled={ask.pending}
 							onClick={async () => {
-								const failures: string[] = [];
+								const refused: typeof failures = [];
 								for (const row of unasked) {
 									try {
 										await ask.call({ group_id: groupId, rank: row.rank });
 									} catch (err) {
 										const message =
 											err instanceof Error ? err.message : String(err);
-										failures.push(
-											`${environmentName(groupName, row.rank)}: ${message}`,
-										);
+										refused.push({
+											planId: row.plan.id,
+											message: `${environmentName(groupName, row.rank)}: ${message}`,
+										});
 									}
 								}
-								setFailed(failures.length > 0 ? failures.join("; ") : null);
-								if (failures.length < unasked.length) onRequested();
+								setFailures(refused);
+								if (refused.length < unasked.length) onRequested();
 							}}
 						>
 							{tested ? "Test again" : "Test now"}
