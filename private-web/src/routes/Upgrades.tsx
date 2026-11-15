@@ -1641,69 +1641,77 @@ function RequestTest({
 	onRequested: () => void;
 }) {
 	const ask = useApiAction("migration_tests", "request");
+	const [failed, setFailed] = useState<string | null>(null);
 	const setUp = rows.filter((row) => row.testing);
+	const unasked = setUp.filter((row) => !row.test_request);
 	const request = setUp
 		.flatMap((row) => (row.test_request ? [row.test_request] : []))
 		.sort((a, b) => Date.parse(b.requested_at) - Date.parse(a.requested_at))[0];
-	if (request) {
-		return (
-			<Tooltip
-				title={
-					<>
-						Asked for <TimeAgo timestamp={request.requested_at} />
-						{request.requested_by ? ` by ${request.requested_by}` : ""}; each
-						machine runs once against its latest backup
-					</>
-				}
-			>
-				<Chip
-					size="small"
-					color="info"
-					variant="outlined"
-					label="test requested"
-					data-testid="migration-test-requested"
-				/>
-			</Tooltip>
-		);
-	}
 	if (setUp.length === 0) return null;
 	const tested = setUp.some((row) => row.tests.some((test) => test.latest));
 	return (
 		<>
-			<GradedAction
-				calls="migration_tests/request"
-				action={`Test migrations for ${groupName}`}
-			>
+			{request && (
 				<Tooltip
-					describeChild
-					title="Test the migrations against the latest backup of each server set up for testing"
+					title={
+						<>
+							Asked for <TimeAgo timestamp={request.requested_at} />
+							{request.requested_by ? ` by ${request.requested_by}` : ""}; each
+							machine runs once against its latest backup
+						</>
+					}
 				>
-					<Button
+					<Chip
 						size="small"
+						color="info"
 						variant="outlined"
-						disabled={ask.pending}
-						onClick={async () => {
-							try {
-								for (const row of setUp) {
-									await ask.call({ group_id: groupId, rank: row.rank });
-								}
-								onRequested();
-							} catch {
-								/* ask.error is shown beside the button */
-							}
-						}}
-					>
-						{tested ? "Test again" : "Test now"}
-					</Button>
+						label="test requested"
+						data-testid="migration-test-requested"
+					/>
 				</Tooltip>
-			</GradedAction>
-			{ask.error && (
+			)}
+			{unasked.length > 0 && (
+				<GradedAction
+					calls="migration_tests/request"
+					action={`Test migrations for ${groupName}`}
+				>
+					<Tooltip
+						describeChild
+						title="Test the migrations against the latest backup of each server set up for testing"
+					>
+						<Button
+							size="small"
+							variant="outlined"
+							disabled={ask.pending}
+							onClick={async () => {
+								const failures: string[] = [];
+								for (const row of unasked) {
+									try {
+										await ask.call({ group_id: groupId, rank: row.rank });
+									} catch (err) {
+										const message =
+											err instanceof Error ? err.message : String(err);
+										failures.push(
+											`${environmentName(groupName, row.rank)}: ${message}`,
+										);
+									}
+								}
+								setFailed(failures.length > 0 ? failures.join("; ") : null);
+								if (failures.length < unasked.length) onRequested();
+							}}
+						>
+							{tested ? "Test again" : "Test now"}
+						</Button>
+					</Tooltip>
+				</GradedAction>
+			)}
+			{failed && (
 				<Typography
 					variant="caption"
 					color="error"
 					data-testid="migration-test-request-error"
 				>
-					{ask.error.message}
+					{failed}
 				</Typography>
 			)}
 		</>

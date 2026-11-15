@@ -180,6 +180,47 @@ test.describe("upgrades dashboard", () => {
 		).toContainText("no open plan");
 	});
 
+	/// spec: RST#dispatching-a-migration-test
+	test("an environment refused does not stop the others being asked", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
+		await runningAt(sql, group.id, "2.60.0", "clone");
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		for (const rank of ["clone", "production"] as const) {
+			await seedUpgradePlan(sql, {
+				groupId: group.id,
+				targetVersionId: target.id,
+				plannedFor: "2020-01-01",
+				rank,
+			});
+		}
+		await declareUpgradeReplica(sql, group.id);
+
+		await page.goto("/upgrades");
+		const header = plannedGroup(page, "kamaka").getByTestId(
+			"planned-group-header",
+		);
+		const button = header.getByRole("button", { name: "Test now" });
+		await expect(button).toBeVisible();
+		await sql.query(
+			"UPDATE upgrade_plans SET withdrawn_at = NOW() WHERE rank = 'clone'",
+		);
+		await button.click();
+
+		await expect(
+			header.getByTestId("migration-test-request-error"),
+		).toContainText("kamaka clone: ");
+		await expect(header.getByTestId("migration-test-requested")).toBeVisible();
+		const requests = await sql.query<{ rank: string }>(
+			`SELECT p.rank FROM migration_test_requests r
+			 JOIN upgrade_plans p ON p.id = r.plan_id`,
+		);
+		expect(requests.map((r) => r.rank)).toEqual(["production"]);
+	});
+
 	test("says quietly when nothing is set up to test a group", async ({
 		page,
 		sql,
