@@ -249,6 +249,35 @@ test.describe("upgrades dashboard", () => {
 		await expect(header.getByRole("button", { name: "Test now" })).toHaveCount(0);
 	});
 
+	test("a declaration with nothing to test against offers no test", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
+		const target = await seedVersion(sql, {
+			major: 2,
+			minor: 61,
+			patch: 0,
+			status: "draft",
+		});
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: "2020-01-01",
+		});
+		await declareUpgradeReplica(sql, group.id);
+
+		await page.goto("/upgrades");
+		const header = plannedGroup(page, "kamaka").getByTestId(
+			"planned-group-header",
+		);
+		await expect(header.getByTestId("migration-verdict")).toHaveText(
+			"Nothing set up for testing",
+		);
+		await expect(header.getByRole("button", { name: "Test now" })).toHaveCount(0);
+	});
+
 	/// spec: UPG#the-dashboard
 	test("a passing test is said once for the group", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });

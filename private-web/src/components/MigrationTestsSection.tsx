@@ -135,7 +135,7 @@ export default function MigrationTestsSection({
 					<Table size="small" sx={{ tableLayout: "fixed", minWidth: 640 }}>
 						<TableHead>
 							<TableRow>
-								<TableCell sx={{ width: "32%" }}>Server</TableCell>
+								<TableCell sx={{ width: target ? "32%" : "18%" }}>Server</TableCell>
 								{!target && (
 									<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
 										Upgrading to
@@ -424,6 +424,32 @@ function TestRow({
 
 /// The ask covers every server of the environment set up for testing.
 // spec: RST#dispatching-a-migration-test
+export function TestRequestedChip({
+	request,
+}: {
+	request: { requested_at: string; requested_by?: string | null };
+}) {
+	return (
+		<Tooltip
+			title={
+				<>
+					Asked for <TimeAgo timestamp={request.requested_at} />
+					{request.requested_by ? ` by ${request.requested_by}` : ""}; each
+					machine runs once against its latest backup
+				</>
+			}
+		>
+			<Chip
+				size="small"
+				color="info"
+				variant="outlined"
+				label="test requested"
+				data-testid="migration-test-requested"
+			/>
+		</Tooltip>
+	);
+}
+
 function RequestTest({
 	groupId,
 	rank,
@@ -440,26 +466,7 @@ function RequestTest({
 	onRequested: () => void;
 }) {
 	const ask = useApiAction("migration_tests", "request");
-	if (request) {
-		return (
-			<Tooltip
-				title={
-					<>
-						Asked for <TimeAgo timestamp={request.requested_at} />
-						{request.requested_by ? ` by ${request.requested_by}` : ""}
-					</>
-				}
-			>
-				<Chip
-					size="small"
-					color="info"
-					variant="outlined"
-					label="test requested"
-					data-testid="migration-test-requested"
-				/>
-			</Tooltip>
-		);
-	}
+	if (request) return <TestRequestedChip request={request} />;
 	return (
 		<Stack spacing={0.5} sx={{ alignItems: "flex-end" }}>
 			<GradedAction

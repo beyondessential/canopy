@@ -51,6 +51,7 @@ import {
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
+import { TestRequestedChip } from "../components/MigrationTestsSection";
 import {
 	GradedAction,
 	blockedSx,
@@ -78,9 +79,8 @@ type PlannedRow = PlannedUpgrade & { plan: NonNullable<PlannedUpgrade["plan"]> }
 type TestedServer = PlannedUpgrade["tests"][number];
 type PlannableVersion = ApiResponse<"upgrade_plans", "targets">[number];
 
-/// Where every group is going. A group with no plan is listed too: one
-/// several minors behind with nothing recorded is what this view exists to
-/// surface.
+/// Where every group with a plan is going, and whether its data survives
+/// getting there.
 // spec: UPG#the-dashboard
 export default function Upgrades() {
 	usePageTitle("Upgrades");
@@ -1306,10 +1306,10 @@ function PlannedGroup({
 		rows.every((row) => row.current_version === first.current_version)
 			? first.current_version
 			: null;
-	const tests = rows.flatMap((row) => row.tests);
-	const failed = tests.some((test) => test.verdict === "failed");
+	const summary = summariseTests(rows);
+	const failed = summary.failed.length > 0;
 	const passed =
-		tests.length > 0 && tests.every((test) => test.verdict === "passed");
+		summary.tests.length > 0 && summary.passed.length === summary.tests.length;
 	return (
 		<Box
 			component="section"
@@ -1426,15 +1426,46 @@ function PlannedGroup({
 	);
 }
 
+/// The rows whose environment a declaration tests and that have something to
+/// test against the plan; a declaration over nothing testable has no result
+/// coming.
+function testable(rows: PlannedRow[]): PlannedRow[] {
+	return rows.filter((row) => row.testing && row.tests.length > 0);
+}
+
+/// One roll-up of a group's tests, so the header's tint and its label cannot
+/// disagree. Failures newest first.
+function summariseTests(rows: PlannedRow[]) {
+	const tests = rows.flatMap((row) => row.tests);
+	return {
+		tests,
+		failed: tests
+			.filter((test) => test.verdict === "failed")
+			.sort(
+				(a, b) =>
+					Date.parse(b.latest?.reported_at ?? "") -
+					Date.parse(a.latest?.reported_at ?? ""),
+			),
+		passed: tests.filter((test) => test.verdict === "passed"),
+		untested: tests.filter((test) => test.verdict === "nottested"),
+	};
+}
+
 // spec: UPG#the-dashboard
 function TestSummary({ groupId, rows }: { groupId: string; rows: PlannedRow[] }) {
 	const to = `/fleet/groups/${groupId}#migration-tests`;
 	const modes = [
-		...new Set(rows.flatMap((row) => (row.testing ? [row.testing] : []))),
+		...new Set(testable(rows).flatMap((row) => (row.testing ? [row.testing] : []))),
 	];
 	if (modes.length === 0) {
 		return (
-			<Tooltip title="Nothing is declared to test this group's data against its plan, so no test will run. Declare a restore replica for it on the group's page.">
+			<Tooltip
+				title={
+					rows.some((row) => row.testing)
+						? "What is declared to test this group has nothing to test against its plan (no Tamanu server, or the target is not a published version), so no test will run."
+						: "Nothing is declared to test this group's data against its plan, so no test will run. Declare a restore replica for it on the group's page."
+				}
+			>
 				<MuiLink
 					component={RouterLink}
 					to={to}
@@ -1449,16 +1480,7 @@ function TestSummary({ groupId, rows }: { groupId: string; rows: PlannedRow[] })
 		);
 	}
 
-	const tests = rows.flatMap((row) => row.tests);
-	const failed = tests
-		.filter((test) => test.verdict === "failed")
-		.sort(
-			(a, b) =>
-				Date.parse(b.latest?.reported_at ?? "") -
-				Date.parse(a.latest?.reported_at ?? ""),
-		);
-	const passed = tests.filter((test) => test.verdict === "passed");
-	const untested = tests.filter((test) => test.verdict === "nottested");
+	const { tests, failed, passed, untested } = summariseTests(rows);
 	const tally = `${passed.length} of ${tests.length} passed`;
 
 	const verdict = (
@@ -1642,7 +1664,7 @@ function RequestTest({
 }) {
 	const ask = useApiAction("migration_tests", "request");
 	const [failed, setFailed] = useState<string | null>(null);
-	const setUp = rows.filter((row) => row.testing);
+	const setUp = testable(rows);
 	const unasked = setUp.filter((row) => !row.test_request);
 	const request = setUp
 		.flatMap((row) => (row.test_request ? [row.test_request] : []))
@@ -1651,25 +1673,7 @@ function RequestTest({
 	const tested = setUp.some((row) => row.tests.some((test) => test.latest));
 	return (
 		<>
-			{request && (
-				<Tooltip
-					title={
-						<>
-							Asked for <TimeAgo timestamp={request.requested_at} />
-							{request.requested_by ? ` by ${request.requested_by}` : ""}; each
-							machine runs once against its latest backup
-						</>
-					}
-				>
-					<Chip
-						size="small"
-						color="info"
-						variant="outlined"
-						label="test requested"
-						data-testid="migration-test-requested"
-					/>
-				</Tooltip>
-			)}
+			{request && <TestRequestedChip request={request} />}
 			{unasked.length > 0 && (
 				<GradedAction
 					calls="migration_tests/request"
