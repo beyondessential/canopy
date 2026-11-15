@@ -283,6 +283,14 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			"SELECT machine_id FROM migration_test_requests",
 		);
 		expect(requests.map((r) => r.machine_id)).toEqual([central.machineId]);
+
+		// The upgrades view says the same ask is waiting.
+		await page.goto("/upgrades");
+		await expect(
+			page
+				.getByTestId("planned-group-header")
+				.getByTestId("migration-test-requested"),
+		).toBeVisible();
 	});
 
 	test("the fleet view names the failure and links to the detail", async ({

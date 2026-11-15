@@ -203,6 +203,51 @@ test.describe("upgrades dashboard", () => {
 		const header = plannedGroup(page, "kamaka").getByTestId(
 			"planned-group-header",
 		);
+		await page.route("**/api/migration_tests/request", async (route) => {
+			if (route.request().postDataJSON().rank === "clone") {
+				await route.fulfill({
+					status: 409,
+					contentType: "application/problem+json",
+					body: JSON.stringify({ title: "the clone is busy" }),
+				});
+			} else {
+				await route.continue();
+			}
+		});
+		const button = header.getByRole("button", { name: "Test now" });
+		await expect(button).toBeVisible();
+		await button.click();
+
+		await expect(header.getByTestId("migration-test-requested")).toBeVisible();
+		// Still said once the page has reloaded what was asked.
+		await expect(
+			header.getByTestId("migration-test-request-error"),
+		).toContainText("kamaka clone: ");
+		await expect(header.getByRole("button", { name: "Test now" })).toBeVisible();
+		const requests = await sql.query<{ rank: string }>(
+			`SELECT p.rank FROM migration_test_requests r
+			 JOIN upgrade_plans p ON p.id = r.plan_id`,
+		);
+		expect(requests.map((r) => r.rank)).toEqual(["production"]);
+	});
+
+	test("a refusal is dropped once its plan is gone", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
+		await runningAt(sql, group.id, "2.60.0", "clone");
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		for (const rank of ["clone", "production"] as const) {
+			await seedUpgradePlan(sql, {
+				groupId: group.id,
+				targetVersionId: target.id,
+				rank,
+			});
+		}
+		await declareUpgradeReplica(sql, group.id);
+
+		await page.goto("/upgrades");
+		const block = plannedGroup(page, "kamaka");
+		const header = block.getByTestId("planned-group-header");
 		const button = header.getByRole("button", { name: "Test now" });
 		await expect(button).toBeVisible();
 		await sql.query(
@@ -210,15 +255,9 @@ test.describe("upgrades dashboard", () => {
 		);
 		await button.click();
 
-		await expect(
-			header.getByTestId("migration-test-request-error"),
-		).toContainText("kamaka clone: ");
 		await expect(header.getByTestId("migration-test-requested")).toBeVisible();
-		const requests = await sql.query<{ rank: string }>(
-			`SELECT p.rank FROM migration_test_requests r
-			 JOIN upgrade_plans p ON p.id = r.plan_id`,
-		);
-		expect(requests.map((r) => r.rank)).toEqual(["production"]);
+		await expect(block.getByTestId("planned-upgrade-row")).toHaveCount(1);
+		await expect(header.getByTestId("migration-test-request-error")).toHaveCount(0);
 	});
 
 	test("says quietly when nothing is set up to test a group", async ({
@@ -398,6 +437,54 @@ test.describe("upgrades dashboard", () => {
 	});
 
 	/// spec: UPG#the-dashboard
+	test("some passed and none failed counts them, untinted", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		const central = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		const facility = await seedServer(sql, {
+			name: "kamaka-facility",
+			type: "tamanu-facility",
+			groupId: group.id,
+			rank: "production",
+		});
+		for (const server of [central, facility]) {
+			await seedStatus(sql, { serverId: server.id, version: "2.60.0" });
+		}
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+		});
+		const consumer = await declareUpgradeReplica(sql, group.id);
+		await seedMigrationTest(sql, {
+			consumerDeviceId: consumer,
+			groupId: group.id,
+			machineId: central.machineId,
+			applicationId: central.id,
+			targetVersionId: target.id,
+		});
+
+		await page.goto("/upgrades");
+
+		const header = plannedGroup(page, "kamaka").getByTestId(
+			"planned-group-header",
+		);
+		await expect(header.getByTestId("migration-verdict")).toHaveText(
+			"1 of 2 passed",
+		);
+		await expect(header.getByTestId("migration-verdict-detail")).toHaveText(
+			"not yet tested: kamaka-facility",
+		);
+		await expect(header).toHaveCSS("background-color", "rgba(0, 0, 0, 0.04)");
+	});
+
+	/// spec: UPG#the-dashboard
 	test("environments going to different versions say so per row", async ({
 		page,
 		sql,
@@ -473,6 +560,37 @@ test.describe("upgrades dashboard", () => {
 				.getByTestId("planned-upgrade-row")
 				.filter({ hasText: "production" }),
 		).toContainText("2.59.0");
+	});
+
+	/// spec: UPG#the-dashboard
+	test("an environment that has reported no version keeps the running column", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
+		await seedServer(sql, { groupId: group.id, rank: "clone" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		for (const rank of ["clone", "production"] as const) {
+			await seedUpgradePlan(sql, {
+				groupId: group.id,
+				rank,
+				targetVersionId: target.id,
+			});
+		}
+
+		await page.goto("/upgrades");
+
+		const block = plannedGroup(page, "kamaka");
+		const header = block.getByTestId("planned-group-header");
+		await expect(header).toContainText("to 2.61.0");
+		await expect(header).not.toContainText("→");
+		await expect(
+			block.getByRole("columnheader", { name: "Running", exact: true }),
+		).toBeVisible();
+		await expect(
+			block.getByTestId("planned-upgrade-row").filter({ hasText: "clone" }),
+		).toContainText("unknown");
 	});
 
 	/// spec: UPG#the-dashboard
@@ -569,6 +687,42 @@ test.describe("upgrades dashboard", () => {
 			.filter({ hasText: "kamaka" });
 		await expect(past).toContainText("2.61.0");
 		await expect(past).toContainText("withdrawn");
+	});
+
+	test("a plan cannot be withdrawn again while the first withdraw runs", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+		});
+		let release = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await page.route("**/api/upgrade_plans/withdraw", async (route) => {
+			await held;
+			await route.continue();
+		});
+
+		await page.goto("/upgrades");
+		await expect(plannedGroup(page, "kamaka")).toBeVisible();
+		page.once("dialog", (dialog) => dialog.accept());
+		await planAction(page, "kamaka", "Withdraw plan");
+
+		await page.getByRole("button", { name: "More actions for kamaka" }).click();
+		await expect(
+			page.getByRole("menuitem", { name: "Withdraw plan" }),
+		).toBeDisabled();
+		release();
+		await page.keyboard.press("Escape");
+		await expect(page.getByTestId("planned-upgrades")).toContainText(
+			"No group has a recorded plan",
+		);
 	});
 
 	test("a plan replaced by a later one reads as replaced, not withdrawn", async ({
