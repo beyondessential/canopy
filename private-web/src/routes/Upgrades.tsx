@@ -99,7 +99,9 @@ export default function Upgrades() {
 	const planned = fleet.data.filter((row): row is PlannedRow => row.plan !== null);
 	const groups = new Map<string, PlannedRow[]>();
 	for (const row of planned) {
-		groups.set(row.group_id, [...(groups.get(row.group_id) ?? []), row]);
+		const rows = groups.get(row.group_id) ?? [];
+		rows.push(row);
+		groups.set(row.group_id, rows);
 	}
 
 	return (
