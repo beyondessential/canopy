@@ -132,40 +132,43 @@ pub async fn for_group(
 		database::applications::Application::list_live_in_group(&mut conn, args.group_id).await?;
 	let declared = database::restore::migrating_environments(&mut conn, args.group_id).await?;
 	let verdicts = database::migration_tests::verdicts(&mut conn, applications.clone()).await?;
+	let plans =
+		database::upgrade_plans::UpgradePlan::open_for_group(&mut conn, args.group_id).await?;
+	let plan_ids: Vec<Uuid> = plans.iter().map(|plan| plan.id).collect();
+	let requests = MigrationTestRequest::pending_for_plans(&mut conn, &plan_ids).await?;
 
-	let mut out = Vec::with_capacity(verdicts.len());
-	for verdict in verdicts {
-		let tested = applications
-			.iter()
-			.find(|application| application.id == verdict.server_id)
-			.filter(|application| {
-				application
-					.machine_id
-					.is_some_and(|machine_id| declared.tests_machine(machine_id))
-			});
-		let mut test_request = None;
-		if let Some(application) = tested
-			&& let (Some(machine_id), Some(rank)) = (application.machine_id, application.rank)
-			&& let Some(plan) = database::upgrade_plans::UpgradePlan::open_for_environment(
-				&mut conn,
-				args.group_id,
-				rank,
-			)
-			.await?
-		{
-			test_request = MigrationTestRequest::pending(&mut conn, machine_id, plan.id)
-				.await?
+	let out = verdicts
+		.into_iter()
+		.map(|verdict| {
+			let tested = applications
+				.iter()
+				.find(|application| application.id == verdict.server_id)
+				.filter(|application| {
+					application
+						.machine_id
+						.is_some_and(|machine_id| declared.tests_machine(machine_id))
+				});
+			let test_request = tested
+				.and_then(|application| {
+					let plan = plans
+						.iter()
+						.find(|plan| Some(plan.rank) == application.rank)?;
+					requests.iter().find(|request| {
+						Some(request.machine_id) == application.machine_id
+							&& request.plan_id == plan.id
+					})
+				})
 				.map(|request| crate::fns::upgrade_plans::TestRequest {
 					requested_at: request.requested_at,
-					requested_by: request.requested_by,
+					requested_by: request.requested_by.clone(),
 				});
-		}
-		out.push(ServerVerdict {
-			verdict,
-			set_up: tested.is_some(),
-			test_request,
-		});
-	}
+			ServerVerdict {
+				verdict,
+				set_up: tested.is_some(),
+				test_request,
+			}
+		})
+		.collect();
 	Ok(Json(out))
 }
 
