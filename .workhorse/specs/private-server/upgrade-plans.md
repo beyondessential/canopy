@@ -22,7 +22,7 @@ Nor is it one decision per site: a clone is often moved first, to rehearse the u
 
 Left unrecorded, that decision costs twice.
 Pre-upgrade migration testing has nothing to aim at, so an environment gets no answer about its own data until it says where it is going (see [RST](../public-server/restore-replicas.md)).
-And nobody can see at a glance which environments are mid-plan, which are overdue to move, and which have no plan at all.
+And nobody can see at a glance which environments are mid-plan and which are overdue to move.
 
 ## A plan
 
@@ -50,7 +50,7 @@ A plan for a group's clone leaves its production's plan where it was.
 
 What an environment runs is what its own central reports, so a site's production reads from its production central and its clone from the clone's (see [APP](../servers/application-types.md), "Versions").
 Wherever an environment is named, it is named by its group with the rank after it, except a group's production, which is named by the group alone.
-In the upgrades tables an environment's rank is also shown as a chip beside its group, production's included, so a production row stands out from its clone and demo.
+In the upgrades tables an environment's rank is also shown as a chip, production's included, so a production row stands out from its clone and demo.
 A plan names an environment the group has applications at; one cannot be recorded for a rank the group holds nothing at, so a group with nothing ranked records no plans (see [GRP](../servers/groups.md), "Environments").
 
 An open plan's date, time, and note can be amended, and an amendment records who made it and when.
@@ -102,17 +102,31 @@ The plan is read at the moment someone declares, so a planned hour arriving susp
 
 Canopy presents planned upgrades across the fleet in one view, so the question "what is moving, and when" is answered without reading each group.
 
-For each environment with an open plan it shows the environment, the target version, the version the environment is on now, the planned date and window where there are ones, and the pre-upgrade verdict for that target, so an operator sees both the intent and whether the environment's data survives it.
+Open plans are shown a group at a time.
+Each group has a header naming it, and beneath the header each environment with an open plan is a row giving its rank, the version it runs now, the planned date and window where there are ones, and the note.
+A group's environments usually move together, so a version they all share is said once in the header and left off the rows.
+Where every planned environment runs the same version and is going to the same one, the header reads as the move from one to the other.
+Where they share only the target, the header names the target and each row its running version; where they share only the running version, the header names that and each row its own target.
+An environment whose running version is unknown has nothing to share, so its group's rows keep the running version.
 The window is shown with its timezone abbreviated, so a reader can tell which site's midnight it is.
-Where a restore attempt is under way it shows that too.
+An environment's own actions, amending its plan, declaring maintenance over it, and withdrawing the plan, sit behind one control on its row.
+
+The header gives the group's pre-upgrade verdict once, beside the group's name and versions, so an operator sees both the intent and whether the group's data survives it.
+It counts only the applications a testing declaration restores (see [RST](../public-server/restore-replicas.md), "Verdicts").
+Testing is usually set up on one server of a group, often only its production central, and an application nothing tests would read as not yet tested for good, which looks like a problem when nothing is wrong.
+With one such application the header names it and its result: passed with how many migrations ran, how long they took and when, failed with the migration that failed, or not yet tested.
+With several it says how many of them passed, naming a failure first.
+A failure tints the header as a warning, and the error it produced is a hover away.
+Where every application it counts has passed the header is tinted as a success, so a group ready to move reads as such at a glance; until then it carries no tint.
+The verdict links to the group's own migration tests.
+Where nothing tests any of the group's planned environments the header says so quietly in place of a verdict, since such a plan is never dispatched and a reader would otherwise wait on a result that cannot arrive; it is not presented as a warning, since a group with no testing set up is a choice rather than a fault.
+The header also says whether the group is tested on the schedule or only when asked.
+
+Where a restore attempt is under way the header shows that too.
 A restore takes hours, and without this a plan that is still being tested and one the pipeline has stopped testing both read as not yet tested.
-An attempt is the group's rather than one environment's, since a restore is issued credentials for the group's backups without naming the machine it will restore, so it shows on each of the group's environments that is set up for testing and could be tested now: one tested on the schedule, or one tested on request while an ask waits.
+An attempt is the group's rather than one environment's, since a restore is issued credentials for the group's backups without naming the machine it will restore, so it shows for a group with an environment that is set up for testing and could be tested now: one tested on the schedule, or one tested on request while an ask waits.
 An environment tested only on request with no ask waiting is not dispatched, so a restore under way in its group is some other work and is not shown.
-Where nothing is declared to migrate the environment's data it says so in place of the verdict, since a plan with no such declaration is never dispatched and a reader would otherwise wait on a result that cannot arrive.
-An environment set up for testing offers to test it now, and while that ask waits on a verdict it says so in place of the offer (see [RST](../public-server/restore-replicas.md), "Dispatching a migration test").
-Environments with no plan are shown too, behind a disclosure that counts them, and each is shown with how far behind it is: an unplanned production several minors behind is what this view exists to surface, and the count surfaces it without the list crowding out what is moving.
-Only a group's headline environment is listed there, since a clone or a demo is mostly never planned and listing them would bury the gap that matters.
-An environment already on the newest published version has nothing to plan, and one that has reported no version cannot be placed, so neither is listed either.
+A group set up for testing offers to test it now, asking for each of its planned environments that is set up for testing, and while an ask waits on a verdict it says so in place of the offer (see [RST](../public-server/restore-replicas.md), "Dispatching a migration test").
 
 A plan whose date has passed without being met is presented as late, judged on the day alone rather than the hour.
 Late is a presentational state and not an incident: an upgrade slipping is normal operational reality, and Canopy has no basis for treating a date someone typed as a failure of anything.

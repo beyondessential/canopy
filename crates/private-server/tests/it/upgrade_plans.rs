@@ -62,18 +62,14 @@ async fn record_then_the_fleet_view_shows_it() {
 		assert_eq!(planned["current_version"], "2.60.0");
 		assert_eq!(planned["late"], true, "the planned day has passed unmet");
 
-		// A group with no plan is still listed: an unplanned group several
-		// minors behind is what the view exists to surface.
+		// A group with no plan is still listed, since a plan is recorded for an
+		// environment named here.
 		let unplanned = fleet
 			.iter()
 			.find(|row| row["group_id"] == UNPLANNED)
 			.expect("the unplanned group");
 		assert!(unplanned["plan"].is_null());
 		assert_eq!(unplanned["late"], false);
-		assert_eq!(
-			unplanned["behind"], 3,
-			"2.60.0 against the newest published, 2.63.0"
-		);
 	})
 	.await;
 }
@@ -156,10 +152,11 @@ async fn a_plan_nothing_will_test_says_so() {
 			.await
 			.json();
 		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
-		assert_eq!(
-			row["testable"], false,
+		assert!(
+			row["testing"].is_null(),
 			"an intent that does not migrate tests nothing"
 		);
+		assert_eq!(row["tests"], json!([]), "so no server is set up for testing");
 
 		assert!(
 			row["attempt"].is_null(),
@@ -186,7 +183,8 @@ async fn a_plan_nothing_will_test_says_so() {
 			.await
 			.json();
 		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
-		assert_eq!(row["testable"], true);
+		assert_eq!(row["tests"].as_array().unwrap().len(), 1, "got {row}");
+		assert_eq!(row["tests"][0]["name"], "Tamanu central");
 		assert_eq!(row["attempt"], "in_flight");
 		assert_eq!(row["testing"], "scheduled");
 
@@ -287,7 +285,7 @@ async fn an_attempt_in_flight_shows_beside_the_verdict() {
 			"a group mid-test does not read as merely untested"
 		);
 		assert_eq!(
-			row["verdict"], "nottested",
+			row["tests"][0]["verdict"], "nottested",
 			"and the verdict is untouched by the activity"
 		);
 	})
@@ -764,10 +762,8 @@ async fn each_environment_is_planned_apart() {
 		assert_eq!(rows.len(), 2, "one row per environment: {fleet:?}");
 		let production = rows.iter().find(|r| r["rank"] == "production").unwrap();
 		let clone = rows.iter().find(|r| r["rank"] == "clone").unwrap();
-		assert_eq!(production["headline"], true);
 		assert_eq!(production["current_version"], "2.60.0");
 		assert_eq!(production["target_version"], "2.61.0");
-		assert_eq!(clone["headline"], false);
 		assert_eq!(clone["current_version"], "2.62.0");
 		assert_eq!(
 			clone["target_version"], "2.63.0",
@@ -837,57 +833,6 @@ async fn a_plan_whose_environment_has_no_live_application_is_still_listed() {
 			clone["current_version"].is_null(),
 			"with no running version, since nothing is running"
 		);
-		assert!(
-			clone["behind"].is_null(),
-			"and no distance, rather than a distance from nothing"
-		);
-		assert_eq!(
-			clone["headline"], false,
-			"a synthetic row is never the group's headline"
-		);
-	})
-	.await;
-}
-
-/// An environment that has reported no version cannot be placed against the
-/// newest one, so its distance is null. The dashboard's no-plan list keys off
-/// that distance, so a null is what keeps an unreporting environment out of a
-/// list of things to plan.
-// spec: UPG#the-fleet-view
-#[tokio::test(flavor = "multi_thread")]
-async fn an_environment_that_has_reported_no_version_has_no_distance() {
-	commons_tests::server::run(async |mut conn, _, private| {
-		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
-				('cccccccc-0000-0000-0000-0000000000f2', 2, 63, 0, 'x', 'published');
-			INSERT INTO server_groups (id, name) VALUES
-				('cccccccc-0000-0000-0000-000000000002', 'silent');
-			INSERT INTO machines (name, id, group_id) VALUES
-				('box', 'cccccccc-0000-0000-0000-0000000000a2', 'cccccccc-0000-0000-0000-000000000002');
-			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
-				('cccccccc-0000-0000-0000-0000000000a2', 'https://silent.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000002', 'cccccccc-0000-0000-0000-0000000000a2');",
-		)
-		.await
-		.unwrap();
-
-		let fleet: Vec<Value> = private
-			.post("/api/upgrade_plans/fleet")
-			.json(&json!({}))
-			.await
-			.json();
-		let silent = fleet
-			.iter()
-			.find(|row| row["group_id"] == UNPLANNED)
-			.expect("the environment is listed");
-		assert!(
-			silent["current_version"].is_null(),
-			"nothing has been reported for it"
-		);
-		assert!(
-			silent["behind"].is_null(),
-			"so there is no distance to the newest published version"
-		);
-		assert!(silent["plan"].is_null());
 	})
 	.await;
 }
@@ -1015,8 +960,7 @@ async fn an_ask_shows_on_the_row_until_a_verdict_answers_it() {
 }
 
 /// A group with nothing ranked has no environment, so the fleet view lists none
-/// of it, while a group with something ranked is listed by its headline
-/// environment.
+/// of it, while a group with something ranked is listed.
 // spec: UPG#the-fleet-view
 #[tokio::test(flavor = "multi_thread")]
 async fn only_a_group_with_something_ranked_is_in_the_fleet_view() {
@@ -1046,7 +990,7 @@ async fn only_a_group_with_something_ranked_is_in_the_fleet_view() {
 			.await
 			.json();
 		assert!(
-			fleet.iter().any(|row| row["group_id"] == GROUP && row["headline"] == true),
+			fleet.iter().any(|row| row["group_id"] == GROUP),
 			"{fleet:?}"
 		);
 		assert!(

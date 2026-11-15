@@ -500,8 +500,9 @@ test.describe("maintenance windows", () => {
 
 		await page.goto("/upgrades");
 		await page
-			.getByRole("button", { name: "Declare maintenance for kamaka" })
+			.getByRole("button", { name: "More actions for kamaka" })
 			.click();
+		await page.getByRole("menuitem", { name: "Declare maintenance" }).click();
 
 		await expect(
 			page.getByRole("heading", { name: "Declare maintenance" }),
@@ -1014,8 +1015,9 @@ test.describe("maintenance windows", () => {
 
 		await page.goto("/upgrades");
 		await page
-			.getByRole("button", { name: "Declare maintenance for kamaka clone" })
+			.getByRole("button", { name: "More actions for kamaka clone" })
 			.click();
+		await page.getByRole("menuitem", { name: "Declare maintenance" }).click();
 		await expect(
 			page.getByRole("heading", { name: "Declare maintenance" }),
 		).toBeVisible();
