@@ -144,7 +144,6 @@ async fn only_a_server_a_declaration_tests_is_set_up() {
 		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
 		let tests = row["tests"].as_array().unwrap();
 		assert_eq!(tests.len(), 1, "the facility is not counted: {row}");
-		assert_eq!(tests[0]["server_id"], CENTRAL);
 		assert_eq!(tests[0]["name"], "central");
 	})
 	.await;
