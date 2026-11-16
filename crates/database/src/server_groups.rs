@@ -252,6 +252,19 @@ impl ServerGroup {
 			.min_by_key(|s| (rank_priority(s.rank), s.id))
 	}
 
+	/// The central of one of a group's environments, the lowest id among
+	/// several so the choice is stable.
+	// spec: RPT#the-build-contract
+	pub fn environment_central(
+		members: &[crate::applications::Application],
+		rank: ServerRank,
+	) -> Option<&crate::applications::Application> {
+		members
+			.iter()
+			.filter(|s| s.r#type == ApplicationType::TamanuCentral && s.rank == Some(rank))
+			.min_by_key(|s| s.id)
+	}
+
 	/// Groups carrying this exact name, archived ones included, so a caller
 	/// resolving a group by name can tell an archived group from one that does
 	/// not exist. Names aren't unique, so this can return several.

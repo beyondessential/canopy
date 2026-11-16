@@ -347,11 +347,16 @@ impl RestoreReplica {
 	/// every machine in the group and run. The advertised semantic still has to
 	/// be there, since a consumer that cannot build a schema has no business
 	/// publishing one, but it grants nothing on its own.
+	///
+	/// Naming an environment asks whether a declaration covers that one: a
+	/// declaration on a machine publishes for the environment whose central
+	/// runs there and no other.
 	// spec: ART#registration, RPT#the-build-contract
 	pub async fn authorizes_schema_artifacts(
 		db: &mut AsyncPgConnection,
 		consumer_device_id: Uuid,
 		group_id: Uuid,
+		rank: Option<commons_types::server::rank::ServerRank>,
 	) -> Result<bool> {
 		let building: Vec<RestoreIntent> =
 			RestoreConsumerCapability::list_for_consumer(db, consumer_device_id)
@@ -366,22 +371,32 @@ impl RestoreReplica {
 		}
 
 		use crate::schema::restore_replicas::dsl;
-		let n: i64 = dsl::restore_replicas
+		let declared: Vec<Option<Uuid>> = dsl::restore_replicas
 			.filter(dsl::consumer_device_id.eq(consumer_device_id))
 			.filter(dsl::group_id.eq(group_id))
 			.filter(dsl::intent.eq_any(building.iter().map(|i| i.0.clone()).collect::<Vec<_>>()))
 			.filter(dsl::enabled.eq(true))
 			.filter(dsl::publishes_schemas.eq(true))
-			// Dispatch builds no schema from a redacting or machine-scoped
-			// declaration, and one nothing is dispatched for publishes nothing.
+			// Dispatch builds no schema from a redacting declaration, and one
+			// nothing is dispatched for publishes nothing.
 			.filter(dsl::redacts.eq(false))
-			.filter(dsl::machine_id.is_null())
-			.count()
-			.get_result(db)
+			.select(dsl::machine_id)
+			.load(db)
 			.await
 			.map_err(AppError::from)?;
 
-		Ok(n > 0)
+		let Some(coverage) = crate::reporting_schemas::SchemaCoverage::by_group(
+			declared.into_iter().map(|machine| (group_id, machine)),
+		)
+		.remove(&group_id) else {
+			return Ok(false);
+		};
+		let (Some(rank), crate::reporting_schemas::SchemaCoverage::Centrals(_)) = (rank, &coverage)
+		else {
+			return Ok(true);
+		};
+		let members = crate::applications::Application::list_live_in_group(db, group_id).await?;
+		Ok(coverage.covers(rank, &members))
 	}
 
 	/// Whether a run id is already recorded against a different consumer or

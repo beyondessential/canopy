@@ -369,7 +369,8 @@ async fn register_for_group(
 	})?;
 
 	let authorised = device.0.role == DeviceRole::Admin
-		|| RestoreReplica::authorizes_schema_artifacts(&mut db, device_id, group).await?;
+		|| RestoreReplica::authorizes_schema_artifacts(&mut db, device_id, group, Some(rank))
+			.await?;
 	if !authorised {
 		// Refused the same way whether the group exists or not, so the endpoint
 		// is not a directory of which groups have a builder.

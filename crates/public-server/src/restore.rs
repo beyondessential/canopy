@@ -240,13 +240,8 @@ async fn resolve_schema_group(
 		// The environment's own central, not the group's: restoring the
 		// group's highest-ranked one for every environment is what built one
 		// schema from the wrong configuration.
-		let in_environment: Vec<database::applications::Application> = members
-			.iter()
-			.filter(|m| m.rank == Some(rank))
-			.cloned()
-			.collect();
 		let Some(central) =
-			database::server_groups::ServerGroup::canonical_central(&in_environment)
+			database::server_groups::ServerGroup::environment_central(&members, rank)
 		else {
 			continue;
 		};
@@ -436,18 +431,6 @@ async fn worklist(
 				continue;
 			}
 
-			// A build restores the group's canonical central, so a declaration
-			// pinned to a machine names something this dispatch cannot honour.
-			// Retargeting it silently would build against a box the operator
-			// did not declare.
-			if d.machine_id.is_some() {
-				tracing::warn!(
-					replica = %d.id,
-					"a machine-scoped declaration builds no reporting schema; a build is per group"
-				);
-				continue;
-			}
-
 			// Sending the masking parameters unset is what tells a consumer not
 			// to redact, so an intent advertising both has to be told here as
 			// well rather than inheriting the defaults declared with it.
@@ -473,7 +456,27 @@ async fn worklist(
 				continue;
 			};
 
+			if let Some(machine) = d.machine_id
+				&& !group.environments.iter().any(|e| e.machine_id == machine)
+			{
+				tracing::warn!(
+					replica = %d.id,
+					%machine,
+					"a declaration on a machine running no environment's central builds no reporting schema"
+				);
+			}
+
 			for environment in &group.environments {
+				// A declaration on a machine builds for the environment whose
+				// central runs there. Retargeting it would build against a box
+				// the operator did not declare.
+				// spec: RPT#pairs
+				if d.machine_id
+					.is_some_and(|machine| machine != environment.machine_id)
+				{
+					continue;
+				}
+
 				let latest = snapshots.get(&(environment.machine_id, d.r#type.clone()));
 
 				for version in &environment.versions {
@@ -1211,18 +1214,20 @@ async fn verification(
 		(_, Some(build)) => {
 			// A build report settles the pair: it stops the pair being
 			// dispatched again and clears an operator's ask. Nothing but a
-			// consumer authorised to publish the group's schema may say so, or
-			// a plain verify consumer settles a pair no schema was built for.
+			// consumer authorised to publish the restored environment's schema
+			// may say so, or a plain verify consumer settles a pair no schema
+			// was built for.
 			// spec: RPT#the-build-contract
 			if !RestoreReplica::authorizes_schema_artifacts(
 				&mut conn,
 				consumer_device_id,
 				args.group,
+				reported.rank,
 			)
 			.await?
 			{
 				return Err(AppError::AuthInsufficientPermissions {
-					required: "an enabled declaration building this group's schemas".into(),
+					required: "an enabled declaration building this environment's schemas".into(),
 				});
 			}
 
@@ -1290,13 +1295,8 @@ async fn verification(
 			let members =
 				database::applications::Application::list_live_in_group(&mut conn, args.group)
 					.await?;
-			let in_environment: Vec<database::applications::Application> = members
-				.iter()
-				.filter(|m| m.rank == Some(rank))
-				.cloned()
-				.collect();
 			let application_id =
-				database::server_groups::ServerGroup::canonical_central(&in_environment)
+				database::server_groups::ServerGroup::environment_central(&members, rank)
 					.map(|a| a.id);
 			ReportingSchemaBuild::record(
 				&mut conn,

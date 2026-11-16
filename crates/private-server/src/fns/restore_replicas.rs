@@ -207,8 +207,9 @@ pub struct RestoreReplicasCreateArgs {
 	#[serde(default)]
 	pub redacts: bool,
 	/// Whether this consumer may publish the group's reporting schema.
-	/// Accepted only for a group-wide, non-redacting declaration whose intent
-	/// carries the `reporting-schema` semantic. Defaults to false, so a
+	/// Accepted only for a non-redacting declaration whose intent carries the
+	/// `reporting-schema` semantic, scoped to the group or to the machine one
+	/// of its environments builds from. Defaults to false, so a
 	/// consumer publishes only where an operator has said it may.
 	#[serde(default)]
 	pub publishes_schemas: bool,
@@ -263,8 +264,9 @@ pub struct RestoreReplicasUpdateArgs {
 	#[serde(default)]
 	pub redacts: bool,
 	/// Whether this consumer may publish the group's reporting schema.
-	/// Accepted only for a group-wide, non-redacting declaration whose intent
-	/// carries the `reporting-schema` semantic. Defaults to false.
+	/// Accepted only for a non-redacting declaration whose intent carries the
+	/// `reporting-schema` semantic, scoped to the group or to the machine one
+	/// of its environments builds from. Defaults to false.
 	#[serde(default)]
 	pub publishes_schemas: bool,
 	/// Whether a migrating declaration tests only when an operator asks from
@@ -309,6 +311,7 @@ async fn normalized_params_for_intent(
 	params: &ParamValues,
 	redacts: bool,
 	publishes_schemas: bool,
+	group_id: Uuid,
 	machine_id: Option<Uuid>,
 ) -> Result<ParamValues> {
 	// What a build is dispatched for does not depend on the intent's descriptor,
@@ -321,10 +324,28 @@ async fn normalized_params_for_intent(
 				"a redacting declaration cannot publish a reporting schema".into(),
 			));
 		}
-		if machine_id.is_some() {
-			return Err(AppError::BadRequest(
-				"a machine-scoped declaration cannot publish a reporting schema: a build is per group".into(),
-			));
+		// A build restores an environment's central, so a declaration on a
+		// machine names the environment by naming where its central runs.
+		// spec: RPT#pairs
+		if let Some(machine_id) = machine_id {
+			let machine = database::machines::Machine::get_by_id(conn, machine_id).await?;
+			let members = if machine.group_id == Some(group_id) && machine.deleted_at.is_none() {
+				database::applications::Application::list_live_in_group(conn, group_id).await?
+			} else {
+				Vec::new()
+			};
+			let coverage = database::reporting_schemas::SchemaCoverage::Centrals(
+				std::collections::HashSet::from([machine_id]),
+			);
+			if !members
+				.iter()
+				.filter_map(|a| a.rank)
+				.any(|rank| coverage.covers(rank, &members))
+			{
+				return Err(AppError::BadRequest(
+					"a declaration on a machine publishes a reporting schema only where that machine runs an environment's Tamanu central".into(),
+				));
+			}
 		}
 	}
 
@@ -346,9 +367,9 @@ async fn normalized_params_for_intent(
 		)));
 	}
 
-	// A schema is built per group from its canonical central, from data the
-	// masking manifest has not altered, so a declaration Canopy would never
-	// dispatch a build to cannot be the group's publisher either.
+	// A schema is built from an environment's central, from data the masking
+	// manifest has not altered, so a declaration Canopy would never dispatch a
+	// build to cannot be the group's publisher either.
 	// spec: RPT#the-build-contract
 	if publishes_schemas && !desc.has_semantic(semantics::REPORTING_SCHEMA) {
 		return Err(AppError::BadRequest(format!(
@@ -826,6 +847,7 @@ pub async fn create(
 		&args.params,
 		args.redacts,
 		args.publishes_schemas,
+		args.group_id,
 		args.machine_id,
 	)
 	.await?;
@@ -909,6 +931,7 @@ pub async fn update(
 		&args.params,
 		args.redacts,
 		args.publishes_schemas,
+		args.group_id,
 		args.machine_id,
 	)
 	.await?;

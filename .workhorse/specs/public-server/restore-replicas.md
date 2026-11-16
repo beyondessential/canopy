@@ -132,7 +132,7 @@ Each declaration carries:
 - a human-readable **name**, distinct from every other declaration assigned to the same consumer;
 - **parameter values** for the intent's schema, defaulted where the schema provides one;
 - whether the replica **redacts**, offered only for an intent carrying `redact` (see [Redaction](#redaction));
-- whether the declaration **publishes its group's reporting schema**, offered only for a group-wide, non-redacting declaration of an intent carrying `reporting-schema` (see [RPT](reporting-schemas.md));
+- whether the declaration **publishes its group's reporting schema**, offered only for a non-redacting declaration of an intent carrying `reporting-schema`, group-wide or on the machine an environment builds from (see [RPT](reporting-schemas.md));
 - an **overdue bound**: the maximum time a replica may go without meeting its intent's health expectation before Canopy considers it overdue, interpreted per the intent's semantics (see [Alerting](#alerting));
 - whether the declaration is **enabled**.
 

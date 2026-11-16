@@ -569,22 +569,27 @@ function RedactionField({
 }
 
 /** The publishing switch, shown only for an intent that builds reporting
- * schemas. A build is per group from data the masking manifest has not
- * altered, so a machine-scoped or redacting declaration cannot carry it. */
+ * schemas. A build reads data the masking manifest has not altered, so a
+ * redacting declaration cannot carry it. */
 function PublishesSchemasField({
 	value,
 	onChange,
-	disabled,
-	why,
+	redacts,
+	oneMachine,
 }: {
 	value: boolean;
 	onChange: (value: boolean) => void;
-	disabled: boolean;
-	why: string;
+	redacts: boolean;
+	oneMachine: boolean;
 }) {
+	const caption = redacts
+		? "A redacting replica builds no schema: masking alters the configuration a schema follows from."
+		: oneMachine
+			? "Builds only for the environment whose central runs on this machine."
+			: "Lets this consumer register the schema every application in the group is offered.";
 	return (
 		<FormControlLabel
-			disabled={disabled}
+			disabled={redacts}
 			control={
 				<Switch
 					size="small"
@@ -598,9 +603,7 @@ function PublishesSchemasField({
 						Publish this group's reporting schema
 					</Typography>
 					<Typography variant="caption" color="text.secondary">
-						{disabled
-							? why
-							: "Lets this consumer register the schema every application in the group is offered."}
+						{caption}
 					</Typography>
 				</Stack>
 			}
@@ -966,11 +969,10 @@ function CreateReplicaDialog({
 		if (!canRedact) setRedacts(false);
 	}, [canRedact]);
 
-	// A build is dispatched per group from unmasked data, so narrowing the
-	// declaration to a machine or turning redaction on drops the flag with it.
+	// A build reads unmasked data, so turning redaction on drops the flag.
 	useEffect(() => {
-		if (!canPublishSchemas || redacts || serverId) setPublishesSchemas(false);
-	}, [canPublishSchemas, redacts, serverId]);
+		if (!canPublishSchemas || redacts) setPublishesSchemas(false);
+	}, [canPublishSchemas, redacts]);
 	useEffect(() => {
 		if (!canMigrateOnRequest) setMigratesOnRequest(false);
 	}, [canMigrateOnRequest]);
@@ -1085,12 +1087,8 @@ function CreateReplicaDialog({
 						<PublishesSchemasField
 							value={publishesSchemas}
 							onChange={setPublishesSchemas}
-							disabled={redacts || Boolean(serverId)}
-							why={
-								redacts
-									? "A redacting replica builds no schema: masking alters the configuration a schema follows from."
-									: "A build is per group: pick every machine in the group to publish its schema."
-							}
+							redacts={redacts}
+							oneMachine={Boolean(serverId)}
 						/>
 					)}
 
@@ -1194,11 +1192,10 @@ function EditReplicaDialog({
 		if (!canRedact) setRedacts(false);
 	}, [canRedact]);
 
-	// A build is dispatched per group from unmasked data, so narrowing the
-	// declaration to a machine or turning redaction on drops the flag with it.
+	// A build reads unmasked data, so turning redaction on drops the flag.
 	useEffect(() => {
-		if (!canPublishSchemas || redacts || serverId) setPublishesSchemas(false);
-	}, [canPublishSchemas, redacts, serverId]);
+		if (!canPublishSchemas || redacts) setPublishesSchemas(false);
+	}, [canPublishSchemas, redacts]);
 	useEffect(() => {
 		if (!canMigrateOnRequest) setMigratesOnRequest(false);
 	}, [canMigrateOnRequest]);
@@ -1316,12 +1313,8 @@ function EditReplicaDialog({
 						<PublishesSchemasField
 							value={publishesSchemas}
 							onChange={setPublishesSchemas}
-							disabled={redacts || Boolean(serverId)}
-							why={
-								redacts
-									? "A redacting replica builds no schema: masking alters the configuration a schema follows from."
-									: "A build is per group: pick every machine in the group to publish its schema."
-							}
+							redacts={redacts}
+							oneMachine={Boolean(serverId)}
 						/>
 					)}
 

@@ -35,6 +35,7 @@ The pairs are, for each environment of a group covered by an enabled declaration
 Two environments of one group on one version are two pairs, since the configuration each follows from is its own.
 An application Canopy holds no rank for is in none of the group's environments, so it is in no pair until an operator ranks it (see [GRP](../servers/groups.md), "Environments").
 That declaration is what covers a group: it names the group, is enabled or disabled, carries the operator's mark, and is audited (see [RST](restore-replicas.md) and [AUD](../platform/audit-log.md)).
+A group-wide declaration covers every environment of the group, and one on a machine covers the environment whose central runs on that machine and no other, so a schema can be built and offered for a clone without one being built for production.
 Only a published version is in a pair, since a version's migrations reach a builder as its published artifacts (see [ART](../platform/artifacts.md)) and an unpublished one has none.
 
 A pair with no schema is built, and a pair with one is settled.
@@ -57,8 +58,8 @@ In the run it reports, the builder registers the **reporting schema** as an arti
 The schema is the only type it may register: what is published for an environment is offered to every machine in it and fetched, so the authorisation stays defined with the artifact it was written for.
 The builder is authorised to register artifacts for a group whose enabled declaration an operator has marked as publishing its reporting schema, and for no other, and is the one device other than a releaser that registers artifacts (see [ART](../platform/artifacts.md)).
 The mark is the operator's alone, and is the whole of the authorisation: a consumer registers the set of semantics it advertises itself, so they shape what Canopy dispatches to it and grant it nothing, and what is published for an environment is offered to every machine in it and applied.
-The mark covers the group, and so every environment of it: an environment is not separately marked, since the declaration a build is dispatched for is the group's.
-Only a group-wide, non-redacting declaration of an intent carrying `reporting-schema` can carry the mark, which is the same declaration a build is dispatched for, so Canopy asks for no build it would refuse the result of.
+The mark reaches as far as the declaration carrying it: every environment of the group for a group-wide declaration, and one environment for a declaration on that environment's central, which authorises registering that environment's schema and no other's.
+Only a non-redacting declaration of an intent carrying `reporting-schema`, group-wide or on the machine an environment builds from, can carry the mark, which is the same declaration a build is dispatched for, so Canopy asks for no build it would refuse the result of.
 
 A schema is published for the exact version and never for a range, since it follows from the migrations that version applies, and one built against a patch is not the schema another patch of the same minor describes.
 

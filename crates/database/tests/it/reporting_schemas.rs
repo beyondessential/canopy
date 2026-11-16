@@ -1115,3 +1115,61 @@ async fn an_environment_with_no_central_to_restore_is_no_pair() {
 	})
 	.await;
 }
+
+/// A declaration on a machine covers the environment whose central runs
+/// there. The group's other environments are owed no schema by it, so they
+/// present no pairs.
+// spec: RPT#pairs
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_on_a_central_covers_its_environment_alone() {
+	TestDb::run(|mut conn, _url| async move {
+		seed(&mut conn).await;
+
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name, group_id, rank)
+			 VALUES ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'clone box', '{GROUP}', 'clone');
+
+			 INSERT INTO applications (id, type, name, host, machine_id, group_id, rank)
+			 VALUES ('ffffffff-0000-ffff-0000-ffffffffffff', 'tamanu-central', 'clone central',
+			         'https://cc', 'ffffffff-ffff-ffff-ffff-ffffffffffff', '{GROUP}', 'clone');
+
+			 INSERT INTO application_reported_detail (application_id, source, reported_at, version)
+			 VALUES ('ffffffff-0000-ffff-0000-ffffffffffff', 'tamanu', NOW(), '2.60.0')",
+		))
+		.await
+		.expect("seed a clone environment");
+		declare_builder(&mut conn, true).await;
+
+		let ranks = |pairs: &[database::reporting_schemas::Pair]| {
+			let mut ranks: Vec<ServerRank> = pairs.iter().map(|pair| pair.rank).collect();
+			ranks.sort();
+			ranks.dedup();
+			ranks
+		};
+
+		let group_wide = pairs_for_group(&mut conn, group())
+			.await
+			.expect("the group's pairs");
+		assert_eq!(
+			ranks(&group_wide),
+			vec![ServerRank::Production, ServerRank::Clone],
+			"a group-wide declaration covers every environment"
+		);
+
+		conn.batch_execute(
+			"UPDATE restore_replicas SET machine_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'",
+		)
+		.await
+		.expect("scope the declaration to the clone central's machine");
+
+		let scoped = pairs_for_group(&mut conn, group())
+			.await
+			.expect("the group's pairs");
+		assert_eq!(
+			ranks(&scoped),
+			vec![ServerRank::Clone],
+			"production is owed no schema by a declaration on the clone's central"
+		);
+	})
+	.await;
+}
