@@ -155,7 +155,7 @@ test.describe("reporting schemas", () => {
 	/// "Awaiting build" reads as a backlog rather than as an absent builder.
 	///
 	/// spec: RPT#pairs
-	test("a group with no builder declared shows no pairs", async ({
+	test("a group with no builder declared shows no section", async ({
 		page,
 		sql,
 	}) => {
@@ -171,12 +171,11 @@ test.describe("reporting schemas", () => {
 			version: "2.60.0",
 		});
 
+		const answered = page.waitForResponse("**/reporting_schemas/for_group**");
 		await page.goto(`/groups/${group.id}`);
+		await answered;
 
-		const section = page.getByTestId("reporting-schemas");
-		await expect(section).toBeVisible();
-		await expect(section.getByTestId("reporting-schema-row")).toHaveCount(0);
-		await expect(section.getByText(/no builder is declared/i)).toBeVisible();
+		await expect(page.getByTestId("reporting-schemas")).toHaveCount(0);
 	});
 
 	/// A group is owed a schema for where it is going as well as where it is:
