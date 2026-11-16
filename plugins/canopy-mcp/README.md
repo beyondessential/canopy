@@ -70,3 +70,14 @@ Setup:
    > `get_alert_triage_guidance` tool and start today's write-up thread as
    > its "morning write-up" section describes, titled "Alert triage ·
    > <weekday> <d Mon> (NZ)".
+
+Before turning it on:
+
+- **Spend.** Each alert costs one Claude session. Set a spend limit on the
+  bundle and watch the first week.
+- **Patient data.** Claude Tag is not covered by Anthropic's BAA, and check
+  messages are free text. Confirm none of the checks posting to the alerts
+  channel carries patient data.
+- **Repeats.** Claude spots a repeated alert by comparing with the latest
+  triage note on the incident. If repeats are reported twice in the first
+  week, tighten the note format in the guidance.
