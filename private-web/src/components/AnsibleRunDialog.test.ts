@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -38,11 +38,15 @@ describe("buildCommand", () => {
 			mkdirSync(join(dir, "ansible"));
 			writeFileSync(join(bin, "git"), `#!/bin/sh\nexit ${gitExit}\n`, { mode: 0o755 });
 			writeFileSync(join(bin, "uv"), `#!/bin/sh\ntouch "${dir}/ran"\n`, { mode: 0o755 });
-			spawnSync("sh", ["-c", copied], {
-				cwd: dir,
-				env: { PATH: `${bin}:/usr/bin:/bin` },
-			});
-			return existsSync(join(dir, "ran"));
+			try {
+				spawnSync("sh", ["-c", copied], {
+					cwd: dir,
+					env: { PATH: `${bin}:/usr/bin:/bin` },
+				});
+				return existsSync(join(dir, "ran"));
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
 		};
 		expect(run(0)).toBe(true);
 		expect(run(1)).toBe(false);
