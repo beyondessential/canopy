@@ -1,9 +1,7 @@
 import {
 	Alert,
-	Box,
 	Button,
 	Chip,
-	LinearProgress,
 	Paper,
 	Stack,
 	Table,
@@ -15,6 +13,7 @@ import {
 	Typography,
 } from "@mui/material";
 import DownloadIcon from "@mui/icons-material/Download";
+import HelpOutlinedIcon from "@mui/icons-material/HelpOutlined";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { GradedAction } from "./GradedAction";
@@ -43,14 +42,7 @@ export default function ReportingSchemasSection({
 	const build = useApiAction("reporting_schemas", "build");
 	const isAdmin = useIsAdmin() === true;
 
-	if (pairs.status === "loading" || pairs.status === "idle") {
-		return (
-			<Paper variant="outlined" sx={{ p: 2 }}>
-				<SectionHeading />
-				<LinearProgress />
-			</Paper>
-		);
-	}
+	if (pairs.status === "loading" || pairs.status === "idle") return null;
 	if (pairs.status === "error") {
 		return (
 			<Paper variant="outlined" sx={{ p: 2 }}>
@@ -60,18 +52,7 @@ export default function ReportingSchemasSection({
 		);
 	}
 
-	if (pairs.data.length === 0) {
-		return (
-			<Paper variant="outlined" sx={{ p: 2 }} data-testid="reporting-schemas">
-				<SectionHeading />
-				<Typography variant="body2" color="text.secondary">
-					Nothing to build for this group: either no builder is declared for it
-					under Backups, or no Tamanu application in it reports a published
-					version.
-				</Typography>
-			</Paper>
-		);
-	}
+	if (pairs.data.length === 0) return null;
 
 	const ask = async (rank: string, versionId: string) => {
 		try {
@@ -225,14 +206,17 @@ function StateChip({
 
 function SectionHeading() {
 	return (
-		<Box sx={{ mb: 1 }}>
+		<Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "baseline" }}>
 			<Typography variant="h6" component="h2">
 				Reporting schemas
 			</Typography>
-			<Typography variant="body2" color="text.secondary">
-				One per environment and version this group runs or is moving to, built
-				from a replica of that environment's own data.
-			</Typography>
-		</Box>
+			<Tooltip title="One per environment and version this group runs or is moving to, built from a replica of that environment's data." arrow>
+				<HelpOutlinedIcon
+					tabIndex={0}
+					aria-label="About reporting schemas"
+					sx={{ fontSize: 16, color: "text.secondary", alignSelf: "center" }}
+				/>
+			</Tooltip>
+		</Stack>
 	);
 }

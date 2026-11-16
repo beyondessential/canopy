@@ -1,12 +1,12 @@
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import HelpOutlinedIcon from "@mui/icons-material/HelpOutlined";
 import {
 	Alert,
 	Box,
 	Button,
 	Chip,
 	Collapse,
-	LinearProgress,
 	Link as MuiLink,
 	Paper,
 	Stack,
@@ -83,14 +83,7 @@ export default function MigrationTestsSection({
 		section.scrollIntoView();
 	}, [verdicts.status]);
 
-	if (verdicts.status === "loading" || verdicts.status === "idle") {
-		return (
-			<Paper variant="outlined" sx={{ p: 2 }}>
-				<SectionHeading />
-				<LinearProgress />
-			</Paper>
-		);
-	}
+	if (verdicts.status === "loading" || verdicts.status === "idle") return null;
 	if (verdicts.status === "error") {
 		return (
 			<Paper variant="outlined" sx={{ p: 2 }}>
@@ -100,22 +93,7 @@ export default function MigrationTestsSection({
 		);
 	}
 
-	if (verdicts.data.length === 0) {
-		return (
-			<Paper
-				id="migration-tests"
-				variant="outlined"
-				sx={{ p: 2, scrollMarginTop: 16 }}
-				data-testid="migration-tests"
-			>
-				<SectionHeading />
-				<Typography variant="body2" color="text.secondary">
-					Nothing to test against: no upgrade plan is open for this group,
-					or its target is not a published version.
-				</Typography>
-			</Paper>
-		);
-	}
+	if (verdicts.data.length === 0) return null;
 
 	const tested = verdicts.data.filter((row) => row.set_up);
 	const others = verdicts.data.filter((row) => !row.set_up);
@@ -268,11 +246,18 @@ function SectionHeading({ target }: { target?: string | null }) {
 			<Typography variant="h6" component="h2">
 				Pre-upgrade migration tests
 			</Typography>
-			<Typography variant="body2" color="text.secondary">
-				{target
-					? `to ${target}`
-					: "run against a restore of each server's own data"}
-			</Typography>
+			{target && (
+				<Typography variant="body2" color="text.secondary">
+					to {target}
+				</Typography>
+			)}
+			<Tooltip title="Each server's upgrade migrations, run against a restore of its own data." arrow>
+				<HelpOutlinedIcon
+					tabIndex={0}
+					aria-label="About pre-upgrade migration tests"
+					sx={{ fontSize: 16, color: "text.secondary", alignSelf: "center" }}
+				/>
+			</Tooltip>
 		</Stack>
 	);
 }

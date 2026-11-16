@@ -180,7 +180,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		await expect(row).not.toContainText(server.id);
 	});
 
-	test("says so when the group has no open plan", async ({
+	test("shows no section when the group has no open plan", async ({
 		page,
 		sql,
 	}) => {
@@ -192,21 +192,25 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		});
 		await seedStatus(sql, { serverId: server.id, version: "2.62.0" });
 
+		const answered = page.waitForResponse("**/migration_tests/for_group**");
 		await page.goto(`/fleet/groups/${group.id}`);
+		await answered;
 
-		await expect(page.getByTestId("migration-tests")).toContainText(
-			"Nothing to test against",
-		);
+		await expect(page.getByTestId("migration-tests")).toHaveCount(0);
 	});
 
 	test("a link to the section opens on it", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "drifting" });
-		await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
+		const target = await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
 		const server = await seedServer(sql, {
 			name: "drifting-central",
 			groupId: group.id,
 		});
 		await seedStatus(sql, { serverId: server.id, version: "2.62.0" });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+		});
 
 		await page.setViewportSize({ width: 1280, height: 400 });
 		await page.goto(`/fleet/groups/${group.id}#migration-tests`);
