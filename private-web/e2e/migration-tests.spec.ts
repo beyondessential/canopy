@@ -180,7 +180,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		await expect(row).not.toContainText(server.id);
 	});
 
-	test("says so when the group has no open plan", async ({
+	test("shows no section when the group has no open plan", async ({
 		page,
 		sql,
 	}) => {
@@ -192,11 +192,11 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		});
 		await seedStatus(sql, { serverId: server.id, version: "2.62.0" });
 
+		const answered = page.waitForResponse("**/migration_tests/for_group**");
 		await page.goto(`/fleet/groups/${group.id}`);
+		await answered;
 
-		await expect(page.getByTestId("migration-tests")).toContainText(
-			"Nothing to test against",
-		);
+		await expect(page.getByTestId("migration-tests")).toHaveCount(0);
 	});
 
 	test("a link to the section opens on it", async ({ page, sql }) => {

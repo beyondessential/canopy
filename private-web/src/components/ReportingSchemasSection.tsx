@@ -1,9 +1,7 @@
 import {
 	Alert,
-	Box,
 	Button,
 	Chip,
-	LinearProgress,
 	Paper,
 	Stack,
 	Table,
@@ -43,14 +41,7 @@ export default function ReportingSchemasSection({
 	const build = useApiAction("reporting_schemas", "build");
 	const isAdmin = useIsAdmin() === true;
 
-	if (pairs.status === "loading" || pairs.status === "idle") {
-		return (
-			<Paper variant="outlined" sx={{ p: 2 }}>
-				<SectionHeading />
-				<LinearProgress />
-			</Paper>
-		);
-	}
+	if (pairs.status === "loading" || pairs.status === "idle") return null;
 	if (pairs.status === "error") {
 		return (
 			<Paper variant="outlined" sx={{ p: 2 }}>
@@ -60,13 +51,7 @@ export default function ReportingSchemasSection({
 		);
 	}
 
-	if (pairs.data.length === 0) {
-		return (
-			<Paper variant="outlined" sx={{ p: 2 }} data-testid="reporting-schemas">
-				<SectionHeading note="Nothing to build for this group: no builder is declared for it under Backups, or no Tamanu application in it reports a published version." />
-			</Paper>
-		);
-	}
+	if (pairs.data.length === 0) return null;
 
 	const ask = async (rank: string, versionId: string) => {
 		try {
@@ -218,24 +203,10 @@ function StateChip({
 	);
 }
 
-function SectionHeading({ note }: { note?: string }) {
+function SectionHeading() {
 	return (
-		<Box
-			sx={{
-				mb: note ? 0 : 1,
-				display: "flex",
-				alignItems: "baseline",
-				flexWrap: "wrap",
-				columnGap: 1,
-			}}
-		>
-			<Typography variant="h6" component="h2">
-				Reporting schemas
-			</Typography>
-			<Typography variant="body2" color="text.secondary">
-				{note ??
-					"One per environment and version this group runs or is moving to, built from a replica of that environment's own data."}
-			</Typography>
-		</Box>
+		<Typography variant="h6" component="h2" gutterBottom>
+			Reporting schemas
+		</Typography>
 	);
 }

@@ -239,16 +239,12 @@ describe("the environment a pair is for", () => {
 });
 
 describe("a group with nothing to build", () => {
-	// Two different reasons reach the same empty answer: no builder is declared
-	// for the group, or nothing in it reports a published version. Naming both
-	// is what stops an operator reading an absent builder as a backlog.
-	it("names both reasons rather than showing an empty table", async () => {
-		stubApi([]);
-		render(<ReportingSchemasSection groupId={GROUP} />);
+	it("shows no section", async () => {
+		const calls = stubApi([]);
+		const { container } = render(<ReportingSchemasSection groupId={GROUP} />);
 
-		const empty = await screen.findByText(/nothing to build for this group/i);
-		expect(empty.textContent).toMatch(/no builder is declared/i);
-		expect(empty.textContent).toMatch(/reports a published version/i);
-		expect(screen.queryByText("Version")).toBeNull();
+		await waitFor(() => expect(calls).toHaveLength(1));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(container.innerHTML).toBe("");
 	});
 });

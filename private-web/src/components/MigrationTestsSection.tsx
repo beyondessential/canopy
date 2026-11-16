@@ -6,7 +6,6 @@ import {
 	Button,
 	Chip,
 	Collapse,
-	LinearProgress,
 	Link as MuiLink,
 	Paper,
 	Stack,
@@ -83,14 +82,7 @@ export default function MigrationTestsSection({
 		section.scrollIntoView();
 	}, [verdicts.status]);
 
-	if (verdicts.status === "loading" || verdicts.status === "idle") {
-		return (
-			<Paper variant="outlined" sx={{ p: 2 }}>
-				<SectionHeading />
-				<LinearProgress />
-			</Paper>
-		);
-	}
+	if (verdicts.status === "loading" || verdicts.status === "idle") return null;
 	if (verdicts.status === "error") {
 		return (
 			<Paper variant="outlined" sx={{ p: 2 }}>
@@ -100,18 +92,7 @@ export default function MigrationTestsSection({
 		);
 	}
 
-	if (verdicts.data.length === 0) {
-		return (
-			<Paper
-				id="migration-tests"
-				variant="outlined"
-				sx={{ p: 2, scrollMarginTop: 16 }}
-				data-testid="migration-tests"
-			>
-				<SectionHeading note="Nothing to test against: no upgrade plan is open for this group, or its target is not a published version." />
-			</Paper>
-		);
-	}
+	if (verdicts.data.length === 0) return null;
 
 	const tested = verdicts.data.filter((row) => row.set_up);
 	const others = verdicts.data.filter((row) => !row.set_up);
@@ -258,32 +239,17 @@ const VERDICT_ORDER: Record<string, number> = {
 	passed: 2,
 };
 
-function SectionHeading({
-	target,
-	note,
-}: {
-	target?: string | null;
-	note?: string;
-}) {
+function SectionHeading({ target }: { target?: string | null }) {
 	return (
-		<Stack
-			direction="row"
-			sx={{
-				mb: note ? 0 : 1,
-				alignItems: "baseline",
-				flexWrap: "wrap",
-				columnGap: 1,
-			}}
-		>
+		<Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "baseline" }}>
 			<Typography variant="h6" component="h2">
 				Pre-upgrade migration tests
 			</Typography>
-			<Typography variant="body2" color="text.secondary">
-				{note ??
-					(target
-						? `to ${target}`
-						: "run against a restore of each server's own data")}
-			</Typography>
+			{target && (
+				<Typography variant="body2" color="text.secondary">
+					to {target}
+				</Typography>
+			)}
 		</Stack>
 	);
 }
