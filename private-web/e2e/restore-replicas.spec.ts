@@ -321,12 +321,11 @@ test.describe("restore replicas", () => {
 		await expect(page.getByText("publishes schema").first()).toBeVisible();
 	});
 
-	/// A build is dispatched per group from data the masking manifest has not
-	/// altered, so a declaration narrowed to one machine cannot be the group's
-	/// publisher.
+	/// A declaration on one machine publishes for the environment whose central
+	/// runs there, so narrowing the declaration keeps the mark.
 	///
-	/// spec: RPT#the-build-contract
-	test("a machine-scoped declaration cannot publish the schema", async ({
+	/// spec: RPT#pairs
+	test("a declaration on one machine can publish its environment's schema", async ({
 		page,
 		sql,
 	}) => {
@@ -342,13 +341,15 @@ test.describe("restore replicas", () => {
 			name: /publish this group's reporting schema/i,
 		});
 		await publishes.check();
-		await expect(publishes).toBeChecked();
 
 		await dialog.getByLabel("Machine").click();
 		await page.getByRole("option", { name: "publish-one" }).click();
 
-		await expect(publishes).toBeDisabled();
-		await expect(publishes).not.toBeChecked();
+		await expect(publishes).toBeEnabled();
+		await expect(publishes).toBeChecked();
+		await expect(
+			dialog.getByText(/only for the environment whose central runs on this machine/i),
+		).toBeVisible();
 	});
 
 	test("a partial redaction shows against the report that carried it", async ({

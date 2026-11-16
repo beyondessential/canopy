@@ -321,10 +321,22 @@ async fn normalized_params_for_intent(
 				"a redacting declaration cannot publish a reporting schema".into(),
 			));
 		}
-		if machine_id.is_some() {
-			return Err(AppError::BadRequest(
-				"a machine-scoped declaration cannot publish a reporting schema: a build is per group".into(),
-			));
+		// A build restores an environment's central, so a declaration on a
+		// machine names the environment by naming where its central runs.
+		// spec: RPT#pairs
+		if let Some(machine_id) = machine_id {
+			let on_box = database::machines::Machine::get_by_id(conn, machine_id)
+				.await?
+				.applications(conn)
+				.await?;
+			if !on_box.iter().any(|a| {
+				a.r#type == commons_types::server::app_type::ApplicationType::TamanuCentral
+					&& a.rank.is_some()
+			}) {
+				return Err(AppError::BadRequest(
+					"a declaration on a machine publishes a reporting schema only where that machine runs a ranked Tamanu central".into(),
+				));
+			}
 		}
 	}
 
@@ -346,9 +358,9 @@ async fn normalized_params_for_intent(
 		)));
 	}
 
-	// A schema is built per group from its canonical central, from data the
-	// masking manifest has not altered, so a declaration Canopy would never
-	// dispatch a build to cannot be the group's publisher either.
+	// A schema is built from an environment's central, from data the masking
+	// manifest has not altered, so a declaration Canopy would never dispatch a
+	// build to cannot be the group's publisher either.
 	// spec: RPT#the-build-contract
 	if publishes_schemas && !desc.has_semantic(semantics::REPORTING_SCHEMA) {
 		return Err(AppError::BadRequest(format!(

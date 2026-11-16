@@ -436,18 +436,6 @@ async fn worklist(
 				continue;
 			}
 
-			// A build restores the group's canonical central, so a declaration
-			// pinned to a machine names something this dispatch cannot honour.
-			// Retargeting it silently would build against a box the operator
-			// did not declare.
-			if d.machine_id.is_some() {
-				tracing::warn!(
-					replica = %d.id,
-					"a machine-scoped declaration builds no reporting schema; a build is per group"
-				);
-				continue;
-			}
-
 			// Sending the masking parameters unset is what tells a consumer not
 			// to redact, so an intent advertising both has to be told here as
 			// well rather than inheriting the defaults declared with it.
@@ -474,6 +462,16 @@ async fn worklist(
 			};
 
 			for environment in &group.environments {
+				// A declaration on a machine builds for the environment whose
+				// central runs there. Retargeting it would build against a box
+				// the operator did not declare.
+				// spec: RPT#pairs
+				if d.machine_id
+					.is_some_and(|machine| machine != environment.machine_id)
+				{
+					continue;
+				}
+
 				let latest = snapshots.get(&(environment.machine_id, d.r#type.clone()));
 
 				for version in &environment.versions {
@@ -1218,6 +1216,7 @@ async fn verification(
 				&mut conn,
 				consumer_device_id,
 				args.group,
+				None,
 			)
 			.await?
 			{
@@ -1251,6 +1250,18 @@ async fn verification(
 				BackupRestoreCheck::record_report(&mut conn, report).await?;
 				return Ok(StatusCode::NO_CONTENT);
 			};
+			if !RestoreReplica::authorizes_schema_artifacts(
+				&mut conn,
+				consumer_device_id,
+				args.group,
+				Some(rank),
+			)
+			.await?
+			{
+				return Err(AppError::AuthInsufficientPermissions {
+					required: "an enabled declaration building this environment's schemas".into(),
+				});
+			}
 			// A schema registered against an environment other than the one
 			// restored would be applied by machines the build never read,
 			// while the pair it is filed against reads as built. The build

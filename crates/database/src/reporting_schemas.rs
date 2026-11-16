@@ -400,12 +400,12 @@ pub struct Pair {
 /// nothing will pick up.
 // spec: RPT#pairs
 pub async fn pairs_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<Vec<Pair>> {
-	if !groups_building_schemas(db).await?.contains(&group) {
+	let Some(coverage) = groups_building_schemas(db).await?.remove(&group) else {
 		return Ok(Vec::new());
-	}
+	};
 
 	let members = crate::applications::Application::list_live_in_group(db, group).await?;
-	pairs_of_members(db, group, &members).await
+	pairs_of_members(db, group, &members, &coverage).await
 }
 
 /// The pairs of a group already known to have a builder, from members already
@@ -415,8 +415,9 @@ async fn pairs_of_members(
 	db: &mut AsyncPgConnection,
 	group: Uuid,
 	members: &[crate::applications::Application],
+	coverage: &SchemaCoverage,
 ) -> Result<Vec<Pair>> {
-	let versions = versions_and_applications(db, group, members).await?;
+	let versions = versions_and_applications(db, group, members, coverage).await?;
 	let builds = ReportingSchemaBuild::latest_by_pair_for_group(db, group).await?;
 	let requests = ReportingSchemaRequest::pending_for_group(db, group).await?;
 
@@ -459,11 +460,13 @@ pub async fn pairs_of_live_members(
 	group: Uuid,
 	members: &[crate::applications::Application],
 ) -> Result<Vec<(ServerRank, Version)>> {
-	Ok(versions_and_applications(db, group, members)
-		.await?
-		.into_iter()
-		.map(|(rank, version, _)| (rank, version))
-		.collect())
+	Ok(
+		versions_and_applications(db, group, members, &SchemaCoverage::Group)
+			.await?
+			.into_iter()
+			.map(|(rank, version, _)| (rank, version))
+			.collect(),
+	)
 }
 
 /// A group's pairs, and which of its Tamanu applications report each one.
@@ -483,12 +486,17 @@ async fn versions_and_applications(
 	db: &mut AsyncPgConnection,
 	group: Uuid,
 	applications: &[crate::applications::Application],
+	coverage: &SchemaCoverage,
 ) -> Result<Vec<(ServerRank, Version, Vec<String>)>> {
 	use commons_types::version::VersionStatus;
 
 	let tamanu: Vec<&crate::applications::Application> = applications
 		.iter()
 		.filter(|a| a.r#type.software() == "tamanu")
+		.filter(|a| {
+			a.rank
+				.is_none_or(|rank| coverage.covers(rank, applications))
+		})
 		.collect();
 
 	let ids: Vec<Uuid> = tamanu.iter().map(|a| a.id).collect();
@@ -643,7 +651,7 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 	// spec: RPT#alerting
 	let open = applications_with_open_issue(db, refs::REPORTING_SCHEMA).await?;
 	let walk: std::collections::HashSet<Uuid> = builders
-		.iter()
+		.keys()
 		.copied()
 		.chain(open.iter().filter_map(|(_, group)| *group))
 		.collect();
@@ -668,8 +676,8 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 			continue;
 		};
 
-		let pairs = if builders.contains(&group.id) {
-			pairs_of_members(db, group.id, &members).await?
+		let pairs = if let Some(coverage) = builders.get(&group.id) {
+			pairs_of_members(db, group.id, &members, coverage).await?
 		} else {
 			Vec::new()
 		};
@@ -747,19 +755,66 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 	Ok(())
 }
 
-/// The groups an enabled declaration builds schemas for.
+/// Which of a group's environments its declaration builds schemas for.
+// spec: RPT#pairs
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SchemaCoverage {
+	/// A group-wide declaration covers every environment.
+	Group,
+	/// A declaration on a machine covers the environment whose central runs
+	/// on it.
+	Centrals(std::collections::HashSet<Uuid>),
+}
+
+impl SchemaCoverage {
+	/// Fold each group's publishing declarations, given as the machine each
+	/// is scoped to, into what the group is covered for.
+	pub fn by_group(
+		declared: impl IntoIterator<Item = (Uuid, Option<Uuid>)>,
+	) -> std::collections::HashMap<Uuid, Self> {
+		let mut out = std::collections::HashMap::new();
+		for (group, machine) in declared {
+			match (
+				out.entry(group)
+					.or_insert(Self::Centrals(Default::default())),
+				machine,
+			) {
+				(covered, None) => *covered = Self::Group,
+				(Self::Centrals(machines), Some(machine)) => {
+					machines.insert(machine);
+				}
+				(Self::Group, Some(_)) => {}
+			}
+		}
+		out
+	}
+
+	pub fn covers(&self, rank: ServerRank, members: &[crate::applications::Application]) -> bool {
+		match self {
+			Self::Group => true,
+			Self::Centrals(machines) => {
+				crate::server_groups::ServerGroup::environment_central(members, rank)
+					.and_then(|central| central.machine_id)
+					.is_some_and(|machine| machines.contains(&machine))
+			}
+		}
+	}
+}
+
+/// The groups an enabled declaration builds schemas for, and how much of each
+/// it covers.
 ///
 /// The same conditions `RestoreReplica::authorizes_schema_artifacts` asks of one
 /// consumer and one group, asked of the fleet at once: dispatching builds a
 /// group would then refuse to accept is the divergence worth not having.
 async fn groups_building_schemas(
 	db: &mut AsyncPgConnection,
-) -> Result<std::collections::HashSet<Uuid>> {
+) -> Result<std::collections::HashMap<Uuid, SchemaCoverage>> {
 	use crate::schema::{restore_consumer_capabilities, restore_replicas};
 	use diesel::dsl::sql;
 	use diesel::sql_types::Bool;
 
-	let groups: Vec<Uuid> = restore_replicas::table
+	let declared: Vec<(Uuid, Option<Uuid>)> = restore_replicas::table
 		.inner_join(
 			restore_consumer_capabilities::table.on(
 				restore_consumer_capabilities::consumer_device_id
@@ -769,18 +824,17 @@ async fn groups_building_schemas(
 		)
 		.filter(restore_replicas::enabled.eq(true))
 		.filter(restore_replicas::publishes_schemas.eq(true))
-		// Dispatch builds no schema from a redacting or machine-scoped
-		// declaration, and one nothing is dispatched for publishes nothing.
+		// Dispatch builds no schema from a redacting declaration, and one
+		// nothing is dispatched for publishes nothing.
 		.filter(restore_replicas::redacts.eq(false))
-		.filter(restore_replicas::machine_id.is_null())
 		.filter(sql::<Bool>(
 			"restore_consumer_capabilities.semantics @> '[\"reporting-schema\"]'::jsonb",
 		))
-		.select(restore_replicas::group_id)
+		.select((restore_replicas::group_id, restore_replicas::machine_id))
 		.distinct()
 		.load(db)
 		.await
 		.map_err(AppError::from)?;
 
-	Ok(groups.into_iter().collect())
+	Ok(SchemaCoverage::by_group(declared))
 }

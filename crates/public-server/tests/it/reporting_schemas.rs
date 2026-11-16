@@ -140,22 +140,47 @@ async fn a_second_declaration_dispatches_no_second_build() {
 	.await
 }
 
-/// A build restores the group's canonical central, so a declaration pinned to a
-/// machine names something this dispatch cannot honour. Retargeting it silently
-/// would build against a box the operator did not declare.
+const CLONE_MACHINE: &str = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+const CLONE_CENTRAL: &str = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+
+/// Give the seeded group a clone environment with its own central and
+/// snapshot, and scope the declaration to that central's machine.
+async fn declare_on_the_clone_central(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	consumer: uuid::Uuid,
+) {
+	conn.batch_execute(&format!(
+		"INSERT INTO machines (id, name, group_id, rank)
+		 VALUES ('{CLONE_MACHINE}', 'clone-box', '{GROUP}', 'clone');
+
+		 INSERT INTO applications (id, type, name, host, machine_id, group_id)
+		 VALUES ('{CLONE_CENTRAL}', 'tamanu-central', 'clone-central', 'https://cc', '{CLONE_MACHINE}', '{GROUP}');
+
+		 INSERT INTO application_reported_detail (application_id, source, reported_at, version)
+		 VALUES ('{CLONE_CENTRAL}', 'tamanu', NOW(), '2.60.0');
+
+		 INSERT INTO backup_runs
+		   (id, device_id, machine_id, group_id, type, purpose, outcome, snapshot_id, reported_at)
+		 VALUES (gen_random_uuid(), '{consumer}', '{CLONE_MACHINE}', '{GROUP}', 'tamanu-postgres', 'backup', 'success', 'snap-clone', NOW());
+
+		 UPDATE restore_replicas SET machine_id = '{CLONE_MACHINE}'
+		 WHERE consumer_device_id = '{consumer}'"
+	))
+	.await
+	.expect("declare on the clone central");
+}
+
+/// A declaration on a machine builds for the environment whose central runs
+/// there, and leaves the group's other environments alone.
+///
+/// spec: RPT#pairs
 #[tokio::test(flavor = "multi_thread")]
-async fn a_machine_scoped_declaration_builds_no_schema() {
+async fn a_declaration_on_a_central_builds_its_environment_alone() {
 	commons_tests::server::run_with_device_auth(
 		"backup-restore",
 		async |mut conn, cert, device_id, public, _| {
 			seed(&mut conn, device_id).await;
-
-			conn.batch_execute(&format!(
-				"UPDATE restore_replicas SET machine_id = '{MACHINE}'
-				 WHERE consumer_device_id = '{device_id}'"
-			))
-			.await
-			.expect("pin the declaration to a machine");
+			declare_on_the_clone_central(&mut conn, device_id).await;
 
 			let response = public
 				.get("/restore-worklist")
@@ -163,11 +188,51 @@ async fn a_machine_scoped_declaration_builds_no_schema() {
 				.await;
 			response.assert_status_ok();
 			let entries: Vec<serde_json::Value> = response.json();
+			let builds: Vec<&serde_json::Value> = entries
+				.iter()
+				.filter(|e| e["intent"] == "schema-build")
+				.collect();
 
-			assert!(
-				entries.iter().all(|e| e["intent"] != "schema-build"),
-				"a build is per group, not per machine"
-			);
+			assert_eq!(builds.len(), 1, "the clone's pair and not production's");
+			assert_eq!(builds[0]["rank"], "clone");
+			assert_eq!(builds[0]["machine_id"], CLONE_MACHINE);
+		},
+	)
+	.await
+}
+
+/// What a declaration on one environment's central authorises is that
+/// environment's schema. Production's is offered to production's machines and
+/// applied, so a builder declared for the clone is refused it.
+///
+/// spec: RPT#the-build-contract
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_on_a_central_publishes_for_its_environment_alone() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			declare_on_the_clone_central(&mut conn, device_id).await;
+
+			let clone = public
+				.post(&format!(
+					"/artifacts/groups/{GROUP}/clone/2.60.0/reporting-schema/any"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text("CREATE VIEW ...")
+				.await;
+			clone.assert_status_ok();
+
+			let production = public
+				.post(&format!(
+					"/artifacts/groups/{GROUP}/production/2.60.0/reporting-schema/any"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text("CREATE VIEW ...")
+				.await;
+			assert_eq!(production.status_code(), StatusCode::FORBIDDEN);
 		},
 	)
 	.await

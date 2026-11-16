@@ -284,8 +284,8 @@ async fn an_intent_that_cannot_redact_refuses_the_flag() {
 	.await;
 }
 
-/// The publisher mark is unique per group, and a machine-scoped or redacting
-/// declaration is one no build is dispatched to. Accepting the mark on one
+/// The publisher mark is unique per group, and a declaration on a machine
+/// with no central is one no build is dispatched to. Accepting the mark on one
 /// takes the group's only slot and leaves the operator unable to declare the
 /// publisher that would work.
 #[tokio::test(flavor = "multi_thread")]
@@ -310,6 +310,40 @@ async fn a_declaration_no_build_is_dispatched_to_cannot_publish() {
 			}))
 			.await
 			.assert_status_bad_request();
+	})
+	.await;
+}
+
+/// A declaration on the machine an environment's central runs on publishes
+/// that environment's schema.
+///
+/// spec: RPT#pairs
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_on_a_central_can_publish() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		let central = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{central}', '{group}') RETURNING id) INSERT INTO applications (id, name, host, type, rank, group_id, machine_id) VALUES
+				('{central}', 'clone-central', 'https://{central}.example.com', 'tamanu-central', 'clone', '{group}', '{central}')"
+		))
+		.await
+		.expect("insert central");
+
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"machine_id": central,
+				"type": "tamanu-postgres",
+				"intent": "reporting-schema",
+				"name": "clone-publisher",
+				"publishes_schemas": true,
+			}))
+			.await
+			.assert_status_ok();
 	})
 	.await;
 }
