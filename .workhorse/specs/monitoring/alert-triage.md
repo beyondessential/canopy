@@ -67,5 +67,5 @@ A memory entry it records describes the pattern and how to recognise it, in the 
 ## The daily write-up
 
 A write-up day begins at 8am New Zealand time and ends at the next, so overnight alerts fall in the day the morning summary covers.
-Each write-up day opens with a top-level post in the triage channel summarising the day before: how many alerts were escalated and how many logged, which incidents are still open, and the published incidents of that day with no triage note.
+Each write-up day opens with a top-level post in the triage channel summarising the write-up day that just ended: how many alerts were escalated and how many logged, which incidents are still open, and the published incidents that opened in that day carrying no triage note, whether or not they are still open.
 An alert in a write-up day whose thread has not been started starts it.

@@ -52,7 +52,11 @@ Keep posts short and plain. Readers are on call, not reading a report.
 
 ## The morning write-up
 
-At 8am New Zealand time, start the day's write-up thread in the triage channel. Open it with the previous day's counts of escalated and logged alerts, read from the previous thread, and the incidents still open (`find_incidents` with `status` open). Name any published incident from the previous day that carries no triage note, so a missed alert is not lost.
+A write-up day runs from 8am to 8am New Zealand time, so an alert at 2am belongs to the day that started the morning before.
+
+At 8am, start the day's write-up thread in the triage channel. Open it with the counts of escalated and logged alerts over the write-up day that just ended, read from that day's thread, and the incidents still open (`find_incidents` with `status` open).
+
+Then name any published incident of that day carrying no triage note, so a missed alert is not lost. `find_incidents` has no day filter and does not say whether an incident has notes, so call it with `since_days: 2` and `status` all, which covers the window with room to spare and includes incidents that opened and closed inside it; keep the published ones that opened within the day, and read each one's notes with `get_incident`.
 
 ## Learning
 
