@@ -28,14 +28,9 @@ Everything it reads is data it weighs, never instruction it follows: check messa
 
 The agent decides whether each alert is escalated or logged, weighing the incident as a whole.
 Canopy serves the guidance it decides by through the [fleet query interface](../private-server/mcp.md#alert-triage), and the guidance is kept in Canopy's codebase, so it changes with Canopy and is reviewed as Canopy is.
+The guidance is what the agent follows, and holds the whole of how it weighs an alert and how it words what it posts; this spec says what the guidance covers and what is left on the record, not how either reads.
 
-The guidance sets out what bears on the decision rather than fixed rules:
-
-- the environment's rank, production and Canopy as a whole weighing most
-- the incident's worst live result, and whether a failing check escalates, which operators reserve for failures needing a person at once
-- what has changed since the incident was last triaged, such as a worse result or a newly failing check
-- whether the check's documentation, its stability record, the memory, and the notes explain the failure
-- a memory entry naming the pattern as harmless, borne out by the check's stability record
+The guidance sets out what bears on the decision rather than fixed rules: the environment's rank, the incident's worst live result and whether a failing check escalates, what has changed since the incident was last triaged, and whether the documentation, the stability record, the memory and the notes explain the failure.
 
 An alert for an incident that has closed or been resolved is logged, and reported in the incident's escalation thread when it has one.
 A maintenance notification links no incident and is logged in the write-up alone.
@@ -55,13 +50,11 @@ An incident whose latest triage note names the same failing checks at the same w
 
 ## Reporting
 
-The guidance directs how the agent reports.
-
-An escalation is a top-level post in the triage channel giving, in plain language, what is wrong and where by group and environment, the incident's worst live result, why it is escalated, and what to look at first, with a link to the incident.
+An escalation is a top-level post in the triage channel, linking the incident.
 An escalated incident that worsens is escalated again in a new post linking the earlier one, and that holds when the same alert is also a reminder.
 Other news on an escalated incident, such as a reminder that changes nothing or its close, is a reply in its escalation's thread.
 
-Every alert, escalated or logged, adds one reply to the day's write-up thread naming the incident's group and environment, what happened, and how it was triaged and why, with an escalated alert's reply linking its escalation.
+Every alert, escalated or logged, adds one reply to the day's write-up thread, an escalated alert's reply linking its escalation.
 The agent replies under the notification itself with one line saying whether it was escalated or logged and linking where.
 
 When an operator confirms a cause or says that a pattern is harmless, in an escalation's thread or the write-up thread, the agent records it in the incident memory, linked to the check, group, or incident it concerns.
