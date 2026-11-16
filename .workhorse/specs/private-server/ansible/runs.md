@@ -86,6 +86,7 @@ Tags and further arguments are collapsed until asked for, leaving the limit, whi
 
 Starting work takes the lease, and only then is the command shown, since it carries the lease.
 The command brings the operator's checkout of the infra repository up to date with its main branch, by git or by jj as the operator chooses, then runs the playbook against the environment.
+The playbook runs only if the update succeeded, so a checkout that could not be updated never runs its stale roles.
 It names the environment by its lease alone, since the lease says which environment it holds and what for.
 Its first step, changing into the checkout, names a place only the operator knows, so it is shown but left out of what is copied.
 While the lease waits, the time left for the run to start is shown, and the operator can give it up.

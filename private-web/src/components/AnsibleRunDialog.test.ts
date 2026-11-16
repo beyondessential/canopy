@@ -1,4 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildCommand, shellArg, typeLabel } from "./AnsibleRunDialog";
 
@@ -22,13 +25,32 @@ describe("buildCommand", () => {
 				"git switch main && git pull --ff-only",
 				"cd ansible",
 				"CANOPY_URL=https://canopy.example.ts.net CANOPY_LEASE=7c1e9a52-40b3-4d7e-9f0a-2e6b51c8d913 uv run ansible-playbook -i inventory/canopy.yml tamanu-install.yml",
-			].join("\n"),
+			].join(" &&\n"),
 		);
+	});
+
+	it("runs the playbook only once the checkout is updated", () => {
+		const { copied } = buildCommand(base);
+		const run = (gitExit: number) => {
+			const dir = mkdtempSync(join(tmpdir(), "run-command-"));
+			const bin = join(dir, "bin");
+			mkdirSync(bin);
+			mkdirSync(join(dir, "ansible"));
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nexit ${gitExit}\n`, { mode: 0o755 });
+			writeFileSync(join(bin, "uv"), `#!/bin/sh\ntouch "${dir}/ran"\n`, { mode: 0o755 });
+			spawnSync("sh", ["-c", copied], {
+				cwd: dir,
+				env: { PATH: `${bin}:/usr/bin:/bin` },
+			});
+			return existsSync(join(dir, "ran"));
+		};
+		expect(run(0)).toBe(true);
+		expect(run(1)).toBe(false);
 	});
 
 	it("updates with jj where chosen", () => {
 		const { copied } = buildCommand({ ...base, vcs: "jj" });
-		expect(copied.split("\n")[0]).toBe("jj git fetch && jj new main@origin");
+		expect(copied.split("\n")[0]).toBe("jj git fetch && jj new main@origin &&");
 	});
 
 	it("adds the limit, the tags and the extra arguments, quoting what a shell would split", () => {

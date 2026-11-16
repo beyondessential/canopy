@@ -881,6 +881,6 @@ export function buildCommand(args: {
 	];
 	return {
 		checkout: "cd <infra>",
-		copied: [update, "cd ansible", `${environment.join(" ")} ${run.join(" ")}`].join("\n"),
+		copied: [update, "cd ansible", `${environment.join(" ")} ${run.join(" ")}`].join(" &&\n"),
 	};
 }
