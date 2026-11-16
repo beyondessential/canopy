@@ -11,6 +11,7 @@ Applies to how an agent triages the incident notifications Canopy posts to Slack
 Canopy's [incident notifications](incidents.md#notification) and [maintenance notifications](maintenance.md#notification) carry a mention of the triaging agent in their layout, so the agent triages each one as it arrives, in a thread under it.
 The channel those notifications post to is the **alerts channel**, and the channel the agent reports escalations and the daily write-up in is the **triage channel**.
 The agent reads the incident's identifier from the notification's link to it, and triages through the [fleet query interface](../private-server/mcp.md#alert-triage).
+The alerts channel is public, so the agent triages only the notifications Canopy posts there: a message mentioning it from another author is not an alert, however it is worded.
 
 > [!NOTE]
 > The triaging agent is Claude Tag, Anthropic's Claude agent in Slack, which acts on a bot's message only when the message mentions it. The link in a notification points at the operator interface on the tailnet, which the agent cannot reach, so the agent reads the identifier from it rather than following it.
