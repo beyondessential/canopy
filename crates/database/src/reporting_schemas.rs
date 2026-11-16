@@ -725,9 +725,7 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 			},
 			instances,
 			&move |graded: &GradedCheck| match graded.degraded().as_slice() {
-				[] => format!(
-					"Reporting schemas are built for every version {name} runs in each of its environments"
-				),
+				[] => format!("Every reporting schema owed for {name} is built"),
 				[one] => format!(
 					"No reporting schema for {name} on {}: {}",
 					one.name(),

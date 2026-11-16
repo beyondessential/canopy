@@ -456,6 +456,16 @@ async fn worklist(
 				continue;
 			};
 
+			if let Some(machine) = d.machine_id
+				&& !group.environments.iter().any(|e| e.machine_id == machine)
+			{
+				tracing::warn!(
+					replica = %d.id,
+					%machine,
+					"a declaration on a machine running no environment's central builds no reporting schema"
+				);
+			}
+
 			for environment in &group.environments {
 				// A declaration on a machine builds for the environment whose
 				// central runs there. Retargeting it would build against a box
@@ -1204,19 +1214,20 @@ async fn verification(
 		(_, Some(build)) => {
 			// A build report settles the pair: it stops the pair being
 			// dispatched again and clears an operator's ask. Nothing but a
-			// consumer authorised to publish the group's schema may say so, or
-			// a plain verify consumer settles a pair no schema was built for.
+			// consumer authorised to publish the restored environment's schema
+			// may say so, or a plain verify consumer settles a pair no schema
+			// was built for.
 			// spec: RPT#the-build-contract
 			if !RestoreReplica::authorizes_schema_artifacts(
 				&mut conn,
 				consumer_device_id,
 				args.group,
-				None,
+				reported.rank,
 			)
 			.await?
 			{
 				return Err(AppError::AuthInsufficientPermissions {
-					required: "an enabled declaration building this group's schemas".into(),
+					required: "an enabled declaration building this environment's schemas".into(),
 				});
 			}
 
@@ -1245,18 +1256,6 @@ async fn verification(
 				BackupRestoreCheck::record_report(&mut conn, report).await?;
 				return Ok(StatusCode::NO_CONTENT);
 			};
-			if !RestoreReplica::authorizes_schema_artifacts(
-				&mut conn,
-				consumer_device_id,
-				args.group,
-				Some(rank),
-			)
-			.await?
-			{
-				return Err(AppError::AuthInsufficientPermissions {
-					required: "an enabled declaration building this environment's schemas".into(),
-				});
-			}
 			// A schema registered against an environment other than the one
 			// restored would be applied by machines the build never read,
 			// while the pair it is filed against reads as built. The build

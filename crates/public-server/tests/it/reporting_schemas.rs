@@ -710,6 +710,34 @@ async fn restoring_for_a_group_does_not_authorise_settling_its_pairs() {
 	.await
 }
 
+/// A builder declared on the clone's central settles the clone's pairs alone,
+/// or it would clear production's pair with no schema built for it.
+///
+/// spec: RPT#the-build-contract
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_on_a_central_settles_its_environment_alone() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			declare_on_the_clone_central(&mut conn, device_id).await;
+			let replica = declaration_id(&mut conn).await;
+
+			let refused = public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&build_report(
+					replica,
+					serde_json::json!({ "target_version": "2.60.0", "built": true }),
+				))
+				.await;
+
+			assert_eq!(refused.status_code(), StatusCode::FORBIDDEN);
+		},
+	)
+	.await
+}
+
 /// The artifacts route carries a body limit sized from the held-bytes cap, so a
 /// schema past axum's 2 MiB default is taken in rather than answered with a
 /// plain-text 413 for a limit sixteen times below the documented one.
