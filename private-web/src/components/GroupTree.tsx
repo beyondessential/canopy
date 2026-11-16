@@ -261,7 +261,7 @@ function MachineBlock({
 									<Chip size="small" variant="outlined" label="unmonitored" />
 								</Tooltip>
 							)}
-							<Meta>{application.display_host}</Meta>
+							<Meta link>{application.display_host}</Meta>
 						</Row>
 					))}
 				</Box>
@@ -342,7 +342,7 @@ function Name({ to, children }: { to: string | null; children: string }) {
 
 /// The one fact each row carries besides its name: a box's platform, a
 /// workload's address. Right-aligned, so the column reads down the block.
-function Meta({ children }: { children: string }) {
+function Meta({ link, children }: { link?: boolean; children: string }) {
 	if (!children) return <Box sx={{ ml: "auto" }} />;
 	return (
 		<Typography
@@ -350,7 +350,19 @@ function Meta({ children }: { children: string }) {
 			color="text.secondary"
 			sx={{ ml: "auto", pl: 1, flexShrink: 0 }}
 		>
-			{children}
+			{link && /^https?:\/\//.test(children) ? (
+				<MuiLink
+					href={children}
+					target="_blank"
+					rel="noopener noreferrer"
+					color="inherit"
+					underline="hover"
+				>
+					{children}
+				</MuiLink>
+			) : (
+				children
+			)}
 		</Typography>
 	);
 }
