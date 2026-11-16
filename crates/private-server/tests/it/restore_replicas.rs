@@ -383,6 +383,43 @@ async fn a_declaration_on_another_groups_central_cannot_publish() {
 	.await;
 }
 
+/// An environment builds from one central, the lowest id among several, so a
+/// declaration on another of its centrals' machines would build nothing.
+///
+/// spec: RPT#pairs
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_on_an_environments_second_central_cannot_publish() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		let first = "11111111-1111-1111-1111-111111111111";
+		let second = "22222222-2222-2222-2222-222222222222";
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (name, id, group_id) VALUES ('first', '{first}', '{group}'), ('second', '{second}', '{group}');
+			 INSERT INTO applications (id, name, host, type, rank, group_id, machine_id) VALUES
+				('{first}', 'first-central', 'https://first.example.com', 'tamanu-central', 'clone', '{group}', '{first}'),
+				('{second}', 'second-central', 'https://second.example.com', 'tamanu-central', 'clone', '{group}', '{second}')"
+		))
+		.await
+		.expect("insert centrals");
+
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"machine_id": second,
+				"type": "tamanu-postgres",
+				"intent": "reporting-schema",
+				"name": "clone-publisher",
+				"publishes_schemas": true,
+			}))
+			.await
+			.assert_status_bad_request();
+	})
+	.await;
+}
+
 /// A server whose product publishes no manifest is withheld from the
 /// worklist, so the operator is shown which of the declaration's replicas
 /// aren't being restored and why.

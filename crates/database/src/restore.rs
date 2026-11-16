@@ -391,7 +391,8 @@ impl RestoreReplica {
 		.remove(&group_id) else {
 			return Ok(false);
 		};
-		let Some(rank) = rank else {
+		let (Some(rank), crate::reporting_schemas::SchemaCoverage::Centrals(_)) = (rank, &coverage)
+		else {
 			return Ok(true);
 		};
 		let members = crate::applications::Application::list_live_in_group(db, group_id).await?;

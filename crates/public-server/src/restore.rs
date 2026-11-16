@@ -240,13 +240,8 @@ async fn resolve_schema_group(
 		// The environment's own central, not the group's: restoring the
 		// group's highest-ranked one for every environment is what built one
 		// schema from the wrong configuration.
-		let in_environment: Vec<database::applications::Application> = members
-			.iter()
-			.filter(|m| m.rank == Some(rank))
-			.cloned()
-			.collect();
 		let Some(central) =
-			database::server_groups::ServerGroup::canonical_central(&in_environment)
+			database::server_groups::ServerGroup::environment_central(&members, rank)
 		else {
 			continue;
 		};
@@ -1301,13 +1296,8 @@ async fn verification(
 			let members =
 				database::applications::Application::list_live_in_group(&mut conn, args.group)
 					.await?;
-			let in_environment: Vec<database::applications::Application> = members
-				.iter()
-				.filter(|m| m.rank == Some(rank))
-				.cloned()
-				.collect();
 			let application_id =
-				database::server_groups::ServerGroup::canonical_central(&in_environment)
+				database::server_groups::ServerGroup::environment_central(&members, rank)
 					.map(|a| a.id);
 			ReportingSchemaBuild::record(
 				&mut conn,

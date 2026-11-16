@@ -329,17 +329,21 @@ async fn normalized_params_for_intent(
 		// spec: RPT#pairs
 		if let Some(machine_id) = machine_id {
 			let machine = database::machines::Machine::get_by_id(conn, machine_id).await?;
-			let on_box = if machine.group_id == Some(group_id) && machine.deleted_at.is_none() {
-				machine.applications(conn).await?
+			let members = if machine.group_id == Some(group_id) && machine.deleted_at.is_none() {
+				database::applications::Application::list_live_in_group(conn, group_id).await?
 			} else {
 				Vec::new()
 			};
-			if !on_box.iter().any(|a| {
-				a.r#type == commons_types::server::app_type::ApplicationType::TamanuCentral
-					&& a.rank.is_some()
-			}) {
+			let coverage = database::reporting_schemas::SchemaCoverage::Centrals(
+				std::collections::HashSet::from([machine_id]),
+			);
+			if !members
+				.iter()
+				.filter_map(|a| a.rank)
+				.any(|rank| coverage.covers(rank, &members))
+			{
 				return Err(AppError::BadRequest(
-					"a declaration on a machine publishes a reporting schema only where that machine is in the group and runs a ranked Tamanu central".into(),
+					"a declaration on a machine publishes a reporting schema only where that machine runs an environment's Tamanu central".into(),
 				));
 			}
 		}

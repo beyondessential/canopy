@@ -602,12 +602,7 @@ async fn versions_and_applications(
 		ranks
 			.into_iter()
 			.filter(|rank| {
-				let in_environment: Vec<crate::applications::Application> = applications
-					.iter()
-					.filter(|member| member.rank == Some(*rank))
-					.cloned()
-					.collect();
-				crate::server_groups::ServerGroup::canonical_central(&in_environment)
+				crate::server_groups::ServerGroup::environment_central(applications, *rank)
 					.is_some_and(|central| central.machine_id.is_some())
 			})
 			.collect()
