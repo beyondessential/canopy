@@ -1401,7 +1401,10 @@ function PlannedGroup({
 												end={row.plan.planned_end_time ?? null}
 												zone={row.plan.planned_zone ?? null}
 											/>
-											<UnderMaintenance held={row.maintenance_window} />
+											<UnderMaintenance
+												held={row.maintenance_window}
+												zone={row.plan.planned_zone ?? null}
+											/>
 										</Stack>
 									</TableCell>
 									<TableCell>
@@ -1834,8 +1837,10 @@ function PlanNote({ note, testId }: { note: string | null; testId: string }) {
 // spec: UPG#when-a-plan-is-met
 function UnderMaintenance({
 	held,
+	zone,
 }: {
 	held: MaintenanceWindow | null | undefined;
+	zone: string | null;
 }) {
 	if (!held) {
 		return null;
@@ -1844,10 +1849,7 @@ function UnderMaintenance({
 	// read as this environment's alone.
 	const whole = held.rank === null;
 	const until = held.expected_end
-		? ` until ${new Date(held.expected_end).toLocaleTimeString(undefined, {
-				hour: "2-digit",
-				minute: "2-digit",
-			})}`
+		? ` until ${clockAt(new Date(held.expected_end), zone)}`
 		: "";
 	return (
 		<Tooltip
@@ -1859,7 +1861,7 @@ function UnderMaintenance({
 		>
 			<Typography
 				variant="caption"
-				sx={{ color: "info.main" }}
+				sx={{ color: "info.main", whiteSpace: "normal" }}
 				data-testid="plan-under-maintenance"
 			>
 				{whole ? "group in maintenance" : "in maintenance"}
@@ -1933,6 +1935,23 @@ function clockTime(time: string): string {
 	const hour = hours % 12 === 0 ? 12 : hours % 12;
 	if (minutes === 0) return `${hour}${suffix}`;
 	return `${hour}:${String(minutes).padStart(2, "0")}${suffix}`;
+}
+
+function clockAt(at: Date, zone: string | null): string {
+	const options = {
+		hour: "2-digit",
+		minute: "2-digit",
+		hourCycle: "h23",
+	} as const;
+	let format: Intl.DateTimeFormat;
+	try {
+		format = new Intl.DateTimeFormat("en", { ...options, timeZone: zone ?? undefined });
+	} catch {
+		format = new Intl.DateTimeFormat("en", options);
+	}
+	const parts = format.formatToParts(at);
+	const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
+	return clockTime(`${part("hour")}:${part("minute")}`);
 }
 
 /// tzdata dropped invented abbreviations in 2017, so these zones report

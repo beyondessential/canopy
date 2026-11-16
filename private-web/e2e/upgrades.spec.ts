@@ -1358,6 +1358,10 @@ test.describe("upgrade windows", () => {
 			groupId: group.id,
 			rank: "production",
 			targetVersionId: target.id,
+			plannedFor: localIso(new Date()),
+			plannedTime: "09:00",
+			plannedEndTime: "12:30",
+			plannedZone: "Pacific/Fiji",
 		});
 		await seedMaintenanceWindow(sql, {
 			serverGroupId: group.id,
@@ -1368,6 +1372,24 @@ test.describe("upgrade windows", () => {
 		await page.goto("/upgrades");
 		const mark = page.getByTestId("plan-under-maintenance");
 		await expect(mark).toBeVisible();
+		const end = Date.now() + 2 * 3600_000;
+		const fiji = [end, end + 60_000].map((at) =>
+			new Intl.DateTimeFormat("en", {
+				timeZone: "Pacific/Fiji",
+				hour: "numeric",
+				minute: "2-digit",
+			})
+				.format(at)
+				.replace(/:00|\s/g, "")
+				.toLowerCase(),
+		);
+		expect(fiji.map((at) => `in maintenance until ${at}`)).toContain(
+			await mark.textContent(),
+		);
+		const cell = mark.locator("xpath=ancestor::td");
+		expect(
+			await cell.evaluate((td) => td.scrollWidth <= td.clientWidth),
+		).toBe(true);
 
 		// The operator reading the row is the one in the work, so the mark is the
 		// way back into it.
