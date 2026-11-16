@@ -31,7 +31,7 @@ If that does not explain the failure, look further: the machine (`get_machine`),
 
    ```
    **Alert triage: escalated** · <link to the report>
-   Worst: failure. Failing: <check> on <where>, <check> on <where>.
+   Worst: failed. Failing: <check> on <where>, <check> on <where>.
    <why, in a few lines>
    Relied on: <memory entry ids, if any>
    ```

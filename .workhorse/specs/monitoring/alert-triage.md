@@ -43,7 +43,7 @@ A maintenance notification links no incident and is logged in the write-up alone
 ## Recording a verdict
 
 A verdict is recorded as a note by the agent on the [incident](incidents.md#resolution), after it is reported.
-The note opens with whether the incident was escalated or logged and a link to where it was reported, then the incident's worst live result and failing checks as triaged, then the reasoning and any memory entries relied on.
+The note opens with whether the incident was escalated or logged and a link to where it was reported, then the incident's worst live result, named as the check result it is, and the failing checks as triaged, then the reasoning and any memory entries relied on.
 
 An incident whose latest triage note names the same failing checks at the same worst result has already been triaged at that state, so a repeated alert reports nothing new and the agent replies under it with a link to the earlier report.
 
