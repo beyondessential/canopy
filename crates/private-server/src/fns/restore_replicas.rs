@@ -207,8 +207,9 @@ pub struct RestoreReplicasCreateArgs {
 	#[serde(default)]
 	pub redacts: bool,
 	/// Whether this consumer may publish the group's reporting schema.
-	/// Accepted only for a group-wide, non-redacting declaration whose intent
-	/// carries the `reporting-schema` semantic. Defaults to false, so a
+	/// Accepted only for a non-redacting declaration whose intent carries the
+	/// `reporting-schema` semantic, scoped to the group or to a machine of it
+	/// running a ranked Tamanu central. Defaults to false, so a
 	/// consumer publishes only where an operator has said it may.
 	#[serde(default)]
 	pub publishes_schemas: bool,
@@ -263,8 +264,9 @@ pub struct RestoreReplicasUpdateArgs {
 	#[serde(default)]
 	pub redacts: bool,
 	/// Whether this consumer may publish the group's reporting schema.
-	/// Accepted only for a group-wide, non-redacting declaration whose intent
-	/// carries the `reporting-schema` semantic. Defaults to false.
+	/// Accepted only for a non-redacting declaration whose intent carries the
+	/// `reporting-schema` semantic, scoped to the group or to a machine of it
+	/// running a ranked Tamanu central. Defaults to false.
 	#[serde(default)]
 	pub publishes_schemas: bool,
 	/// Whether a migrating declaration tests only when an operator asks from
@@ -309,6 +311,7 @@ async fn normalized_params_for_intent(
 	params: &ParamValues,
 	redacts: bool,
 	publishes_schemas: bool,
+	group_id: Uuid,
 	machine_id: Option<Uuid>,
 ) -> Result<ParamValues> {
 	// What a build is dispatched for does not depend on the intent's descriptor,
@@ -325,16 +328,18 @@ async fn normalized_params_for_intent(
 		// machine names the environment by naming where its central runs.
 		// spec: RPT#pairs
 		if let Some(machine_id) = machine_id {
-			let on_box = database::machines::Machine::get_by_id(conn, machine_id)
-				.await?
-				.applications(conn)
-				.await?;
+			let machine = database::machines::Machine::get_by_id(conn, machine_id).await?;
+			let on_box = if machine.group_id == Some(group_id) && machine.deleted_at.is_none() {
+				machine.applications(conn).await?
+			} else {
+				Vec::new()
+			};
 			if !on_box.iter().any(|a| {
 				a.r#type == commons_types::server::app_type::ApplicationType::TamanuCentral
 					&& a.rank.is_some()
 			}) {
 				return Err(AppError::BadRequest(
-					"a declaration on a machine publishes a reporting schema only where that machine runs a ranked Tamanu central".into(),
+					"a declaration on a machine publishes a reporting schema only where that machine is in the group and runs a ranked Tamanu central".into(),
 				));
 			}
 		}
@@ -838,6 +843,7 @@ pub async fn create(
 		&args.params,
 		args.redacts,
 		args.publishes_schemas,
+		args.group_id,
 		args.machine_id,
 	)
 	.await?;
@@ -921,6 +927,7 @@ pub async fn update(
 		&args.params,
 		args.redacts,
 		args.publishes_schemas,
+		args.group_id,
 		args.machine_id,
 	)
 	.await?;

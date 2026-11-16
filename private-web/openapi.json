@@ -11828,7 +11828,7 @@
             "type": "object"
           },
           "publishes_schemas": {
-            "description": "Whether this consumer may publish the group's reporting schema.\nAccepted only for a group-wide, non-redacting declaration whose intent\ncarries the `reporting-schema` semantic. Defaults to false, so a\nconsumer publishes only where an operator has said it may.",
+            "description": "Whether this consumer may publish the group's reporting schema.\nAccepted only for a non-redacting declaration whose intent carries the\n`reporting-schema` semantic, scoped to the group or to a machine of it\nrunning a ranked Tamanu central. Defaults to false, so a\nconsumer publishes only where an operator has said it may.",
             "type": "boolean"
           },
           "redacts": {
@@ -11917,7 +11917,7 @@
             "type": "object"
           },
           "publishes_schemas": {
-            "description": "Whether this consumer may publish the group's reporting schema.\nAccepted only for a group-wide, non-redacting declaration whose intent\ncarries the `reporting-schema` semantic. Defaults to false.",
+            "description": "Whether this consumer may publish the group's reporting schema.\nAccepted only for a non-redacting declaration whose intent carries the\n`reporting-schema` semantic, scoped to the group or to a machine of it\nrunning a ranked Tamanu central. Defaults to false.",
             "type": "boolean"
           },
           "redacts": {

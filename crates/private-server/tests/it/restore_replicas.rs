@@ -348,6 +348,41 @@ async fn a_declaration_on_a_central_can_publish() {
 	.await;
 }
 
+/// A central in another group is no environment of this one, so a
+/// declaration on its machine would hold the publisher slot and build nothing.
+///
+/// spec: RPT#pairs
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_on_another_groups_central_cannot_publish() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let elsewhere = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		let central = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{central}', '{elsewhere}') RETURNING id) INSERT INTO applications (id, name, host, type, rank, group_id, machine_id) VALUES
+				('{central}', 'clone-central', 'https://{central}.example.com', 'tamanu-central', 'clone', '{elsewhere}', '{central}')"
+		))
+		.await
+		.expect("insert central");
+
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"machine_id": central,
+				"type": "tamanu-postgres",
+				"intent": "reporting-schema",
+				"name": "clone-publisher",
+				"publishes_schemas": true,
+			}))
+			.await
+			.assert_status_bad_request();
+	})
+	.await;
+}
+
 /// A server whose product publishes no manifest is withheld from the
 /// worklist, so the operator is shown which of the declaration's replicas
 /// aren't being restored and why.
