@@ -63,12 +63,7 @@ export default function ReportingSchemasSection({
 	if (pairs.data.length === 0) {
 		return (
 			<Paper variant="outlined" sx={{ p: 2 }} data-testid="reporting-schemas">
-				<SectionHeading />
-				<Typography variant="body2" color="text.secondary">
-					Nothing to build for this group: either no builder is declared for it
-					under Backups, or no Tamanu application in it reports a published
-					version.
-				</Typography>
+				<SectionHeading note="Nothing to build for this group: no builder is declared for it under Backups, or no Tamanu application in it reports a published version." />
 			</Paper>
 		);
 	}
@@ -223,15 +218,23 @@ function StateChip({
 	);
 }
 
-function SectionHeading() {
+function SectionHeading({ note }: { note?: string }) {
 	return (
-		<Box sx={{ mb: 1 }}>
+		<Box
+			sx={{
+				mb: note ? 0 : 1,
+				display: "flex",
+				alignItems: "baseline",
+				flexWrap: "wrap",
+				columnGap: 1,
+			}}
+		>
 			<Typography variant="h6" component="h2">
 				Reporting schemas
 			</Typography>
 			<Typography variant="body2" color="text.secondary">
-				One per environment and version this group runs or is moving to, built
-				from a replica of that environment's own data.
+				{note ??
+					"One per environment and version this group runs or is moving to, built from a replica of that environment's own data."}
 			</Typography>
 		</Box>
 	);

@@ -108,11 +108,7 @@ export default function MigrationTestsSection({
 				sx={{ p: 2, scrollMarginTop: 16 }}
 				data-testid="migration-tests"
 			>
-				<SectionHeading />
-				<Typography variant="body2" color="text.secondary">
-					Nothing to test against: no upgrade plan is open for this group,
-					or its target is not a published version.
-				</Typography>
+				<SectionHeading note="Nothing to test against: no upgrade plan is open for this group, or its target is not a published version." />
 			</Paper>
 		);
 	}
@@ -262,16 +258,31 @@ const VERDICT_ORDER: Record<string, number> = {
 	passed: 2,
 };
 
-function SectionHeading({ target }: { target?: string | null }) {
+function SectionHeading({
+	target,
+	note,
+}: {
+	target?: string | null;
+	note?: string;
+}) {
 	return (
-		<Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "baseline" }}>
+		<Stack
+			direction="row"
+			sx={{
+				mb: note ? 0 : 1,
+				alignItems: "baseline",
+				flexWrap: "wrap",
+				columnGap: 1,
+			}}
+		>
 			<Typography variant="h6" component="h2">
 				Pre-upgrade migration tests
 			</Typography>
 			<Typography variant="body2" color="text.secondary">
-				{target
-					? `to ${target}`
-					: "run against a restore of each server's own data"}
+				{note ??
+					(target
+						? `to ${target}`
+						: "run against a restore of each server's own data")}
 			</Typography>
 		</Stack>
 	);
