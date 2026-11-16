@@ -59,7 +59,7 @@ The schema is the only type it may register: what is published for an environmen
 The builder is authorised to register artifacts for a group whose enabled declaration an operator has marked as publishing its reporting schema, and for no other, and is the one device other than a releaser that registers artifacts (see [ART](../platform/artifacts.md)).
 The mark is the operator's alone, and is the whole of the authorisation: a consumer registers the set of semantics it advertises itself, so they shape what Canopy dispatches to it and grant it nothing, and what is published for an environment is offered to every machine in it and applied.
 The mark reaches as far as the declaration carrying it: every environment of the group for a group-wide declaration, and one environment for a declaration on that environment's central, which authorises registering that environment's schema and no other's.
-Only a non-redacting declaration of an intent carrying `reporting-schema`, group-wide or on a machine running a ranked central, can carry the mark, which is the same declaration a build is dispatched for, so Canopy asks for no build it would refuse the result of.
+Only a non-redacting declaration of an intent carrying `reporting-schema`, group-wide or on the machine an environment builds from, can carry the mark, which is the same declaration a build is dispatched for, so Canopy asks for no build it would refuse the result of.
 
 A schema is published for the exact version and never for a range, since it follows from the migrations that version applies, and one built against a patch is not the schema another patch of the same minor describes.
 

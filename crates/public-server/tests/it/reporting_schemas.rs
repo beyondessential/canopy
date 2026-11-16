@@ -733,6 +733,19 @@ async fn a_declaration_on_a_central_settles_its_environment_alone() {
 				.await;
 
 			assert_eq!(refused.status_code(), StatusCode::FORBIDDEN);
+
+			let mut clone = build_report(
+				replica,
+				serde_json::json!({ "target_version": "2.60.0", "built": true }),
+			);
+			clone["machine_id"] = CLONE_MACHINE.into();
+			clone["snapshot_id"] = "snap-clone".into();
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&clone)
+				.await
+				.assert_status(StatusCode::NO_CONTENT);
 		},
 	)
 	.await

@@ -12993,8 +12993,8 @@ export interface components {
             /**
              * @description Whether this consumer may publish the group's reporting schema.
              *     Accepted only for a non-redacting declaration whose intent carries the
-             *     `reporting-schema` semantic, scoped to the group or to a machine of it
-             *     running a ranked Tamanu central. Defaults to false, so a
+             *     `reporting-schema` semantic, scoped to the group or to the machine one
+             *     of its environments builds from. Defaults to false, so a
              *     consumer publishes only where an operator has said it may.
              */
             publishes_schemas?: boolean;
@@ -13081,8 +13081,8 @@ export interface components {
             /**
              * @description Whether this consumer may publish the group's reporting schema.
              *     Accepted only for a non-redacting declaration whose intent carries the
-             *     `reporting-schema` semantic, scoped to the group or to a machine of it
-             *     running a ranked Tamanu central. Defaults to false.
+             *     `reporting-schema` semantic, scoped to the group or to the machine one
+             *     of its environments builds from. Defaults to false.
              */
             publishes_schemas?: boolean;
             /**
