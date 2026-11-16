@@ -14894,6 +14894,11 @@ export interface components {
          *     stands against the environment's planned version.
          */
         TestedServer: {
+            /**
+             * Format: uuid
+             * @description The application, as the group's migration tests name it.
+             */
+            id: string;
             latest?: null | components["schemas"]["TestedRun"];
             /** @description The application's name, so the view reads without a second lookup. */
             name: string;

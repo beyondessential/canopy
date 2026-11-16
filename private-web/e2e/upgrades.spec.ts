@@ -372,8 +372,11 @@ test.describe("upgrades dashboard", () => {
 
 		await header.getByTestId("migration-verdict").click();
 		await expect(page).toHaveURL(
-			new RegExp(`/fleet/groups/${group.id}#migration-tests`),
+			new RegExp(
+				`/fleet/groups/${group.id}\\?migrations=${central.id}#migration-tests`,
+			),
 		);
+		await expect(page.getByTestId("migration-run")).toContainText("kamaka-central");
 	});
 
 	/// spec: UPG#the-dashboard
