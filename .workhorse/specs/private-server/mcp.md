@@ -213,6 +213,12 @@ Incident counts follow the same rule as **Find incidents**, counting published i
 **Restore memory entry** takes an identifier, the revision read, and the earlier version to restore, and is refused as an amendment is when the entry has changed since.
 All four are held by the notes grant, and each is audited as the action it takes (see [AUD](../platform/audit-log.md)).
 
+### Alert triage
+
+**Get alert triage guidance** returns the guidance an agent triages an incident notification by, as [alert triage](../monitoring/alert-triage.md#how-the-agent-decides) describes.
+It reads only, and the interface's instructions tell an agent to read it before triaging an alert.
+The agent reads the incident through the other tools and records its verdict with **Add incident note**.
+
 ### Audit log
 
 **Find audit entries** takes a look-back window of up to ninety days and optional filters for actor, action, and a record acted on, and an option to include routine actions, which are left out unless asked for or named; it returns matching entries of the audit log newest first, as a bounded list (see [AUD](../platform/audit-log.md)).

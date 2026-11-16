@@ -25,6 +25,7 @@
 //! combines into the single stored `ToolRouter`. `util` holds helpers shared
 //! across more than one of those modules.
 
+mod alert_triage;
 mod applications;
 mod audit;
 mod backups;
@@ -99,7 +100,8 @@ impl CanopyMcp {
 				+ Self::upgrade_plans_router()
 				+ Self::vulnerabilities_router()
 				+ Self::notes_router()
-				+ Self::memory_router(),
+				+ Self::memory_router()
+				+ Self::alert_triage_router(),
 			prompt_router: Self::vulnerabilities_prompts(),
 		}
 	}
@@ -171,7 +173,10 @@ impl ServerHandler for CanopyMcp {
 			 applies with find_memory and get_memory_entry, and record what a later \
 			 investigator would otherwise rediscover with record_memory_entry, amending an \
 			 existing entry rather than adding a duplicate. These writes need an administrator \
-			 or a token with the notes grant."
+			 or a token with the notes grant.\n\n\
+			 Alert triage: before triaging a Canopy incident notification, call \
+			 get_alert_triage_guidance and follow it. You make the decision and record it as a \
+			 note on the incident."
 				.into(),
 		);
 		info.capabilities = ServerCapabilities::builder()
