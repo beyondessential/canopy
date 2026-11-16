@@ -14996,6 +14996,11 @@
       "TestedServer": {
         "description": "One of an environment's applications that a declaration tests, and where it\nstands against the environment's planned version.",
         "properties": {
+          "id": {
+            "description": "The application, as the group's migration tests name it.",
+            "format": "uuid",
+            "type": "string"
+          },
           "latest": {
             "oneOf": [
               {
@@ -15017,6 +15022,7 @@
           }
         },
         "required": [
+          "id",
           "name",
           "verdict"
         ],

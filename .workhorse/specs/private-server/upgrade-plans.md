@@ -119,6 +119,7 @@ With several it says how many of them passed, naming a failure first.
 A failure tints the header as a warning, and the error it produced is a hover away.
 Where every application it counts has passed the header is tinted as a success, so a group ready to move reads as such at a glance; until then it carries no tint.
 The verdict links to the group's own migration tests.
+Where the one application it counts has passed, the link opens that application's run.
 Where nothing tests any of the group's planned environments the header says so quietly in place of a verdict, since such a plan is never dispatched and a reader would otherwise wait on a result that cannot arrive; it is not presented as a warning, since a group with no testing set up is a choice rather than a fault.
 The header also says whether the group is tested on the schedule or only when asked.
 

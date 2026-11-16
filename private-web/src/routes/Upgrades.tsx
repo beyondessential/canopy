@@ -1508,11 +1508,12 @@ function TestSummary({
 		colour: string,
 		icon: ReactElement | null,
 		tip: ReactNode = "",
+		href: string = to,
 	) => (
 		<Tooltip title={tip}>
 			<MuiLink
 				component={RouterLink}
-				to={to}
+				to={href}
 				underline="hover"
 				data-testid="migration-verdict"
 				sx={{
@@ -1560,12 +1561,16 @@ function TestSummary({
 				: []),
 		];
 	} else if (outcome === "passed") {
+		const only = tests.length === 1 ? tests[0] : null;
 		shown = verdict(
 			"Migrations passed",
 			"success.dark",
 			<CheckIcon fontSize="small" />,
+			"",
+			only
+				? `/fleet/groups/${groupId}?migrations=${only.id}#migration-tests`
+				: to,
 		);
-		const only = tests.length === 1 ? tests[0] : null;
 		detail = only?.latest
 			? [
 					only.name,

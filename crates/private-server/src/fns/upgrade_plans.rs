@@ -247,6 +247,7 @@ pub async fn fleet(
 			.await?
 			.into_iter()
 			.map(|verdict| TestedServer {
+				id: verdict.server_id,
 				name: applications
 					.iter()
 					.find(|application| application.id == verdict.server_id)
@@ -328,6 +329,8 @@ pub async fn fleet(
 /// stands against the environment's planned version.
 #[derive(Serialize, ToSchema)]
 pub struct TestedServer {
+	/// The application, as the group's migration tests name it.
+	pub id: Uuid,
 	/// The application's name, so the view reads without a second lookup.
 	pub name: String,
 	/// Where it stands.
