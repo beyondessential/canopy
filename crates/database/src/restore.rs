@@ -8,7 +8,8 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 use commons_errors::{AppError, Result};
 use commons_types::backup::{
-	BackupType, IntentDescriptor, RedactionOutcome, RestoreIntent, RunOutcome, semantics,
+	BackupType, IntentDescriptor, ParamValues, RedactionOutcome, RestoreIntent, RunOutcome,
+	normalize_params, redaction_params, semantics, validate_params,
 };
 use commons_types::status::CheckResult;
 use diesel::{
@@ -2112,4 +2113,139 @@ mod tests {
 		let distinct: std::collections::HashSet<&String> = keys.iter().collect();
 		assert_eq!(distinct.len(), keys.len(), "{keys:?}");
 	}
+}
+
+/// Parse an operator-supplied overdue bound (jiff's "friendly" duration
+/// format, e.g. `2h 30m`) into the stored form; null or blank means no bound.
+/// A string that doesn't parse maps to 400.
+pub fn parse_overdue_after(overdue_after: Option<&str>) -> Result<Option<PgDuration>> {
+	let Some(text) = overdue_after.map(str::trim).filter(|t| !t.is_empty()) else {
+		return Ok(None);
+	};
+	let seconds = commons_types::units::parse_duration_seconds(text)
+		.map_err(|e| AppError::BadRequest(format!("overdue bound: {e}")))?;
+	Ok(Some(PgDuration(jiff::SignedDuration::from_secs(seconds))))
+}
+
+/// Resolve human-unit strings in operator-supplied parameter values to their
+/// raw stored form, validate them against the consumer's advertised schema for
+/// `intent`, and refuse a flag the declaration cannot carry. If the intent is
+/// not advertised (a gap) there is no schema to resolve or check against, so
+/// the values are accepted as-is.
+#[expect(clippy::too_many_arguments)]
+pub async fn declared_params(
+	conn: &mut AsyncPgConnection,
+	consumer_device_id: Uuid,
+	intent: &RestoreIntent,
+	params: &ParamValues,
+	redacts: bool,
+	publishes_schemas: bool,
+	group_id: Uuid,
+	machine_id: Option<Uuid>,
+) -> Result<ParamValues> {
+	// What a build is dispatched for does not depend on the intent's descriptor,
+	// and the mark is unique per group: a declaration accepted with it here
+	// holds the group's only publisher slot while authorising nothing.
+	// spec: RPT#the-build-contract
+	if publishes_schemas {
+		if redacts {
+			return Err(AppError::BadRequest(
+				"a redacting declaration cannot publish a reporting schema".into(),
+			));
+		}
+		// A build restores an environment's central, so a declaration on a
+		// machine names the environment by naming where its central runs.
+		// spec: RPT#pairs
+		if let Some(machine_id) = machine_id {
+			let machine = crate::machines::Machine::get_by_id(conn, machine_id).await?;
+			let members = if machine.group_id == Some(group_id) && machine.deleted_at.is_none() {
+				crate::applications::Application::list_live_in_group(conn, group_id).await?
+			} else {
+				Vec::new()
+			};
+			let coverage = crate::reporting_schemas::SchemaCoverage::Centrals(
+				std::collections::HashSet::from([machine_id]),
+			);
+			if !members
+				.iter()
+				.filter_map(|a| a.rank)
+				.any(|rank| coverage.covers(rank, &members))
+			{
+				return Err(AppError::BadRequest(
+					"a declaration on a machine publishes a reporting schema only where that machine runs an environment's Tamanu central".into(),
+				));
+			}
+		}
+	}
+
+	let descriptors =
+		RestoreConsumerCapability::list_for_consumer(conn, consumer_device_id).await?;
+	let Some(desc) = descriptors.iter().find(|d| &d.intent == intent) else {
+		return Ok(params.clone());
+	};
+
+	// The masking parameters are Canopy's for any intent carrying `redact`,
+	// whether or not this declaration redacts. An operator value for one is
+	// dropped rather than stored: were it kept, a declaration could redact
+	// with its flag off and the flag would stop answering on its own whether
+	// an unmasked replica is a finding.
+	let owns_masking = desc.has_semantic(semantics::REDACT);
+	if redacts && !owns_masking {
+		return Err(AppError::BadRequest(format!(
+			"intent {intent} cannot redact: it does not carry the `redact` semantic"
+		)));
+	}
+
+	// A schema is built from an environment's central, from data the masking
+	// manifest has not altered, so a declaration Canopy would never dispatch a
+	// build to cannot be the group's publisher either.
+	// spec: RPT#the-build-contract
+	if publishes_schemas && !desc.has_semantic(semantics::REPORTING_SCHEMA) {
+		return Err(AppError::BadRequest(format!(
+			"intent {intent} cannot publish a reporting schema: it does not carry the `reporting-schema` semantic"
+		)));
+	}
+	let params = if owns_masking {
+		&params
+			.iter()
+			.filter(|(name, _)| !redaction_params::ALL.contains(&name.as_str()))
+			.map(|(name, value)| (name.clone(), value.clone()))
+			.collect()
+	} else {
+		params
+	};
+
+	let normalized =
+		normalize_params(&desc.params, params).map_err(|e| AppError::BadRequest(e.to_string()))?;
+	validate_params(&desc.params, &normalized).map_err(|e| AppError::BadRequest(e.to_string()))?;
+	Ok(normalized)
+}
+
+/// A declaration and what it names, as the records an entry holds: the
+/// declaration, its group, its machine where it covers one, and the consumer
+/// responsible for it.
+pub async fn audit_records(
+	conn: &mut AsyncPgConnection,
+	replica: &RestoreReplica,
+) -> Result<(
+	crate::audit::Record,
+	crate::audit::Record,
+	Option<crate::audit::Record>,
+	crate::audit::Record,
+)> {
+	let group = crate::audit::Record::group(conn, replica.group_id).await?;
+	let machine = match replica.machine_id {
+		Some(machine_id) => Some(crate::audit::Record::machine(conn, machine_id).await?),
+		None => None,
+	};
+	Ok((
+		crate::audit::Record::new(
+			crate::audit::RecordKind::RestoreReplica,
+			replica.id,
+			replica.name.clone(),
+		),
+		group,
+		machine,
+		crate::audit::Record::device(replica.consumer_device_id),
+	))
 }

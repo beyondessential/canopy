@@ -159,6 +159,44 @@ async fn a_token_without_the_notes_grant_is_refused_every_write_with_no_effect()
 	.await
 }
 
+// spec: MCP#restore-replicas
+#[tokio::test(flavor = "multi_thread")]
+async fn no_token_declares_or_changes_a_restore_replica() {
+	commons_tests::server::run(async |mut conn, public, _private| {
+		let s = seed(&mut conn).await;
+		let grants: Vec<String> = database::mcp_tokens::GRANTS
+			.iter()
+			.map(|grant| (*grant).to_owned())
+			.collect();
+		let (_, token) = McpToken::mint(&mut conn, "everything", "test@example.com", &grants)
+			.await
+			.unwrap();
+
+		for (tool, arguments) in [
+			(
+				"declare_restore_replica",
+				json!({
+					"consumer_device_id": Uuid::new_v4(), "group_id": s.group,
+					"type": "tamanu-postgres", "intent": "verify", "name": "by-token",
+				}),
+			),
+			(
+				"update_restore_replica",
+				json!({ "replica_id": Uuid::new_v4(), "enabled": false }),
+			),
+		] {
+			let env = call(&public, &token, tool, arguments).await;
+			assert!(env.get("error").is_some(), "{tool} refused: {env}");
+		}
+		assert!(
+			logged(&mut conn, "restore_replica_declared")
+				.await
+				.is_empty()
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_agent_adds_edits_and_deletes_its_own_notes_but_not_an_operators() {
 	commons_tests::server::run(async |mut conn, public, _private| {

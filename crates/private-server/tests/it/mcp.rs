@@ -980,6 +980,81 @@ async fn find_restore_replicas_reports_gap_and_health() {
 	.await
 }
 
+// spec: MCP#restore-replicas
+#[tokio::test(flavor = "multi_thread")]
+async fn an_operator_declares_and_changes_a_restore_replica() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed_backup_runs(&mut conn).await;
+		seed_restore_replicas(&mut conn).await;
+
+		let declared = call_tool!(
+			private,
+			"declare_restore_replica",
+			serde_json::json!({
+				"consumer_device_id": CONSUMER,
+				"group_id": RGROUP,
+				"machine_id": RSERVER,
+				"type": "tamanu-postgres",
+				"intent": "verify",
+				"name": "declared-here",
+				"overdue_after": "36h",
+			})
+		);
+		assert_eq!(declared["name"], "declared-here");
+		assert_eq!(declared["machine_id"], RSERVER);
+		assert_eq!(declared["enabled"], true);
+		assert_eq!(declared["overdue_after_seconds"], 36 * 3600);
+
+		let changed = call_tool!(
+			private,
+			"update_restore_replica",
+			serde_json::json!({
+				"replica_id": declared["id"],
+				"enabled": false,
+				"whole_group": true,
+			})
+		);
+		assert_eq!(changed["enabled"], false);
+		assert!(changed["machine_id"].is_null(), "widened to the group");
+		assert_eq!(
+			changed["name"], "declared-here",
+			"what was left out is kept"
+		);
+		assert_eq!(changed["overdue_after_seconds"], 36 * 3600);
+
+		for action in ["restore_replica_declared", "restore_replica_updated"] {
+			let logged = database::audit::find(
+				&mut conn,
+				&database::audit::Filter {
+					action: Some(action.to_owned()),
+					limit: 10,
+					..Default::default()
+				},
+			)
+			.await
+			.expect("audit entries");
+			assert_eq!(logged.len(), 1, "{action}");
+		}
+
+		// A name the consumer already uses is refused with the reason, as the
+		// operator interface refuses it.
+		let clash = call_result(
+			&private,
+			"declare_restore_replica",
+			serde_json::json!({
+				"consumer_device_id": CONSUMER,
+				"group_id": RGROUP,
+				"type": "tamanu-postgres",
+				"intent": "verify",
+				"name": "group-wide",
+			}),
+		)
+		.await;
+		assert_eq!(clash["isError"], true, "{clash}");
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn get_restore_replica_detail_and_gap() {
 	commons_tests::server::run(async |mut conn, _public, private| {
@@ -1741,6 +1816,7 @@ async fn every_tool_is_read_only() {
 				"add_incident_note",
 				"add_issue_note",
 				"amend_memory_entry",
+				"declare_restore_replica",
 				"delete_note",
 				"edit_note",
 				"edit_vulnerability_decision",
@@ -1749,6 +1825,7 @@ async fn every_tool_is_read_only() {
 				"replace_notes",
 				"restore_memory_entry",
 				"retire_memory_entry",
+				"update_restore_replica",
 				"withdraw_vulnerability_decisions",
 			],
 			"tools not declared read-only"

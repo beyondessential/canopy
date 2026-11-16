@@ -104,6 +104,15 @@ A plan carries the operator who recorded it, who last amended it, and who withdr
 
 **Find backup problems** optionally narrows to one group, otherwise scans the whole fleet, and returns the current backup problems graded by urgency: machine-and-type pairs whose last successful backup is overdue against its schedule, types that have never reported a backup, groups whose backup repository is in an error state, recent failed backup runs, and maintenance runs that appear stuck.
 
+### Restore replicas
+
+**Declare restore replica** takes a consumer, a group, optionally one machine of it, a backup type, an intent, a name, and optionally an overdue bound, parameter values, and whether it redacts, publishes its reporting schema, or tests migrations only on request, and records the declaration (see [RST](../public-server/restore-replicas.md), "Declared replicas").
+
+**Update restore replica** takes a declaration and any of its name, whether it is enabled, its scope within its group, its overdue bound, its parameter values and its flags, and changes those, leaving the rest as they were.
+
+Both hold a declaration to what the operator interface holds one to, and refuse one it would refuse, with the reason.
+No grant holds these writes: a declaration decides what a consumer restores and may publish, so only an administrator on the operator path makes one, and every access token is refused.
+
 ### Incidents and issues
 
 An issue is a degraded check state (see [CHK](../monitoring/checks.md)): a condition on an application, a machine, a group, or Canopy itself, reported by a known source under a stable check name, carrying its observed and effective results and a current active state; an incident aggregates the issues active on a target over a span of time, from when it opened until it closes or an operator resolves it (see [INC](../monitoring/incidents.md)).

@@ -72,6 +72,8 @@ pub const AUDITED_TOOLS: &[&str] = &[
 	"amend_memory_entry",
 	"retire_memory_entry",
 	"restore_memory_entry",
+	"declare_restore_replica",
+	"update_restore_replica",
 ];
 
 #[derive(Clone)]
@@ -120,8 +122,8 @@ impl ServerHandler for CanopyMcp {
 			"Access to the Canopy fleet: machines, applications, groups, health/status, \
 			 Tamanu versions, planned upgrades, backups, incidents/issues, and vulnerabilities. \
 			 All data is live; every tool reads except the three that change vulnerability triage \
-			 decisions (record_, withdraw_ and edit_) and those that write notes and incident \
-			 memory. \
+			 decisions (record_, withdraw_ and edit_) those that write notes and incident \
+			 memory, and the two that declare and change restore replicas. \
 			 Use find_* to locate entities and get_* for detail; fleet_summary and \
 			 find_backup_problems for triage.\n\n\
 			 Machines and applications are different things and both are queryable. A machine is \

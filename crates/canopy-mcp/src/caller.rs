@@ -108,6 +108,16 @@ impl Caller {
 		}
 	}
 
+	/// Whether the caller may declare and change restore replicas: an
+	/// administrator on the operator surface. No token grant holds it, since
+	/// a declaration decides what a consumer restores and may publish.
+	pub async fn may_declare_replicas(&self) -> Result<bool, AppError> {
+		match self {
+			Self::Operator { admin, .. } => admin.resolve().await,
+			Self::Token { .. } => Ok(false),
+		}
+	}
+
 	/// Whether the caller may record vulnerability triage decisions: an
 	/// administrator on the operator surface, a token with the triage grant on
 	/// the other.

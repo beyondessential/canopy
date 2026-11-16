@@ -102,6 +102,7 @@ Recording, withdrawing or editing a vulnerability triage decision is graded writ
 
 The fleet query interface (see [MCP](mcp.md)) changes nothing on the fleet, so every one of its tools is read-only except its triage writes, recording, withdrawing and editing triage decisions, which are graded write.
 That interface has no sessions, so its writes are allowed by the caller's standing instead of a raised mode: an administrator on the operator path, a token with the triage grant on the token path.
+Declaring and changing a restore replica through it are graded write as they are on the administrative surface, and are allowed to an administrator on the operator path alone.
 The handlers that mint, revoke, and list its access tokens belong to the administrative surface rather than to that interface: minting and revoking are danger, and listing is read-only.
 
 The handlers by which an operator reads and changes their own safety mode are read-only, because a read-only session has to be able to reach them: what they change is that operator's own session rather than the fleet or Canopy's records.
