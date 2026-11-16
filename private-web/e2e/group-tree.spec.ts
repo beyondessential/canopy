@@ -232,6 +232,22 @@ test.describe("the group's tree on the detail pages", () => {
 		).toHaveCount(2);
 	});
 
+	test("an application's address opens that application in a new tab", async ({
+		page,
+		sql,
+	}) => {
+		const { group } = await seedTree(sql);
+
+		await page.goto(`/fleet/groups/${group.id}`);
+
+		const address = page
+			.getByTestId("tree-application")
+			.filter({ hasText: "central-on-shared" })
+			.getByRole("link", { name: "https://c.e2e.invalid" });
+		await expect(address).toHaveAttribute("href", /^https:\/\/c\.e2e\.invalid\/?$/);
+		await expect(address).toHaveAttribute("target", "_blank");
+	});
+
 	/// A fine box is green when nothing is enclosed, and the mark is the size
 	/// of an enclosure holding one dot so the row is no shorter for it.
 	///
