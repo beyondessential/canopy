@@ -316,10 +316,7 @@ impl CanopyMcp {
 		};
 		self.write_replica(
 			&caller,
-			None,
-			new,
-			args.overdue_after,
-			args.params.unwrap_or_default(),
+			Target::New(new, args.overdue_after, args.params.unwrap_or_default()),
 		)
 		.await
 	}
@@ -352,66 +349,96 @@ impl CanopyMcp {
 				None,
 			));
 		}
-
-		let mut conn = self.conn().await?;
-		let held = match RestoreReplica::get(&mut conn, id).await {
-			Ok(held) => held,
-			Err(error) if is_not_found(&error) => {
-				return Ok(not_found(format!("no restore replica with id {id}")));
-			}
-			Err(error) => return Err(mcp_err(error)),
-		};
-		drop(conn);
-
-		let params = match args.params {
-			Some(params) => params,
-			None => serde_json::from_value(held.params.clone()).unwrap_or_default(),
-		};
-		let overdue_after = match args.overdue_after {
-			Some(text) => Some(text),
-			None => held
-				.overdue_after
-				.map(|bound| format!("{}s", bound.0.as_secs())),
-		};
-		let new = RestoreReplicaUpdate {
-			consumer_device_id: held.consumer_device_id,
-			group_id: held.group_id,
-			machine_id: if whole_group {
-				None
-			} else {
-				machine_id.or(held.machine_id)
+		let changes = Changes {
+			name: args.name,
+			enabled: args.enabled,
+			scope: match (whole_group, machine_id) {
+				(true, _) => Some(None),
+				(false, Some(machine)) => Some(Some(machine)),
+				(false, None) => None,
 			},
-			r#type: held.r#type,
-			intent: held.intent,
-			name: args.name.unwrap_or(held.name),
-			overdue_after: None,
-			params: serde_json::Value::Null,
-			redacts: args.redacts.unwrap_or(held.redacts),
-			publishes_schemas: args.publishes_schemas.unwrap_or(held.publishes_schemas),
-			migrates_on_request: args.migrates_on_request.unwrap_or(held.migrates_on_request),
-			enabled: args.enabled.unwrap_or(held.enabled),
+			overdue_after: args.overdue_after,
+			params: args.params,
+			redacts: args.redacts,
+			publishes_schemas: args.publishes_schemas,
+			migrates_on_request: args.migrates_on_request,
 		};
-		self.write_replica(&caller, Some(id), new, overdue_after, params)
-			.await
+		self.write_replica(&caller, Target::Held(id, changes)).await
 	}
 }
 
+/// What an update changes of a declaration; `None` keeps what is held.
+struct Changes {
+	name: Option<String>,
+	enabled: Option<bool>,
+	/// The machine to scope to, or `Some(None)` for the whole group.
+	scope: Option<Option<Uuid>>,
+	overdue_after: Option<String>,
+	params: Option<ParamValues>,
+	redacts: Option<bool>,
+	publishes_schemas: Option<bool>,
+	migrates_on_request: Option<bool>,
+}
+
+impl Changes {
+	fn over(self, held: RestoreReplica) -> Result<(RestoreReplicaUpdate, ParamValues), AppError> {
+		let params = match self.params {
+			Some(params) => params,
+			None => serde_json::from_value(held.params).unwrap_or_default(),
+		};
+		let overdue_after = match self.overdue_after {
+			Some(text) => restore::parse_overdue_after(Some(&text))?,
+			None => held.overdue_after,
+		};
+		Ok((
+			RestoreReplicaUpdate {
+				consumer_device_id: held.consumer_device_id,
+				group_id: held.group_id,
+				machine_id: self.scope.unwrap_or(held.machine_id),
+				r#type: held.r#type,
+				intent: held.intent,
+				name: self.name.unwrap_or(held.name),
+				overdue_after,
+				params: serde_json::Value::Null,
+				redacts: self.redacts.unwrap_or(held.redacts),
+				publishes_schemas: self.publishes_schemas.unwrap_or(held.publishes_schemas),
+				migrates_on_request: self.migrates_on_request.unwrap_or(held.migrates_on_request),
+				enabled: self.enabled.unwrap_or(held.enabled),
+			},
+			params,
+		))
+	}
+}
+
+/// The declaration a write is for: one to make, or one held to change.
+enum Target {
+	New(RestoreReplicaUpdate, Option<String>, ParamValues),
+	Held(Uuid, Changes),
+}
+
 impl CanopyMcp {
-	/// Validate and store a declaration, new where `id` is `None`, and record
-	/// it as the caller's.
+	/// Validate and store a declaration and record it as the caller's.
 	async fn write_replica(
 		&self,
 		caller: &Caller,
-		id: Option<Uuid>,
-		mut new: RestoreReplicaUpdate,
-		overdue_after: Option<String>,
-		params: ParamValues,
+		target: Target,
 	) -> Result<CallToolResult, McpError> {
 		let actor = caller.actor();
 		let created_by = caller.name().to_owned();
 		let mut conn = self.db_write.get().await.map_err(mcp_err)?;
 		let written = conn
 			.transaction::<_, AppError, _>(async |conn| {
+				let (id, mut new, params) = match target {
+					Target::New(mut new, overdue_after, params) => {
+						new.overdue_after = restore::parse_overdue_after(overdue_after.as_deref())?;
+						(None, new, params)
+					}
+					Target::Held(id, changes) => {
+						let held = RestoreReplica::get_for_update(conn, id).await?;
+						let (new, params) = changes.over(held)?;
+						(Some(id), new, params)
+					}
+				};
 				let params = restore::declared_params(
 					conn,
 					new.consumer_device_id,
@@ -424,7 +451,6 @@ impl CanopyMcp {
 				)
 				.await?;
 				new.params = serde_json::to_value(&params).expect("params serialize");
-				new.overdue_after = restore::parse_overdue_after(overdue_after.as_deref())?;
 
 				let replica = match id {
 					Some(id) => RestoreReplica::update(conn, id, new).await?,
@@ -485,7 +511,6 @@ impl CanopyMcp {
 
 		match written {
 			Ok(replica) => {
-				let mut conn = self.conn().await?;
 				let out = self.restore_replica_outs(&mut conn, vec![replica]).await?;
 				ok_json(&out.into_iter().next().expect("one declaration"))
 			}

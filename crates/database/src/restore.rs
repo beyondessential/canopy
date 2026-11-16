@@ -258,6 +258,21 @@ impl RestoreReplica {
 			.ok_or(AppError::DatabaseQuery(DieselError::NotFound))
 	}
 
+	/// A declaration held under a row lock until the transaction ends, for a
+	/// caller changing some of its fields and writing the rest back.
+	pub async fn get_for_update(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
+		use crate::schema::restore_replicas::dsl;
+		dsl::restore_replicas
+			.select(Self::as_select())
+			.filter(dsl::id.eq(id))
+			.for_update()
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?
+			.ok_or(AppError::DatabaseQuery(DieselError::NotFound))
+	}
+
 	/// Edit every field of a declaration, including its scope. A name already
 	/// used by another of the consumer's declarations maps to `409`, same as
 	/// [`Self::create`]; the scope itself is free to collide. If the scope
