@@ -75,7 +75,11 @@ test.describe("server detail page", () => {
 				name: new RegExp(server.name),
 			}),
 		).toBeVisible();
-		const hostLink = page.getByRole("link", { name: new RegExp(server.host) });
+		// The tree at the foot of the page links the same address on this
+		// application's own row.
+		const hostLink = page
+			.getByRole("link", { name: new RegExp(server.host) })
+			.first();
 		await expect(hostLink).toBeVisible();
 
 		// The server's Group section shows the group's effective billing labels.
