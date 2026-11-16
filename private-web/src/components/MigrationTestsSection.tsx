@@ -1,5 +1,6 @@
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import HelpOutlinedIcon from "@mui/icons-material/HelpOutlined";
 import {
 	Alert,
 	Box,
@@ -250,6 +251,13 @@ function SectionHeading({ target }: { target?: string | null }) {
 					to {target}
 				</Typography>
 			)}
+			<Tooltip title="Each server's upgrade migrations, run against a restore of its own data." arrow>
+				<HelpOutlinedIcon
+					tabIndex={0}
+					aria-label="About pre-upgrade migration tests"
+					sx={{ fontSize: 16, color: "text.secondary", alignSelf: "center" }}
+				/>
+			</Tooltip>
 		</Stack>
 	);
 }

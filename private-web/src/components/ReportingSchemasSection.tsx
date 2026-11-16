@@ -13,6 +13,7 @@ import {
 	Typography,
 } from "@mui/material";
 import DownloadIcon from "@mui/icons-material/Download";
+import HelpOutlinedIcon from "@mui/icons-material/HelpOutlined";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { GradedAction } from "./GradedAction";
@@ -205,8 +206,17 @@ function StateChip({
 
 function SectionHeading() {
 	return (
-		<Typography variant="h6" component="h2" gutterBottom>
-			Reporting schemas
-		</Typography>
+		<Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "baseline" }}>
+			<Typography variant="h6" component="h2">
+				Reporting schemas
+			</Typography>
+			<Tooltip title="One per environment and version this group runs or is moving to, built from a replica of that environment's data." arrow>
+				<HelpOutlinedIcon
+					tabIndex={0}
+					aria-label="About reporting schemas"
+					sx={{ fontSize: 16, color: "text.secondary", alignSelf: "center" }}
+				/>
+			</Tooltip>
+		</Stack>
 	);
 }
