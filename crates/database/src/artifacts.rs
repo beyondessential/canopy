@@ -60,17 +60,16 @@ impl Scope {
 	) -> crate::schema::artifacts::BoxedQuery<'a, diesel::pg::Pg, ST> {
 		use crate::schema::artifacts::dsl::{artifact_type, group_id, rank};
 
-		if self == Self::Fleet {
-			return query;
-		}
-		let query = query.filter(artifact_type.ne(REPORTS_TYPE));
-
 		match self {
-			Self::Unscoped => query.filter(group_id.is_null()),
+			Self::Unscoped => query
+				.filter(artifact_type.ne(REPORTS_TYPE))
+				.filter(group_id.is_null()),
 			Self::Group(caller) => query
+				.filter(artifact_type.ne(REPORTS_TYPE))
 				.filter(group_id.is_null().or(group_id.eq(caller)))
 				.filter(rank.is_null()),
 			Self::Environment(caller, caller_rank) => query
+				.filter(artifact_type.ne(REPORTS_TYPE))
 				.filter(group_id.is_null().or(group_id.eq(caller)))
 				.filter(rank.is_null().or(rank.eq(caller_rank))),
 			Self::Fleet => query,
