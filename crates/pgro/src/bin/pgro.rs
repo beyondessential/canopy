@@ -29,8 +29,8 @@ use tracing::{debug, info, warn};
 const MAX_SCHEMA_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 /// Everything under here carries the build's callback token as its last path
-/// segment. Kept in step with the route below and with
-/// `Context::schema_build_callback_url`.
+/// segment. Kept in step with the routes below and with
+/// `Context::schema_build_callback_url` and its reports counterpart.
 const SCHEMA_BUILD_CALLBACK_PREFIX: &str = "/api/v1/schema-build-results/";
 
 use pgro::{
@@ -580,6 +580,12 @@ async fn main() -> anyhow::Result<()> {
 			if dropped > 0 {
 				warn!(dropped, "dropped reporting schemas nothing came back for");
 			}
+			let dropped = schema_ctx
+				.schema_build_reports
+				.sweep(schema_build::DELIVERED_SCHEMA_MAX_AGE);
+			if dropped > 0 {
+				warn!(dropped, "dropped reports nothing came back for");
+			}
 		}
 	});
 
@@ -707,6 +713,15 @@ fn build_router(state: ServerState, metrics_registry: prometheus::Registry) -> R
 		.route(
 			"/api/v1/schema-build-results/{namespace}/{replica}/{token}",
 			axum::routing::post(post_schema_build_results)
+				.layer(DefaultBodyLimit::max(MAX_SCHEMA_BODY_BYTES))
+				.route_layer(axum::middleware::from_fn_with_state(
+					state.clone(),
+					verify_build_token,
+				)),
+		)
+		.route(
+			"/api/v1/schema-build-results/{namespace}/{replica}/reports/{token}",
+			axum::routing::post(post_schema_build_reports)
 				.layer(DefaultBodyLimit::max(MAX_SCHEMA_BODY_BYTES))
 				.route_layer(axum::middleware::from_fn_with_state(
 					state.clone(),
@@ -860,6 +875,29 @@ async fn post_schema_build_results(
 		return StatusCode::SERVICE_UNAVAILABLE;
 	}
 
+	StatusCode::NO_CONTENT
+}
+
+/// Accept the reports archive a reporting-schema build POSTs beside its schema.
+///
+/// Reports are optional to a build, so unlike the schema no receipt is
+/// recorded: reports an operator restart lost leave the schema registered
+/// alone rather than the build run again.
+async fn post_schema_build_reports(
+	State(state): State<ServerState>,
+	Path((namespace, replica, _token)): Path<(String, String, String)>,
+	body: axum::body::Bytes,
+) -> StatusCode {
+	info!(
+		namespace = namespace,
+		replica = replica,
+		bytes = body.len(),
+		"received reporting schema build reports"
+	);
+	state
+		.ctx
+		.schema_build_reports
+		.store(&namespace, &replica, body);
 	StatusCode::NO_CONTENT
 }
 
@@ -1187,6 +1225,19 @@ mod tests {
 		assert_eq!(
 			loggable_target(&uri),
 			"/api/v1/schema-build-results/pgro/kamaka/REDACTED"
+		);
+	}
+
+	#[test]
+	fn a_reports_callback_span_carries_no_token() {
+		let uri: axum::http::Uri =
+			"/api/v1/schema-build-results/pgro/kamaka/reports/6f1c0c3a-1111-2222-3333-444455556666"
+				.parse()
+				.expect("a uri");
+
+		assert_eq!(
+			loggable_target(&uri),
+			"/api/v1/schema-build-results/pgro/kamaka/reports/REDACTED"
 		);
 	}
 

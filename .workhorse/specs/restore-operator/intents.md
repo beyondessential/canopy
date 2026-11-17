@@ -78,6 +78,11 @@ The build returns the schema to pgro over a callback, since the Job's terminatio
 pgro registers the returned schema with Canopy as an artifact of the exact version, scoped to the group, sending the bytes over the connection it already holds.
 It is issued no credential to any store.
 
+The build may also return the group's reports, as one archive over a callback of their own that pgro names to the build beside the schema's.
+A build that is given no reports callback, or returns no reports, is built all the same: the schema is what the build is for, and the reports ride on it.
+pgro registers returned reports with Canopy beside the schema once the schema is registered, and names both in what it reports.
+Reports that Canopy does not take in leave the build reporting the schema alone rather than failing it.
+
 pgro reports the build's outcome to Canopy alongside the replica's own health, as it reports a migration outcome: a replica that came up healthy but whose build failed reports a healthy restore and a failed build.
 A build that fails does not fail the restore, since the replica was sound and what failed is the schema, which Canopy grades separately.
 

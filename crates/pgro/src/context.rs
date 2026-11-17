@@ -65,6 +65,8 @@ pub struct Context {
 	/// replica. The SQL is too big for a Job's termination message, which k8s
 	/// caps at 4 KiB, so the build hands it over the callback instead.
 	pub schema_build_results: Arc<CallbackStore>,
+	/// The reports archive a build posts beside its schema, held the same way.
+	pub schema_build_reports: Arc<CallbackStore<bes_canopy_api::bytes::Bytes>>,
 	/// In-memory store for canopy-proxy sidecar TrafficStats keyed by
 	/// `{namespace}/{job}`. Written on sidecar exit via the operator's
 	/// `/api/v1/canopy-stats/...` callback; read by the canopy
@@ -127,6 +129,7 @@ impl Context {
 			snapshot_results: Arc::new(CallbackStore::default()),
 			schema_migration_results: Arc::new(CallbackStore::default()),
 			schema_build_results: Arc::new(CallbackStore::default()),
+			schema_build_reports: Arc::new(CallbackStore::default()),
 			canopy_stats: Arc::new(CallbackStore::default()),
 			callback_base_url,
 			deployment_ready_timeout_secs,
@@ -190,6 +193,20 @@ impl Context {
 	pub fn schema_build_callback_url(&self, namespace: &str, replica: &str, token: &str) -> String {
 		format!(
 			"{}/api/v1/schema-build-results/{namespace}/{replica}/{token}",
+			self.callback_base_url
+		)
+	}
+
+	/// Where the same build posts its reports archive. Carries the token for
+	/// the same reason the schema's does.
+	pub fn schema_build_reports_callback_url(
+		&self,
+		namespace: &str,
+		replica: &str,
+		token: &str,
+	) -> String {
+		format!(
+			"{}/api/v1/schema-build-results/{namespace}/{replica}/reports/{token}",
 			self.callback_base_url
 		)
 	}
