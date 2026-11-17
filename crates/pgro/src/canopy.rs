@@ -210,6 +210,54 @@ impl Client {
 		run_id: Option<Uuid>,
 		sql: Bytes,
 	) -> Result<Option<Uuid>> {
+		self.register_group_artifact(
+			"reporting-schema",
+			"application/sql",
+			version,
+			group,
+			rank,
+			run_id,
+			sql,
+		)
+		.await
+	}
+
+	/// Register the archive of reports a build posted beside its schema, the
+	/// same way the schema is registered.
+	pub async fn register_reports(
+		&self,
+		version: &str,
+		group: Uuid,
+		rank: &str,
+		run_id: Option<Uuid>,
+		zip: Bytes,
+	) -> Result<Option<Uuid>> {
+		self.register_group_artifact(
+			"reports",
+			"application/zip",
+			version,
+			group,
+			rank,
+			run_id,
+			zip,
+		)
+		.await
+	}
+
+	#[expect(
+		clippy::too_many_arguments,
+		reason = "the registration path's segments"
+	)]
+	async fn register_group_artifact(
+		&self,
+		artifact_type: &str,
+		content_type: &str,
+		version: &str,
+		group: Uuid,
+		rank: &str,
+		run_id: Option<Uuid>,
+		bytes: Bytes,
+	) -> Result<Option<Uuid>> {
 		if !is_path_safe_version(version) {
 			return Err(Error::Canopy(format!(
 				"{version:?} is not a version a schema can be registered against"
@@ -224,23 +272,22 @@ impl Client {
 			)));
 		}
 
-		let uri = registration_uri(version, group, rank, run_id);
+		let uri = registration_uri(artifact_type, version, group, rank, run_id);
 
 		let request = Request::builder()
 			.method(Method::POST)
 			.uri(&uri)
-			.header(CONTENT_TYPE, "application/sql")
-			.body(sql)
+			.header(CONTENT_TYPE, content_type)
+			.body(bytes)
 			.map_err(|err| Error::Canopy(format!("building artifact registration: {err}")))?;
 
-		let response =
-			self.inner.transport().call(request).await.map_err(|err| {
-				Error::Canopy(format!("register_reporting_schema({version}): {err}"))
-			})?;
+		let response = self.inner.transport().call(request).await.map_err(|err| {
+			Error::Canopy(format!("registering {artifact_type} for {version}: {err}"))
+		})?;
 
 		if !response.status().is_success() {
 			return Err(Error::Canopy(format!(
-				"register_reporting_schema({version}): canopy answered {}",
+				"registering {artifact_type} for {version}: canopy answered {}",
 				response.status()
 			)));
 		}
@@ -249,12 +296,18 @@ impl Client {
 	}
 }
 
-/// Where a reporting schema is registered.
+/// Where a build's artifact is registered.
 ///
 /// Canopy authorises this exact path, and a build whose registration misses it
 /// reports a healthy restore and publishes nothing, so the drift is silent.
-fn registration_uri(version: &str, group: Uuid, rank: &str, run_id: Option<Uuid>) -> String {
-	let mut uri = format!("/artifacts/groups/{group}/{rank}/{version}/reporting-schema/any");
+fn registration_uri(
+	artifact_type: &str,
+	version: &str,
+	group: Uuid,
+	rank: &str,
+	run_id: Option<Uuid>,
+) -> String {
+	let mut uri = format!("/artifacts/groups/{group}/{rank}/{version}/{artifact_type}/any");
 	if let Some(run) = run_id {
 		uri.push_str(&format!("?run={run}"));
 	}
@@ -379,7 +432,13 @@ mod tests {
 	/// a failure and this literal is the only thing holding it.
 	#[test]
 	fn a_schema_is_registered_at_the_path_canopy_authorises() {
-		let uri = registration_uri("2.60.0", GROUP.parse().unwrap(), "production", None);
+		let uri = registration_uri(
+			"reporting-schema",
+			"2.60.0",
+			GROUP.parse().unwrap(),
+			"production",
+			None,
+		);
 
 		assert_eq!(
 			uri,
@@ -395,8 +454,8 @@ mod tests {
 		let group: Uuid = GROUP.parse().unwrap();
 
 		assert_ne!(
-			registration_uri("2.60.0", group, "production", None),
-			registration_uri("2.60.0", group, "demo", None)
+			registration_uri("reporting-schema", "2.60.0", group, "production", None),
+			registration_uri("reporting-schema", "2.60.0", group, "demo", None)
 		);
 	}
 
@@ -411,12 +470,36 @@ mod tests {
 		assert!(!is_known_rank(""));
 	}
 
+	/// The reports are registered beside the schema, under the one other type
+	/// canopy authorises a builder for.
+	#[test]
+	fn reports_are_registered_at_the_path_canopy_authorises() {
+		let uri = registration_uri(
+			"reports",
+			"2.60.0",
+			GROUP.parse().unwrap(),
+			"production",
+			None,
+		);
+
+		assert_eq!(
+			uri,
+			format!("/artifacts/groups/{GROUP}/production/2.60.0/reports/any")
+		);
+	}
+
 	/// The exact version, never a range: a schema follows the migrations one
 	/// version applies, so one built against a patch is not the schema another
 	/// patch of the same minor describes.
 	#[test]
 	fn the_registration_names_an_exact_version() {
-		let uri = registration_uri("2.60.2", GROUP.parse().unwrap(), "production", None);
+		let uri = registration_uri(
+			"reporting-schema",
+			"2.60.2",
+			GROUP.parse().unwrap(),
+			"production",
+			None,
+		);
 
 		assert!(uri.contains("/2.60.2/reporting-schema/"), "{uri}");
 		assert!(
@@ -431,6 +514,7 @@ mod tests {
 	fn a_run_is_carried_beside_the_group() {
 		let run = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 		let uri = registration_uri(
+			"reporting-schema",
 			"2.60.0",
 			GROUP.parse().unwrap(),
 			"production",
