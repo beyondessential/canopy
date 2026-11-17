@@ -559,6 +559,8 @@ pub(super) async fn reconcile_schema_build(
 				};
 			};
 
+			let reports = ctx.schema_build_reports.take(namespace, &replica_name);
+
 			// A recorded result is what settles the build for good, so a
 			// registration that failed on the way to canopy is answered while
 			// the schema is still held rather than recorded against a build
@@ -575,16 +577,22 @@ pub(super) async fn reconcile_schema_build(
 				.await
 			{
 				Ok(artifact) => {
-					let reports = register_reports(
-						ctx,
-						namespace,
-						&replica_name,
-						target,
-						group,
-						rank,
-						crate::controllers::canopy::verification::run_id_from_status(restore),
-					)
-					.await;
+					let reports = match &reports {
+						Some(zip) => {
+							register_reports(
+								ctx,
+								target,
+								group,
+								rank,
+								crate::controllers::canopy::verification::run_id_from_status(
+									restore,
+								),
+								zip.clone(),
+							)
+							.await
+						}
+						None => None,
+					};
 					(
 						None,
 						artifact
@@ -599,7 +607,7 @@ pub(super) async fn reconcile_schema_build(
 					warn!(%target, %group, attempts, "registering the reporting schema failed: {err}");
 
 					if attempts < BUILD_ATTEMPTS {
-						keep_schema(ctx, namespace, &replica_name, &sql);
+						keep_delivered(ctx, namespace, &replica_name, &sql, reports);
 						record_build_attempt(client, namespace, &restore_name, attempts).await?;
 						return Ok(false);
 					}
@@ -620,7 +628,7 @@ pub(super) async fn reconcile_schema_build(
 			if let Err(err) =
 				record_schema_build(client, namespace, &restore_name, Some(&job_name), result).await
 			{
-				keep_schema(ctx, namespace, &replica_name, &sql);
+				keep_delivered(ctx, namespace, &replica_name, &sql, reports);
 				return Err(err);
 			}
 
@@ -719,14 +727,12 @@ fn build_failure(log: Option<&str>, secrets: Option<&[String]>) -> String {
 // spec: INT#building-a-reporting-schema
 async fn register_reports(
 	ctx: &Arc<Context>,
-	namespace: &str,
-	replica_name: &str,
 	target: &str,
 	group: Uuid,
 	rank: &str,
 	run_id: Option<Uuid>,
+	zip: Bytes,
 ) -> Option<Uuid> {
-	let zip = ctx.schema_build_reports.take(namespace, replica_name)?;
 	match ctx
 		.canopy
 		.register_reports(target, group, rank, run_id, zip)
@@ -746,13 +752,23 @@ fn drop_delivered(ctx: &Arc<Context>, namespace: &str, replica_name: &str) {
 	ctx.schema_build_reports.take(namespace, replica_name);
 }
 
-/// Put a taken schema back for the next reconcile.
-fn keep_schema(ctx: &Arc<Context>, namespace: &str, replica_name: &str, sql: &Bytes) {
+/// Put a taken schema, and the reports beside it, back for the next reconcile.
+fn keep_delivered(
+	ctx: &Arc<Context>,
+	namespace: &str,
+	replica_name: &str,
+	sql: &Bytes,
+	reports: Option<Bytes>,
+) {
 	ctx.schema_build_results.store(
 		namespace,
 		replica_name,
 		String::from_utf8_lossy(sql).into_owned(),
 	);
+	if let Some(reports) = reports {
+		ctx.schema_build_reports
+			.store(namespace, replica_name, reports);
+	}
 }
 
 /// How many times one restore may go round before its build records a failure
