@@ -1173,3 +1173,58 @@ async fn a_declaration_on_a_central_covers_its_environment_alone() {
 	})
 	.await;
 }
+
+/// A build registers a schema and may register reports beside it, and a pair
+/// names each by what it is rather than by where the build listed it.
+///
+/// spec: RPT#what-a-build-reports
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pair_names_its_schema_and_its_reports() {
+	TestDb::run(|mut conn, _url| async move {
+		let (older, newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
+
+		let schema: Uuid = "77777777-7777-7777-7777-777777777777".parse().unwrap();
+		let reports: Uuid = "88888888-8888-8888-8888-888888888888".parse().unwrap();
+		conn.batch_execute(&format!(
+			"INSERT INTO artifacts (id, version_id, artifact_type, platform, group_id, rank, content_type, digest)
+			 VALUES ('{schema}', '{newer}', 'reporting-schema', 'any', '{GROUP}', 'production',
+			         'application/sql', sha256('s'::bytea)),
+			        ('{reports}', '{newer}', 'reports', 'any', '{GROUP}', 'production',
+			         'application/zip', sha256('r'::bytea))"
+		))
+		.await
+		.expect("seed artifacts");
+
+		for (version, artifact_ids) in [(newer, vec![reports, schema]), (older, vec![])] {
+			ReportingSchemaBuild::record(
+				&mut conn,
+				report_for(commons_types::backup::RunOutcome::Success, true, None),
+				NewReportingSchemaBuild {
+					rank: ServerRank::Production,
+					group_id: group(),
+					version_id: version,
+					application_id: Some(CENTRAL.parse().unwrap()),
+					built: true,
+					error: None,
+					artifact_ids,
+				},
+			)
+			.await
+			.expect("record");
+		}
+
+		let pairs = pairs_for_group(&mut conn, group()).await.expect("pairs");
+		let pair = |version: Uuid| {
+			pairs
+				.iter()
+				.find(|p| p.version_id == version)
+				.expect("the pair")
+		};
+
+		assert_eq!(pair(newer).artifact_id, Some(schema));
+		assert_eq!(pair(newer).reports_artifact_id, Some(reports));
+		assert_eq!(pair(older).reports_artifact_id, None);
+	})
+	.await;
+}

@@ -1186,6 +1186,58 @@ async fn a_registered_schema_is_offered_back_byte_for_byte() {
 	.await
 }
 
+/// The reports a build publishes beside its schema are for an operator to
+/// import by hand, so the machines of the environment are neither offered them
+/// nor able to fetch them by id.
+// spec: RPT#the-build-contract, ART#who-is-offered-a-group-scoped-artifact
+#[tokio::test(flavor = "multi_thread")]
+async fn reports_are_registered_but_offered_to_no_machine() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			conn.batch_execute(&format!(
+				"UPDATE machines SET device_id = '{device_id}' WHERE id = '{MACHINE}'"
+			))
+			.await
+			.expect("enrol the machine");
+
+			let registered = public
+				.post(&format!(
+					"/artifacts/groups/{GROUP}/production/2.60.0/reports/any"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/zip")
+				.bytes(b"PK\x05\x06".as_slice().into())
+				.await;
+			registered.assert_status_ok();
+			let reports: serde_json::Value = registered.json();
+			assert_eq!(reports["artifact_type"], "reports");
+
+			let listing = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			listing.assert_status_ok();
+			let artifacts: Vec<serde_json::Value> = listing.json();
+			assert!(
+				artifacts.iter().all(|a| a["artifact_type"] != "reports"),
+				"no machine is offered the reports: {artifacts:?}"
+			);
+
+			let download = public
+				.get(&format!(
+					"/versions/2.60.0/artifacts/{}/download",
+					reports["id"].as_str().expect("an id")
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			assert_eq!(download.status_code(), StatusCode::NOT_FOUND);
+		},
+	)
+	.await
+}
+
 /// A facility is offered the same schema as its group's centrals: a schema
 /// follows the group and the version rather than the application it was built
 /// from, and the build only ever runs against a central's snapshot.

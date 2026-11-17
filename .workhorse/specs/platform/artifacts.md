@@ -67,6 +67,7 @@ A caller carrying no group of its own names the group it asks about and is answe
 A read carrying no identity, or naming no group, is answered with the unscoped artifacts alone, so giving an artifact a group narrows who is offered it rather than widening what an open path serves.
 A group-scoped artifact's existence is disclosed only to a caller it is offered to: a caller that names or guesses one it is not offered is answered as though it did not exist, so which groups hold one is not enumerable through the artifact surface.
 Canopy passes a group-scoped artifact's bytes only to a caller it is offered to.
+An artifact of type `reports` is offered to no caller, and its bytes reach only an operator, since it is published for an operator to import by hand rather than for a machine to fetch (see [RPT](../public-server/reporting-schemas.md)).
 
 ## Registration
 

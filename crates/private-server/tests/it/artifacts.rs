@@ -707,3 +707,66 @@ async fn a_refused_registration_leaves_no_bytes() {
 	})
 	.await
 }
+
+/// An operator downloads the schema and the reports a build published, and
+/// nothing else a group holds: every other held artifact is a file a machine
+/// runs, read through the rules the public path keeps.
+// spec: RPT#alerting, ART#who-is-offered-a-group-scoped-artifact
+#[tokio::test(flavor = "multi_thread")]
+async fn an_operator_downloads_a_pair_s_schema_and_reports_alone() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "dddddddd-0000-0000-0000-dddddddddddd";
+		let group = "eeeeeeee-0000-0000-0000-eeeeeeeeeeee";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published');
+			 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka')",
+		))
+		.await
+		.unwrap();
+
+		let upload = async |artifact_type: &str, bytes: &'static [u8]| -> Uuid {
+			let uploaded: serde_json::Value = private
+				.post("/api/versions/upload_artifact")
+				.add_header("x-canopy-upload", "1")
+				.add_query_param("version_id", version)
+				.add_query_param("artifact_type", artifact_type)
+				.add_query_param("platform", "any")
+				.add_query_param("group_id", group)
+				.add_query_param("digest", sri_of(bytes))
+				.bytes(bytes.into())
+				.await
+				.json();
+			serde_json::from_value(uploaded["id"].clone()).unwrap()
+		};
+		let download = async |id: Uuid| {
+			private
+				.get("/api/versions/download_artifact")
+				.add_query_param("artifact_id", id)
+				.await
+		};
+
+		let schema = upload("reporting-schema", b"CREATE VIEW ...").await;
+		let reports = upload("reports", b"PK\x05\x06").await;
+		let installer = upload("installer", b"MZ...").await;
+
+		let got = download(schema).await;
+		got.assert_status_ok();
+		assert_eq!(got.as_bytes().as_ref(), b"CREATE VIEW ...");
+
+		let got = download(reports).await;
+		got.assert_status_ok();
+		assert_eq!(got.as_bytes().as_ref(), b"PK\x05\x06");
+		assert_eq!(
+			got.header("content-disposition"),
+			format!("attachment; filename=\"{reports}.zip\"")
+		);
+
+		assert_eq!(
+			download(installer).await.status_code(),
+			axum::http::StatusCode::NOT_FOUND
+		);
+	})
+	.await
+}

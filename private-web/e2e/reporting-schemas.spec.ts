@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Sql } from "./seed";
 import {
 	resetSeededTables,
@@ -297,5 +298,114 @@ test.describe("reporting schemas", () => {
 		await expect(
 			section.getByRole("button", { name: "Build again" }),
 		).toHaveCount(2);
+	});
+
+	/// An operator downloads the SQL a pair published and, where the build
+	/// registered them, the reports beside it to import by hand.
+	///
+	/// spec: RPT#alerting
+	test("a built pair offers its SQL and its reports for download", async ({
+		page,
+		sql,
+	}) => {
+		const withReports = await seedVersion(sql, {
+			major: 2,
+			minor: 60,
+			patch: 0,
+			status: "published",
+		});
+		const schemaOnly = await seedVersion(sql, {
+			major: 2,
+			minor: 59,
+			patch: 0,
+			status: "published",
+		});
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const consumer = await declareBuilder(sql, group.id);
+
+		const central = await seedServer(sql, {
+			name: "central",
+			groupId: group.id,
+			type: "tamanu-central",
+		});
+		const facility = await seedServer(sql, {
+			name: "facility",
+			groupId: group.id,
+			type: "tamanu-facility",
+		});
+		await seedApplicationReport(sql, {
+			applicationId: central.id,
+			version: "2.60.0",
+		});
+		await seedApplicationReport(sql, {
+			applicationId: facility.id,
+			version: "2.59.0",
+		});
+
+		// Uploaded rather than seeded, so the bytes are held and the link
+		// downloads them.
+		const held = async (versionId: string, artifactType: string) => {
+			const bytes = Buffer.from(`${artifactType} ${versionId}`);
+			const digest = `sha256-${createHash("sha256").update(bytes).digest("base64")}`;
+			const uploaded = await page.request.post("/api/versions/upload_artifact", {
+				headers: { "x-canopy-upload": "1" },
+				params: {
+					version_id: versionId,
+					artifact_type: artifactType,
+					platform: "any",
+					group_id: group.id,
+					rank: "production",
+					digest,
+				},
+				data: bytes,
+			});
+			expect(uploaded.ok()).toBe(true);
+			return ((await uploaded.json()) as { id: string }).id;
+		};
+		const reports = await held(withReports.id, "reports");
+		const schema = await held(withReports.id, "reporting-schema");
+		const olderSchema = await held(schemaOnly.id, "reporting-schema");
+
+		await seedReportingSchemaBuild(sql, {
+			consumerDeviceId: consumer,
+			groupId: group.id,
+			machineId: central.machineId,
+			applicationId: central.id,
+			versionId: withReports.id,
+			artifactIds: [reports, schema],
+		});
+		await seedReportingSchemaBuild(sql, {
+			consumerDeviceId: consumer,
+			groupId: group.id,
+			machineId: central.machineId,
+			applicationId: central.id,
+			versionId: schemaOnly.id,
+			artifactIds: [olderSchema],
+		});
+
+		await page.goto(`/groups/${group.id}`);
+
+		const section = page.getByTestId("reporting-schemas");
+		const row = (version: string) =>
+			section.getByTestId("reporting-schema-row").filter({ hasText: version });
+
+		await expect(row("2.60.0").getByRole("link", { name: "SQL" })).toHaveAttribute(
+			"href",
+			`/api/versions/download_artifact?artifact_id=${schema}`,
+		);
+		const link = row("2.60.0").getByRole("link", { name: "Reports" });
+		await expect(link).toHaveAttribute(
+			"href",
+			`/api/versions/download_artifact?artifact_id=${reports}`,
+		);
+
+		const download = page.waitForEvent("download");
+		await link.click();
+		expect((await download).suggestedFilename()).toBe(`${reports}.zip`);
+
+		await expect(row("2.59.0").getByRole("link", { name: "SQL" })).toBeVisible();
+		await expect(
+			row("2.59.0").getByRole("link", { name: "Reports" }),
+		).toHaveCount(0);
 	});
 });

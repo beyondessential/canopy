@@ -58,7 +58,12 @@ impl Scope {
 		self,
 		query: crate::schema::artifacts::BoxedQuery<'a, diesel::pg::Pg, ST>,
 	) -> crate::schema::artifacts::BoxedQuery<'a, diesel::pg::Pg, ST> {
-		use crate::schema::artifacts::dsl::{group_id, rank};
+		use crate::schema::artifacts::dsl::{artifact_type, group_id, rank};
+
+		if self == Self::Fleet {
+			return query;
+		}
+		let query = query.filter(artifact_type.ne(REPORTS_TYPE));
 
 		match self {
 			Self::Unscoped => query.filter(group_id.is_null()),
@@ -77,15 +82,17 @@ impl Scope {
 	/// A rank narrows who an artifact reaches, so one carrying a rank is
 	/// withheld from a caller that has not resolved to that environment,
 	/// the group's own unranked callers included.
-	fn sees(self, group: Option<Uuid>, rank: Option<ServerRank>) -> bool {
+	fn sees(self, artifact: &Artifact) -> bool {
+		let (group, rank) = (artifact.group_id, artifact.rank);
 		match self {
+			Self::Fleet => true,
+			_ if artifact.artifact_type == REPORTS_TYPE => false,
 			Self::Unscoped => group.is_none(),
 			Self::Group(caller) => (group.is_none() || group == Some(caller)) && rank.is_none(),
 			Self::Environment(caller, caller_rank) => {
 				(group.is_none() || group == Some(caller))
 					&& (rank.is_none() || rank == Some(caller_rank))
 			}
-			Self::Fleet => true,
 		}
 	}
 }
@@ -170,6 +177,14 @@ pub struct NewArtifact {
 /// whole artifact before it answers. Until then a larger cap is what a handful
 /// of concurrent fetches spend the server's memory on.
 pub const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+
+/// What a reporting-schema build publishes for an environment's machines to apply.
+pub const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";
+
+/// The archive of an environment's reports a reporting-schema build publishes
+/// beside its schema, for an operator to import by hand. No machine is offered it.
+// spec: ART#who-is-offered-a-group-scoped-artifact
+pub const REPORTS_TYPE: &str = "reports";
 
 /// The digest Canopy records and verifies bytes against.
 pub fn digest_of(bytes: &[u8]) -> Vec<u8> {
@@ -284,7 +299,7 @@ impl Artifact {
 		let mut seen = std::collections::HashSet::new();
 		artifacts
 			.iter()
-			.filter(|a| scope.sees(a.group_id, a.rank))
+			.filter(|a| scope.sees(a))
 			.filter(|a| seen.insert((a.artifact_type.as_str(), a.platform.as_str())))
 			.map(|a| a.id)
 			.collect()

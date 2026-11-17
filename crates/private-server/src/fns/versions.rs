@@ -12,8 +12,8 @@ use commons_types::server::rank::ServerRank;
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
 	artifacts::{
-		Artifact, MAX_HELD_ARTIFACT_BYTES, NewArtifact, Scope, digest_of, parse_sri, parse_sri_opt,
-		sri,
+		Artifact, MAX_HELD_ARTIFACT_BYTES, NewArtifact, REPORTING_SCHEMA_TYPE, REPORTS_TYPE, Scope,
+		digest_of, parse_sri, parse_sri_opt, sri,
 	},
 	server_groups::ServerGroup,
 	version_known_issues::VersionKnownIssue,
@@ -1073,9 +1073,6 @@ pub async fn resolve_known_issue(
 	Ok(Json(KnownIssueData::from(row)))
 }
 
-/// The one held artifact type an operator reads the bytes of.
-const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";
-
 /// Which held artifact to fetch.
 #[derive(Deserialize, IntoParams)]
 pub struct DownloadArtifactQuery {
@@ -1083,7 +1080,8 @@ pub struct DownloadArtifactQuery {
 	pub artifact_id: Uuid,
 }
 
-/// Fetch the bytes of a reporting schema Canopy holds.
+/// Fetch the bytes of a reporting schema, or the reports built beside it, that
+/// Canopy holds.
 ///
 /// The public path serves these to the machines an artifact is offered to, and
 /// resolves what that is from the caller's own device. An operator holds no
@@ -1091,11 +1089,11 @@ pub struct DownloadArtifactQuery {
 /// credential of a machine; this answers the same bytes for an operator
 /// instead.
 ///
-/// Admin-gated and held to the one type: what an operator may see of every
+/// Admin-gated and held to those two types: what an operator may see of every
 /// group's artifacts is their metadata, and a reading of the whole surface
 /// would hand any tailnet user the bytes of every group-scoped artifact there
-/// is. RPT sanctions reading the SQL a pair published, which is this and
-/// nothing else.
+/// is. RPT sanctions reading the SQL and the reports a pair published, which
+/// is this and nothing else.
 ///
 /// The digest is verified before the bytes are served, as on the public path,
 /// so an artifact corrupted after it was taken in fails the read rather than
@@ -1123,10 +1121,10 @@ pub async fn download_artifact(
 	let mut conn = state.db.get().await?;
 	let artifact = Artifact::get_by_id(&mut conn, named.artifact_id).await?;
 
-	// Held to the one type this is for. Every other held artifact is a file a
+	// Held to the types this is for. Every other held artifact is a file a
 	// machine of its group runs, and handing those out here would be a second
 	// way to read them that answers to none of the rules the first does.
-	if artifact.artifact_type != REPORTING_SCHEMA_TYPE {
+	if ![REPORTING_SCHEMA_TYPE, REPORTS_TYPE].contains(&artifact.artifact_type.as_str()) {
 		return Err(AppError::NotFound("reporting schema".into()));
 	}
 
@@ -1163,12 +1161,17 @@ pub async fn download_artifact(
 
 	// Served from the same origin as the operator's own pages, so the media
 	// type is never rendered: it downloads under the artifact's id.
+	let extension = if artifact.artifact_type == REPORTS_TYPE {
+		".zip"
+	} else {
+		""
+	};
 	Ok((
 		[
 			(axum::http::header::CONTENT_TYPE, content_type),
 			(
 				axum::http::header::CONTENT_DISPOSITION,
-				format!("attachment; filename=\"{}\"", artifact.id),
+				format!("attachment; filename=\"{}{extension}\"", artifact.id),
 			),
 			(
 				axum::http::HeaderName::from_static("x-content-type-options"),
