@@ -1155,23 +1155,23 @@ pub async fn download_artifact(
 		return Err(AppError::ArtifactDigestMismatch);
 	};
 
+	// Served from the same origin as the operator's own pages, so the media
+	// type is never rendered: it downloads as a file. Reports are carried to
+	// one environment's central by hand, so their name says which.
+	let filename = if artifact.artifact_type == REPORTS_TYPE {
+		reports_filename(&mut conn, &artifact).await?
+	} else {
+		artifact.id.to_string()
+	};
 	let content_type = artifact
 		.content_type
 		.unwrap_or_else(|| "application/octet-stream".to_owned());
-
-	// Served from the same origin as the operator's own pages, so the media
-	// type is never rendered: it downloads under the artifact's id.
-	let extension = if artifact.artifact_type == REPORTS_TYPE {
-		".zip"
-	} else {
-		""
-	};
 	Ok((
 		[
 			(axum::http::header::CONTENT_TYPE, content_type),
 			(
 				axum::http::header::CONTENT_DISPOSITION,
-				format!("attachment; filename=\"{}{extension}\"", artifact.id),
+				format!("attachment; filename=\"{filename}\""),
 			),
 			(
 				axum::http::HeaderName::from_static("x-content-type-options"),
@@ -1181,4 +1181,45 @@ pub async fn download_artifact(
 		bytes,
 	)
 		.into_response())
+}
+
+/// `<group>-<environment>-<version>-reports.zip`, kept to characters a
+/// header's quoted filename carries as they are.
+async fn reports_filename(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	artifact: &Artifact,
+) -> Result<String> {
+	let group = match artifact.group_id {
+		Some(id) => {
+			database::server_groups::ServerGroup::get_by_id(conn, id)
+				.await?
+				.name
+		}
+		None => "fleet".to_owned(),
+	};
+	let version = match artifact.version_id {
+		Some(id) => Version::get_by_id(conn, id).await?.as_semver().to_string(),
+		None => artifact.id.to_string(),
+	};
+	let rank = artifact
+		.rank
+		.map_or_else(|| "all".to_owned(), |rank| rank.to_string());
+
+	let safe = |part: &str| {
+		part.chars()
+			.map(|c| {
+				if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+					c
+				} else {
+					'-'
+				}
+			})
+			.collect::<String>()
+	};
+	Ok(format!(
+		"{}-{}-{}-reports.zip",
+		safe(&group),
+		safe(&rank),
+		safe(&version)
+	))
 }

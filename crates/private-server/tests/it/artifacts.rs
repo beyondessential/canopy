@@ -721,7 +721,7 @@ async fn an_operator_downloads_a_pair_s_schema_and_reports_alone() {
 		conn.batch_execute(&format!(
 			"INSERT INTO versions (id, major, minor, patch, changelog, status)
 			 VALUES ('{version}', 2, 60, 0, '', 'published');
-			 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka')",
+			 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka \"north\"')",
 		))
 		.await
 		.unwrap();
@@ -760,7 +760,8 @@ async fn an_operator_downloads_a_pair_s_schema_and_reports_alone() {
 		assert_eq!(got.as_bytes().as_ref(), b"PK\x05\x06");
 		assert_eq!(
 			got.header("content-disposition"),
-			format!("attachment; filename=\"{reports}.zip\"")
+			"attachment; filename=\"kamaka--north--all-2.60.0-reports.zip\"",
+			"named for the group, environment and version it is carried to"
 		);
 
 		assert_eq!(

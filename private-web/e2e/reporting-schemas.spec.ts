@@ -401,7 +401,9 @@ test.describe("reporting schemas", () => {
 
 		const download = page.waitForEvent("download");
 		await link.click();
-		expect((await download).suggestedFilename()).toBe(`${reports}.zip`);
+		expect((await download).suggestedFilename()).toBe(
+			"kamaka-production-2.60.0-reports.zip",
+		);
 
 		await expect(row("2.59.0").getByRole("link", { name: "SQL" })).toBeVisible();
 		await expect(
