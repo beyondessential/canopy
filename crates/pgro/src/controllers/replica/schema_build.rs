@@ -128,8 +128,8 @@ pub async fn build_token(
 		.and_then(|job| job.annotations().get(BUILD_TOKEN_ANNOTATION).cloned()))
 }
 
-/// Everything a build needs: the restore it runs against, the version and group
-/// it builds for, and where to post the SQL it produces.
+/// Everything a build needs: the restore it runs against, the version it
+/// builds for, and where to post the SQL it produces.
 struct SchemaBuildArgs<'a> {
 	replica: &'a PostgresPhysicalReplica,
 	namespace: &'a str,
@@ -138,7 +138,6 @@ struct SchemaBuildArgs<'a> {
 	creds_secret_name: &'a str,
 	image: &'a str,
 	version: &'a str,
-	group: &'a str,
 	callback_url: &'a str,
 	reports_callback_url: &'a str,
 	callback_token: &'a str,
@@ -215,7 +214,6 @@ fn build_schema_build_job(
 		creds_secret_name,
 		image,
 		version,
-		group,
 		callback_url,
 		reports_callback_url,
 		callback_token,
@@ -300,7 +298,8 @@ fn build_schema_build_job(
 							),
 							env_literal("TAMANU_DL_DB_DATABASE", dbname),
 							env_literal("TAMANU_VERSION", version),
-							env_literal("TAMANU_DEPLOYMENT", group),
+							// No TAMANU_DEPLOYMENT: the image is the deployment's own project,
+							// whose name the builder takes for its files, as the release does.
 							env_literal("SCHEMA_CALLBACK_URL", callback_url),
 							env_literal("REPORTS_CALLBACK_URL", reports_callback_url),
 						]),
@@ -517,7 +516,6 @@ pub(super) async fn reconcile_schema_build(
 				creds_secret_name: &reader_secret_name,
 				image,
 				version: target,
-				group: &group.to_string(),
 				callback_url: &ctx.schema_build_callback_url(namespace, &replica_name, &token),
 				reports_callback_url: &ctx.schema_build_reports_callback_url(
 					namespace,
@@ -1158,7 +1156,6 @@ mod tests {
 			creds_secret_name: "kamaka-creds",
 			image: "ghcr.io/beyondessential/tamanu-dbt:2.60.0",
 			version: "2.60.0",
-			group: "kamaka",
 			callback_url: "https://canopy.example/public/schema-callback/tok",
 			reports_callback_url: "https://canopy.example/public/schema-callback/reports/tok",
 			callback_token: "tok",
@@ -1260,7 +1257,6 @@ mod tests {
 			vec![
 				"REPORTS_CALLBACK_URL",
 				"SCHEMA_CALLBACK_URL",
-				"TAMANU_DEPLOYMENT",
 				"TAMANU_DL_DB_DATABASE",
 				"TAMANU_DL_DB_PASSWORD",
 				"TAMANU_DL_DB_URL",
@@ -1271,7 +1267,6 @@ mod tests {
 		);
 
 		assert_eq!(env["TAMANU_VERSION"], "2.60.0");
-		assert_eq!(env["TAMANU_DEPLOYMENT"], "kamaka");
 		assert_eq!(env["TAMANU_DL_DB_DATABASE"], "tamanu");
 		assert_eq!(
 			env["SCHEMA_CALLBACK_URL"],
