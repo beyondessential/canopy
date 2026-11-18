@@ -60,32 +60,43 @@ impl Scope {
 	) -> crate::schema::artifacts::BoxedQuery<'a, diesel::pg::Pg, ST> {
 		use crate::schema::artifacts::dsl::{artifact_type, group_id, rank};
 
+		let query = if self.withholds_reports() {
+			query.filter(artifact_type.ne(REPORTS_TYPE))
+		} else {
+			query
+		};
+
 		match self {
-			Self::Unscoped => query
-				.filter(artifact_type.ne(REPORTS_TYPE))
-				.filter(group_id.is_null()),
+			Self::Unscoped => query.filter(group_id.is_null()),
 			Self::Group(caller) => query
-				.filter(artifact_type.ne(REPORTS_TYPE))
 				.filter(group_id.is_null().or(group_id.eq(caller)))
 				.filter(rank.is_null()),
 			Self::Environment(caller, caller_rank) => query
-				.filter(artifact_type.ne(REPORTS_TYPE))
 				.filter(group_id.is_null().or(group_id.eq(caller)))
 				.filter(rank.is_null().or(rank.eq(caller_rank))),
 			Self::Fleet => query,
 		}
 	}
 
-	/// Whether an artifact of this group and environment is in scope.
+	/// Whether a `reports` archive is kept from this scope, which is every
+	/// scope but the operator's.
+	fn withholds_reports(self) -> bool {
+		self != Self::Fleet
+	}
+
+	/// Whether an artifact is in scope.
 	///
 	/// A rank narrows who an artifact reaches, so one carrying a rank is
 	/// withheld from a caller that has not resolved to that environment,
-	/// the group's own unranked callers included.
+	/// the group's own unranked callers included. A `reports` archive is
+	/// withheld wherever [`Self::withholds_reports`] says.
 	fn sees(self, artifact: &Artifact) -> bool {
+		if self.withholds_reports() && artifact.artifact_type == REPORTS_TYPE {
+			return false;
+		}
 		let (group, rank) = (artifact.group_id, artifact.rank);
 		match self {
 			Self::Fleet => true,
-			_ if artifact.artifact_type == REPORTS_TYPE => false,
 			Self::Unscoped => group.is_none(),
 			Self::Group(caller) => (group.is_none() || group == Some(caller)) && rank.is_none(),
 			Self::Environment(caller, caller_rank) => {

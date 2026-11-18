@@ -58,7 +58,8 @@ const BUILD_CONTAINER: &str = "build";
 /// while it expired reads no receipt and builds again.
 const BUILD_TTL_SECONDS: i32 = 60 * 60;
 
-/// How long a delivered schema is held for the reconcile that registers it.
+/// How long a delivered schema, and the reports beside it, are held for the
+/// reconcile that registers them.
 /// A replica deleted while its build was in flight is never reconciled again,
 /// so what it delivered is released by age alone.
 pub const DELIVERED_SCHEMA_MAX_AGE: Duration = Duration::from_secs(60 * 60);
