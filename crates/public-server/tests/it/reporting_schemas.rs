@@ -1005,6 +1005,56 @@ async fn a_build_naming_its_schema_and_reports_settles_the_pair_with_both() {
 	.await
 }
 
+/// A build report naming another group's artifact is not this group's build,
+/// even at the same environment, so the pair is left unsettled rather than
+/// offering operators that group's file.
+// spec: RPT#what-a-build-reports
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_naming_another_group_s_artifact_settles_nothing() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			let replica = declaration_id(&mut conn).await;
+
+			let theirs = uuid::Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO artifacts
+				   (id, version_id, platform, artifact_type, group_id, rank, content_type, digest)
+				 VALUES ('{theirs}', '{VERSION}', 'any', 'reports', '{OTHER_GROUP}', 'production',
+				         'application/zip', sha256('theirs'::bytea))"
+			))
+			.await
+			.expect("another group's reports");
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&build_report(
+					replica,
+					serde_json::json!({
+						"target_version": "2.60.0",
+						"built": true,
+						"artifacts": [theirs],
+					}),
+				))
+				.await
+				.assert_status(StatusCode::NO_CONTENT);
+
+			let build = database::reporting_schemas::ReportingSchemaBuild::latest_for_pair(
+				&mut conn,
+				GROUP.parse().unwrap(),
+				ServerRank::Production,
+				VERSION.parse().unwrap(),
+			)
+			.await
+			.expect("read the build");
+			assert!(build.is_none(), "the pair stays unsettled: {build:?}");
+		},
+	)
+	.await
+}
+
 /// A consumer may name the version by id rather than by semver, which is what
 /// the worklist entry hands it.
 #[tokio::test(flavor = "multi_thread")]
