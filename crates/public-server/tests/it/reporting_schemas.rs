@@ -947,6 +947,64 @@ async fn a_build_report_settles_the_pair_it_names() {
 	.await
 }
 
+/// A build that registered its reports beside the schema names both, the way
+/// pgro reports them, and the pair it settles offers each for download.
+// spec: RPT#what-a-build-reports
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_naming_its_schema_and_reports_settles_the_pair_with_both() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			let replica = declaration_id(&mut conn).await;
+
+			let register = async |artifact_type: &str, content_type: &str, body: &[u8]| {
+				let registered: serde_json::Value = public
+					.post(&format!(
+						"/artifacts/groups/{GROUP}/production/2.60.0/{artifact_type}/any"
+					))
+					.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+					.add_header("content-type", content_type)
+					.bytes(body.to_vec().into())
+					.await
+					.json();
+				registered["id"].as_str().expect("an id").to_owned()
+			};
+			let schema = register("reporting-schema", "application/sql", b"CREATE VIEW ...").await;
+			let reports = register("reports", "application/zip", b"PK\x05\x06").await;
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&build_report(
+					replica,
+					serde_json::json!({
+						"target_version": "2.60.0",
+						"built": true,
+						"artifacts": [schema, reports],
+					}),
+				))
+				.await
+				.assert_status(StatusCode::NO_CONTENT);
+
+			let pairs =
+				database::reporting_schemas::pairs_for_group(&mut conn, GROUP.parse().unwrap())
+					.await
+					.expect("pairs");
+			let pair = pairs
+				.iter()
+				.find(|p| p.version_id.to_string() == VERSION)
+				.expect("the pair");
+			assert_eq!(pair.artifact_id.map(|id| id.to_string()), Some(schema));
+			assert_eq!(
+				pair.reports_artifact_id.map(|id| id.to_string()),
+				Some(reports)
+			);
+		},
+	)
+	.await
+}
+
 /// A consumer may name the version by id rather than by semver, which is what
 /// the worklist entry hands it.
 #[tokio::test(flavor = "multi_thread")]
