@@ -754,6 +754,10 @@ async fn an_operator_downloads_a_pair_s_schema_and_reports_alone() {
 		let got = download(schema).await;
 		got.assert_status_ok();
 		assert_eq!(got.as_bytes().as_ref(), b"CREATE VIEW ...");
+		assert_eq!(
+			got.header("content-disposition"),
+			"attachment; filename=\"kamaka--north--all-2.60.0-reporting-schema.sql\""
+		);
 
 		let got = download(reports).await;
 		got.assert_status_ok();

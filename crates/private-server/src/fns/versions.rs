@@ -1156,13 +1156,9 @@ pub async fn download_artifact(
 	};
 
 	// Served from the same origin as the operator's own pages, so the media
-	// type is never rendered: it downloads as a file. Reports are carried to
-	// one environment's central by hand, so their name says which.
-	let filename = if artifact.artifact_type == REPORTS_TYPE {
-		reports_filename(&mut conn, &artifact).await?
-	} else {
-		artifact.id.to_string()
-	};
+	// type is never rendered: it downloads as a file, named for the pair it
+	// came from.
+	let filename = download_filename(&mut conn, &artifact).await?;
 	let content_type = artifact
 		.content_type
 		.unwrap_or_else(|| "application/octet-stream".to_owned());
@@ -1183,9 +1179,9 @@ pub async fn download_artifact(
 		.into_response())
 }
 
-/// `<group>-<environment>-<version>-reports.zip`, kept to characters a
-/// header's quoted filename carries as they are.
-async fn reports_filename(
+/// `<group>-<environment>-<version>-reports.zip`, or `…-reporting-schema.sql`,
+/// kept to characters a header's quoted filename carries as they are.
+async fn download_filename(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	artifact: &Artifact,
 ) -> Result<String> {
@@ -1216,8 +1212,13 @@ async fn reports_filename(
 			})
 			.collect::<String>()
 	};
+	let kind = if artifact.artifact_type == REPORTS_TYPE {
+		"reports.zip"
+	} else {
+		"reporting-schema.sql"
+	};
 	Ok(format!(
-		"{}-{}-{}-reports.zip",
+		"{}-{}-{}-{kind}",
 		safe(&group),
 		safe(&rank),
 		safe(&version)
