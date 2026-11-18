@@ -23,7 +23,8 @@ use prometheus::Encoder;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, info, warn};
 
-/// Ceiling on a posted reporting schema, matching what canopy will hold. The
+/// Ceiling on a posted reporting schema, and on the reports archive posted
+/// beside it, matching what canopy will hold for either. The
 /// callback exists because a schema does not fit a Job's 4 KiB termination
 /// message, so the default limit is nowhere near it.
 const MAX_SCHEMA_BODY_BYTES: usize = 32 * 1024 * 1024;
