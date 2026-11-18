@@ -1400,6 +1400,73 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn reports_are_taken_only_from_the_running_build() {
+		use tower::ServiceExt as _;
+
+		let job = serde_json::json!({
+			"apiVersion": "batch/v1",
+			"kind": "Job",
+			"metadata": {
+				"name": "kamaka-schema-build",
+				"namespace": "pgro",
+				"annotations": { "pgro.bes.au/schema-build-token": "tok" },
+			},
+		})
+		.to_string();
+		let svc = tower::service_fn(move |_req: http::Request<kube::client::Body>| {
+			let job = job.clone();
+			async move {
+				Ok::<_, std::convert::Infallible>(http::Response::new(http_body_util::Full::new(
+					bytes::Bytes::from(job),
+				)))
+			}
+		});
+		let ctx = Arc::new(Context::new(
+			kube::Client::new(svc, "default"),
+			Arc::new(
+				canopy::Client::from_config(canopy::CanopyConfig {
+					tailnet_url: "http://canopy.test".parse().unwrap(),
+					socks5_proxy: String::new(),
+					tailnet_addr: None,
+				})
+				.unwrap(),
+			),
+			DEFAULT_MAX_CONCURRENT_RESTORES,
+			DEFAULT_KOPIA_IMAGE.to_string(),
+			false,
+			"http://test.svc:8080".to_string(),
+			DEFAULT_DEPLOYMENT_READY_TIMEOUT_SECS,
+		));
+		let router = build_router(
+			ServerState {
+				heartbeat: Arc::new(AtomicI64::new(Timestamp::now().as_second())),
+				ctx: ctx.clone(),
+			},
+			prometheus::Registry::new(),
+		);
+		let post = |token: &str| {
+			http::Request::post(format!(
+				"/api/v1/schema-build-results/pgro/kamaka/reports/{token}"
+			))
+			.header("content-type", "application/zip")
+			.body(axum::body::Body::from(&b"PK\x05\x06"[..]))
+			.unwrap()
+		};
+
+		let refused = router.clone().oneshot(post("forged")).await.unwrap();
+		assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+		assert!(ctx.schema_build_reports.take("pgro", "kamaka").is_none());
+
+		let taken = router.oneshot(post("tok")).await.unwrap();
+		assert_eq!(taken.status(), StatusCode::NO_CONTENT);
+		assert_eq!(
+			ctx.schema_build_reports.take("pgro", "kamaka").as_deref(),
+			Some(&b"PK\x05\x06"[..]),
+			"the bytes arrive as sent, not as text"
+		);
+	}
+
+	#[tokio::test]
 	async fn router_is_constructible() {
 		let client = dummy_client();
 		let canopy = Arc::new(
