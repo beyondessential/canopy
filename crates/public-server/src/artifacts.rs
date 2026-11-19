@@ -15,8 +15,8 @@ use commons_types::{
 };
 use database::{
 	artifacts::{
-		Artifact as ArtifactRow, MAX_HELD_ARTIFACT_BYTES, NewArtifact, Scope, digest_of, location,
-		parse_sri_opt, sri,
+		Artifact as ArtifactRow, MAX_HELD_ARTIFACT_BYTES, NewArtifact, REPORTING_SCHEMA_TYPE,
+		REPORTS_TYPE, Scope, digest_of, location, parse_sri_opt, sri,
 	},
 	audit::{Action, Record, RecordKind},
 	machines::Machine,
@@ -113,11 +113,8 @@ pub(crate) async fn caller_scope(
 /// rather than axum's plain-text 413.
 const MAX_UPLOAD_BODY_BYTES: usize = MAX_HELD_ARTIFACT_BYTES + 64 * 1024;
 
-/// The artifact type a reporting-schema build publishes.
-const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";
-
-/// The platform it publishes on. A schema follows the version's migrations
-/// rather than anything about the machine reading it.
+/// The platform a reporting-schema build publishes on. What it builds follows
+/// the version's migrations rather than anything about the machine reading it.
 const SCHEMA_PLATFORM: &str = "any";
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -278,8 +275,8 @@ async fn create(
 	Ok(Json(Artifact::offered(row, &base, &version)))
 }
 
-/// Register a reporting schema for one environment of a group, carrying its
-/// bytes.
+/// Register a reporting schema, or the archive of reports built beside it, for
+/// one environment of a group, carrying its bytes.
 ///
 /// Requires a device certificate whose restore declaration for the named group
 /// advertises that it builds reporting schemas. The bytes travel on this
@@ -309,7 +306,7 @@ async fn create(
 		("group" = Uuid, Path, description = "Group the artifact is for."),
 		("rank" = String, Path, description = "Environment within the group the schema was built against: `production`, `clone`, `demo`, `test` or `dev`."),
 		("version" = String, Path, description = "Exact semver (e.g. `2.10.5`) the schema was built against."),
-		("artifact_type" = String, Path, description = "Must be `reporting-schema`: the authorisation is defined with that artifact."),
+		("artifact_type" = String, Path, description = "`reporting-schema`, or `reports` for the archive of the environment's reports: the authorisation is defined with those artifacts."),
 		("platform" = String, Path),
 		("run" = Option<Uuid>, Query, description = "The run that produced the artifact, where one produced it."),
 	),
@@ -343,17 +340,20 @@ async fn register_for_group(
 	let device_id = device.0.id;
 	audit.acting_as(device_actor(&device.0, None));
 
-	// What a schema builder is authorised for is the artifact its declaration
-	// names. Any other type or platform registered under it would displace the
-	// releaser's own for every machine in the group, and those machines fetch
-	// and run what they are offered. A schema is one artifact per version, so
+	// What a schema builder is authorised for is the schema its declaration
+	// names and the reports beside it, which no machine is offered. Any other
+	// type or platform registered under it would displace the releaser's own
+	// for every machine in the group, and those machines fetch and run what
+	// they are offered. A schema is one artifact per version, so
 	// the platform it is published on is fixed too: left open, one builder
 	// registers a schema per platform and a group is offered every one of them.
 	// spec: ART#registration, RPT#the-build-contract
-	if artifact_type != REPORTING_SCHEMA_TYPE || platform != SCHEMA_PLATFORM {
+	if ![REPORTING_SCHEMA_TYPE, REPORTS_TYPE].contains(&artifact_type.as_str())
+		|| platform != SCHEMA_PLATFORM
+	{
 		return Err(AppError::BadRequest(format!(
-			"this registers a {REPORTING_SCHEMA_TYPE} on {SCHEMA_PLATFORM}, not a \
-			 {artifact_type} on {platform}"
+			"this registers a {REPORTING_SCHEMA_TYPE} or {REPORTS_TYPE} on {SCHEMA_PLATFORM}, \
+			 not a {artifact_type} on {platform}"
 		)));
 	}
 

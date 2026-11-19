@@ -126,6 +126,18 @@ export default function ReportingSchemasSection({
 												</Button>
 											</Tooltip>
 										)}
+										{isAdmin && pair.reports_artifact_id && (
+											<Tooltip title="Download this environment's reports to import by hand">
+												<Button
+													size="small"
+													startIcon={<DownloadIcon />}
+													href={`/api/versions/download_artifact?artifact_id=${pair.reports_artifact_id}`}
+													download
+												>
+													Reports
+												</Button>
+											</Tooltip>
+										)}
 										{pair.requested ? (
 											<Typography variant="body2" color="text.secondary">
 												Build asked for

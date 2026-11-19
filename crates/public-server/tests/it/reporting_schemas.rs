@@ -947,6 +947,114 @@ async fn a_build_report_settles_the_pair_it_names() {
 	.await
 }
 
+/// A build that registered its reports beside the schema names both, the way
+/// pgro reports them, and the pair it settles offers each for download.
+// spec: RPT#what-a-build-reports
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_naming_its_schema_and_reports_settles_the_pair_with_both() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			let replica = declaration_id(&mut conn).await;
+
+			let register = async |artifact_type: &str, content_type: &str, body: &[u8]| {
+				let registered: serde_json::Value = public
+					.post(&format!(
+						"/artifacts/groups/{GROUP}/production/2.60.0/{artifact_type}/any"
+					))
+					.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+					.add_header("content-type", content_type)
+					.bytes(body.to_vec().into())
+					.await
+					.json();
+				registered["id"].as_str().expect("an id").to_owned()
+			};
+			let schema = register("reporting-schema", "application/sql", b"CREATE VIEW ...").await;
+			let reports = register("reports", "application/zip", b"PK\x05\x06").await;
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&build_report(
+					replica,
+					serde_json::json!({
+						"target_version": "2.60.0",
+						"built": true,
+						"artifacts": [schema, reports],
+					}),
+				))
+				.await
+				.assert_status(StatusCode::NO_CONTENT);
+
+			let pairs =
+				database::reporting_schemas::pairs_for_group(&mut conn, GROUP.parse().unwrap())
+					.await
+					.expect("pairs");
+			let pair = pairs
+				.iter()
+				.find(|p| p.version_id.to_string() == VERSION)
+				.expect("the pair");
+			assert_eq!(pair.artifact_id.map(|id| id.to_string()), Some(schema));
+			assert_eq!(
+				pair.reports_artifact_id.map(|id| id.to_string()),
+				Some(reports)
+			);
+		},
+	)
+	.await
+}
+
+/// A build report naming another group's artifact is not this group's build,
+/// even at the same environment, so the pair is left unsettled rather than
+/// offering operators that group's file.
+// spec: RPT#what-a-build-reports
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_naming_another_group_s_artifact_settles_nothing() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			let replica = declaration_id(&mut conn).await;
+
+			let theirs = uuid::Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO artifacts
+				   (id, version_id, platform, artifact_type, group_id, rank, content_type, digest)
+				 VALUES ('{theirs}', '{VERSION}', 'any', 'reports', '{OTHER_GROUP}', 'production',
+				         'application/zip', sha256('theirs'::bytea))"
+			))
+			.await
+			.expect("another group's reports");
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&build_report(
+					replica,
+					serde_json::json!({
+						"target_version": "2.60.0",
+						"built": true,
+						"artifacts": [theirs],
+					}),
+				))
+				.await
+				.assert_status(StatusCode::NO_CONTENT);
+
+			let build = database::reporting_schemas::ReportingSchemaBuild::latest_for_pair(
+				&mut conn,
+				GROUP.parse().unwrap(),
+				ServerRank::Production,
+				VERSION.parse().unwrap(),
+			)
+			.await
+			.expect("read the build");
+			assert!(build.is_none(), "the pair stays unsettled: {build:?}");
+		},
+	)
+	.await
+}
+
 /// A consumer may name the version by id rather than by semver, which is what
 /// the worklist entry hands it.
 #[tokio::test(flavor = "multi_thread")]
@@ -1181,6 +1289,58 @@ async fn a_registered_schema_is_offered_back_byte_for_byte() {
 				.await;
 			download.assert_status_ok();
 			assert_eq!(download.text(), sql);
+		},
+	)
+	.await
+}
+
+/// The reports a build publishes beside its schema are for an operator to
+/// import by hand, so the machines of the environment are neither offered them
+/// nor able to fetch them by id.
+// spec: RPT#the-build-contract, ART#who-is-offered-a-group-scoped-artifact
+#[tokio::test(flavor = "multi_thread")]
+async fn reports_are_registered_but_offered_to_no_machine() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			conn.batch_execute(&format!(
+				"UPDATE machines SET device_id = '{device_id}' WHERE id = '{MACHINE}'"
+			))
+			.await
+			.expect("enrol the machine");
+
+			let registered = public
+				.post(&format!(
+					"/artifacts/groups/{GROUP}/production/2.60.0/reports/any"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/zip")
+				.bytes(b"PK\x05\x06".as_slice().into())
+				.await;
+			registered.assert_status_ok();
+			let reports: serde_json::Value = registered.json();
+			assert_eq!(reports["artifact_type"], "reports");
+
+			let listing = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			listing.assert_status_ok();
+			let artifacts: Vec<serde_json::Value> = listing.json();
+			assert!(
+				artifacts.iter().all(|a| a["artifact_type"] != "reports"),
+				"no machine is offered the reports: {artifacts:?}"
+			);
+
+			let download = public
+				.get(&format!(
+					"/versions/2.60.0/artifacts/{}/download",
+					reports["id"].as_str().expect("an id")
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			assert_eq!(download.status_code(), StatusCode::NOT_FOUND);
 		},
 	)
 	.await

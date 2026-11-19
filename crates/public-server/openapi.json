@@ -2268,7 +2268,7 @@
             }
           },
           {
-            "description": "Must be `reporting-schema`: the authorisation is defined with that artifact.",
+            "description": "`reporting-schema`, or `reports` for the archive of the environment's reports: the authorisation is defined with those artifacts.",
             "in": "path",
             "name": "artifact_type",
             "required": true,
@@ -2358,7 +2358,7 @@
             "backup-restore-device": []
           }
         ],
-        "summary": "Register a reporting schema for one environment of a group, carrying its\nbytes.",
+        "summary": "Register a reporting schema, or the archive of reports built beside it, for\none environment of a group, carrying its bytes.",
         "tags": [
           "artifacts"
         ],

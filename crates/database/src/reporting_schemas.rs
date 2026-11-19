@@ -385,6 +385,9 @@ pub struct Pair {
 	/// The schema this pair's build registered, where it registered one, so an
 	/// operator can read the SQL the environment is offered.
 	pub artifact_id: Option<Uuid>,
+	/// The reports archive this pair's build registered, where it registered
+	/// one, for an operator to import by hand.
+	pub reports_artifact_id: Option<Uuid>,
 	/// The environment's Tamanu applications reporting this version, by name.
 	/// Empty where the pair comes from the open plan rather than from
 	/// something running it.
@@ -420,10 +423,30 @@ async fn pairs_of_members(
 	let versions = versions_and_applications(db, group, members, coverage).await?;
 	let builds = ReportingSchemaBuild::latest_by_pair_for_group(db, group).await?;
 	let requests = ReportingSchemaRequest::pending_for_group(db, group).await?;
+	let types = artifact_types(
+		db,
+		builds
+			.values()
+			.filter(|build| build.built)
+			.flat_map(|build| build.artifact_ids.iter().flatten().copied()),
+	)
+	.await?;
 
 	let mut pairs = Vec::with_capacity(versions.len());
 	for (rank, version, applications) in versions {
 		let build = builds.get(&(rank, version.id));
+		let registered = |of: &str| {
+			build
+				.filter(|build| build.built)
+				.and_then(|build| {
+					build
+						.artifact_ids
+						.iter()
+						.flatten()
+						.find(|id| types.get(*id).is_some_and(|t| t == of))
+				})
+				.copied()
+		};
 		let (state, error) = match build {
 			None => (PairState::Awaiting, None),
 			Some(build) if build.built => (PairState::Built, None),
@@ -439,15 +462,32 @@ async fn pairs_of_members(
 			state,
 			error,
 			requested: requests.contains(&(rank, version.id)),
-			// A build registers the schema and nothing else, so the first it
-			// recorded is that schema.
-			artifact_id: build
-				.filter(|build| build.built)
-				.and_then(|build| build.artifact_ids.iter().flatten().copied().next()),
+			artifact_id: registered(crate::artifacts::REPORTING_SCHEMA_TYPE),
+			reports_artifact_id: registered(crate::artifacts::REPORTS_TYPE),
 		});
 	}
 
 	Ok(pairs)
+}
+
+/// The type of each of these artifacts that is still registered.
+async fn artifact_types(
+	db: &mut AsyncPgConnection,
+	ids: impl Iterator<Item = Uuid>,
+) -> Result<std::collections::HashMap<Uuid, String>> {
+	use crate::schema::artifacts::dsl::{artifact_type, artifacts, id};
+
+	let ids: Vec<Uuid> = ids.collect();
+	if ids.is_empty() {
+		return Ok(std::collections::HashMap::new());
+	}
+	Ok(artifacts
+		.filter(id.eq_any(ids))
+		.select((id, artifact_type))
+		.load::<(Uuid, String)>(db)
+		.await?
+		.into_iter()
+		.collect())
 }
 
 /// A group's pairs as environment and version, from members already in hand.

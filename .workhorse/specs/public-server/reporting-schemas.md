@@ -55,7 +55,10 @@ The replica is migrated to the named version before the build reads it, and is n
 The builder obtains read credentials for the restore per run as any consumer does, and no storage credential of any kind for what it publishes (see [RST](restore-replicas.md)).
 
 In the run it reports, the builder registers the **reporting schema** as an artifact of the exact version being built for, scoped to the group and to the environment within it, of type `reporting-schema` on platform `any`, carrying a digest and the bytes themselves, which Canopy holds and serves (see [ART](../platform/artifacts.md)).
-The schema is the only type it may register: what is published for an environment is offered to every machine in it and fetched, so the authorisation stays defined with the artifact it was written for.
+Beside it, the builder may register the environment's **reports** the same way, as one archive of type `reports` on platform `any`.
+The reports are the environment's report definitions as the build compiled them against the same database, so an operator can take them to that environment's central and import them there by hand.
+These two are the only types it may register: what is published for an environment is offered to every machine in it and fetched, so the authorisation stays defined with the artifacts it was written for.
+The reports are offered to no machine (see [ART](../platform/artifacts.md)), since an imported report goes live over whatever an operator has edited in place, and that is for an operator to choose.
 The builder is authorised to register artifacts for a group whose enabled declaration an operator has marked as publishing its reporting schema, and for no other, and is the one device other than a releaser that registers artifacts (see [ART](../platform/artifacts.md)).
 The mark is the operator's alone, and is the whole of the authorisation: a consumer registers the set of semantics it advertises itself, so they shape what Canopy dispatches to it and grant it nothing, and what is published for an environment is offered to every machine in it and applied.
 The mark reaches as far as the declaration carrying it: every environment of the group for a group-wide declaration, and one environment for a declaration on that environment's central, which authorises registering that environment's schema and no other's.
@@ -71,7 +74,9 @@ Beyond those it carries:
 - the **environment** it was built for, which Canopy reads from the machine the replica restored rather than from the report, so the environment a build is filed against and the one its schema is registered against cannot disagree;
 - the **version** it was built for;
 - the **outcome**, built or failed, and on failure a description of what went wrong;
-- a reference to each **artifact** the build registered, of which the schema is one.
+- a reference to each **artifact** the build registered: the schema, and the reports where it registered them.
+
+A build that registered a schema and no reports is built, and its pair has a schema and no reports to download.
 
 The restore's health and the build's outcome stay separate signals from the one report, as a migration test's do: a healthy replica whose build failed reports a healthy restore and a failed build.
 Reports are retained indefinitely as an audit trail.
@@ -95,3 +100,4 @@ The check recovers when the pair is built, and nothing else clears it: an operat
 
 Pairs are presented per group and grouped by environment, showing which have a schema, which are being built, and which failed, so whether an environment's applications can be offered the schema for the version they run or are moving to is answered in one place.
 An operator can read the SQL a pair published, since what a group's reports will run against is a thing to be able to look at without holding a credential of one of its machines.
+An operator can download the reports a pair published, which is the only way they leave Canopy.

@@ -48,17 +48,17 @@ pub fn classify_job(job: &Job) -> JobStatus {
 
 /// In-memory store for job callback results, keyed by `{namespace}/{name}`.
 #[derive(Default)]
-pub struct CallbackStore {
-	inner: Mutex<HashMap<String, Entry>>,
+pub struct CallbackStore<T = String> {
+	inner: Mutex<HashMap<String, Entry<T>>>,
 }
 
-struct Entry {
+struct Entry<T> {
 	stored_at: Instant,
-	data: String,
+	data: T,
 }
 
-impl CallbackStore {
-	pub fn store(&self, namespace: &str, name: &str, data: String) {
+impl<T> CallbackStore<T> {
+	pub fn store(&self, namespace: &str, name: &str, data: T) {
 		let key = format!("{namespace}/{name}");
 		self.inner.lock().unwrap().insert(
 			key,
@@ -69,7 +69,7 @@ impl CallbackStore {
 		);
 	}
 
-	pub fn take(&self, namespace: &str, name: &str) -> Option<String> {
+	pub fn take(&self, namespace: &str, name: &str) -> Option<T> {
 		let key = format!("{namespace}/{name}");
 		self.inner.lock().unwrap().remove(&key).map(|e| e.data)
 	}
@@ -256,7 +256,7 @@ mod tests {
 	/// has just arrived is one a reconcile is still on its way to take.
 	#[test]
 	fn a_payload_nothing_took_is_swept() {
-		let store = CallbackStore::default();
+		let store = CallbackStore::<String>::default();
 		store.store("ns", "replica", "schema".to_string());
 
 		assert_eq!(store.sweep(Duration::from_secs(3600)), 0);
@@ -332,7 +332,7 @@ mod tests {
 
 	#[test]
 	fn callback_store_store_and_take() {
-		let store = CallbackStore::default();
+		let store = CallbackStore::<String>::default();
 		store.store("ns", "replica", "payload".into());
 		assert_eq!(store.take("ns", "replica"), Some("payload".into()));
 		assert_eq!(store.take("ns", "replica"), None);
@@ -340,13 +340,13 @@ mod tests {
 
 	#[test]
 	fn callback_store_take_missing() {
-		let store = CallbackStore::default();
+		let store = CallbackStore::<String>::default();
 		assert_eq!(store.take("ns", "nope"), None);
 	}
 
 	#[test]
 	fn callback_store_overwrite() {
-		let store = CallbackStore::default();
+		let store = CallbackStore::<String>::default();
 		store.store("ns", "r", "first".into());
 		store.store("ns", "r", "second".into());
 		assert_eq!(store.take("ns", "r"), Some("second".into()));

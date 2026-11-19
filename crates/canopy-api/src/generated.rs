@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "3.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "c6d1c73e0ea20468c4c74f67ac48d6b95e82cc3eec9c4e9506f3bee22cdd43ef";
+pub const OPENAPI_BLAKE3: &str = "015355627386a8129f0a0b79a7d586a29e59ded2ea9b4c659d4529441c53bb6e";
 
 /// Error types.
 pub mod error {
@@ -4549,8 +4549,8 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
     pub async fn applications_self(&self) -> crate::Result<SelfResponse> {
         self.call_json(::http::Method::GET, "/applications/self", None::<&()>).await
     }
-    /// Register a reporting schema for one environment of a group, carrying its
-    /// bytes.
+    /// Register a reporting schema, or the archive of reports built beside it, for
+    /// one environment of a group, carrying its bytes.
     ///
     /// Requires a device certificate whose restore declaration for the named group
     /// advertises that it builds reporting schemas. The bytes travel on this

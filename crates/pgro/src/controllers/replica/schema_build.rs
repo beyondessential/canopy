@@ -58,7 +58,8 @@ const BUILD_CONTAINER: &str = "build";
 /// while it expired reads no receipt and builds again.
 const BUILD_TTL_SECONDS: i32 = 60 * 60;
 
-/// How long a delivered schema is held for the reconcile that registers it.
+/// How long a delivered schema, and the reports beside it, are held for the
+/// reconcile that registers them.
 /// A replica deleted while its build was in flight is never reconciled again,
 /// so what it delivered is released by age alone.
 pub const DELIVERED_SCHEMA_MAX_AGE: Duration = Duration::from_secs(60 * 60);
@@ -127,8 +128,8 @@ pub async fn build_token(
 		.and_then(|job| job.annotations().get(BUILD_TOKEN_ANNOTATION).cloned()))
 }
 
-/// Everything a build needs: the restore it runs against, the version and group
-/// it builds for, and where to post the SQL it produces.
+/// Everything a build needs: the restore it runs against, the version it
+/// builds for, and where to post the SQL it produces.
 struct SchemaBuildArgs<'a> {
 	replica: &'a PostgresPhysicalReplica,
 	namespace: &'a str,
@@ -137,8 +138,8 @@ struct SchemaBuildArgs<'a> {
 	creds_secret_name: &'a str,
 	image: &'a str,
 	version: &'a str,
-	group: &'a str,
 	callback_url: &'a str,
+	reports_callback_url: &'a str,
 	callback_token: &'a str,
 	pull_secret: Option<&'a str>,
 	placement: &'a PodPlacement,
@@ -213,8 +214,8 @@ fn build_schema_build_job(
 		creds_secret_name,
 		image,
 		version,
-		group,
 		callback_url,
+		reports_callback_url,
 		callback_token,
 		pull_secret,
 		placement,
@@ -297,8 +298,10 @@ fn build_schema_build_job(
 							),
 							env_literal("TAMANU_DL_DB_DATABASE", dbname),
 							env_literal("TAMANU_VERSION", version),
-							env_literal("TAMANU_DEPLOYMENT", group),
+							// No TAMANU_DEPLOYMENT: the image is the deployment's own project,
+							// whose name the builder takes for its files, as the release does.
 							env_literal("SCHEMA_CALLBACK_URL", callback_url),
+							env_literal("REPORTS_CALLBACK_URL", reports_callback_url),
 						]),
 						// The build shares a node with the Postgres it is
 						// querying, so an unbounded pod starves the database
@@ -464,7 +467,7 @@ pub(super) async fn reconcile_schema_build(
 		BuildToDo::Settled => {
 			// A schema posted after its build was recorded has no later taker,
 			// and it is tens of megabytes.
-			ctx.schema_build_results.take(namespace, &replica_name);
+			drop_delivered(ctx, namespace, &replica_name);
 			return Ok(true);
 		}
 		BuildToDo::NoImage => return Ok(true),
@@ -480,7 +483,7 @@ pub(super) async fn reconcile_schema_build(
 
 			// A payload held with no Job behind it belongs to no build this
 			// reconcile can record, and it is tens of megabytes.
-			ctx.schema_build_results.take(namespace, &replica_name);
+			drop_delivered(ctx, namespace, &replica_name);
 
 			let reader_secret_name = replica.creds_secret_name();
 			let dbname = match discover_build_database(
@@ -513,8 +516,12 @@ pub(super) async fn reconcile_schema_build(
 				creds_secret_name: &reader_secret_name,
 				image,
 				version: target,
-				group: &group.to_string(),
 				callback_url: &ctx.schema_build_callback_url(namespace, &replica_name, &token),
+				reports_callback_url: &ctx.schema_build_reports_callback_url(
+					namespace,
+					&replica_name,
+					&token,
+				),
 				callback_token: &token,
 				pull_secret: pull_secret.as_deref(),
 				placement: &ctx.pod_placement(),
@@ -551,6 +558,8 @@ pub(super) async fn reconcile_schema_build(
 				};
 			};
 
+			let reports = ctx.schema_build_reports.take(namespace, &replica_name);
+
 			// A recorded result is what settles the build for good, so a
 			// registration that failed on the way to canopy is answered while
 			// the schema is still held rather than recorded against a build
@@ -566,16 +575,38 @@ pub(super) async fn reconcile_schema_build(
 				)
 				.await
 			{
-				Ok(artifact) => (
-					None,
-					artifact.map(|id| id.to_string()).into_iter().collect(),
-				),
+				Ok(artifact) => {
+					let reports = match &reports {
+						Some(zip) => {
+							register_reports(
+								ctx,
+								target,
+								group,
+								rank,
+								crate::controllers::canopy::verification::run_id_from_status(
+									restore,
+								),
+								zip.clone(),
+							)
+							.await
+						}
+						None => None,
+					};
+					(
+						None,
+						artifact
+							.into_iter()
+							.chain(reports)
+							.map(|id| id.to_string())
+							.collect(),
+					)
+				}
 				Err(err) => {
 					let attempts = attempts_so_far(restore) + 1;
 					warn!(%target, %group, attempts, "registering the reporting schema failed: {err}");
 
 					if attempts < BUILD_ATTEMPTS {
-						keep_schema(ctx, namespace, &replica_name, &sql);
+						keep_delivered(ctx, namespace, &replica_name, &sql, reports);
 						record_build_attempt(client, namespace, &restore_name, attempts).await?;
 						return Ok(false);
 					}
@@ -596,7 +627,7 @@ pub(super) async fn reconcile_schema_build(
 			if let Err(err) =
 				record_schema_build(client, namespace, &restore_name, Some(&job_name), result).await
 			{
-				keep_schema(ctx, namespace, &replica_name, &sql);
+				keep_delivered(ctx, namespace, &replica_name, &sql, reports);
 				return Err(err);
 			}
 
@@ -627,7 +658,7 @@ pub(super) async fn reconcile_schema_build(
 			.await?;
 			// A build that posted a schema and then exited non-zero has left
 			// megabytes in a store nothing else empties.
-			ctx.schema_build_results.take(namespace, &replica_name);
+			drop_delivered(ctx, namespace, &replica_name);
 			delete_build_job(client, namespace, &job_name).await;
 			Ok(false)
 		}
@@ -688,13 +719,55 @@ fn build_failure(log: Option<&str>, secrets: Option<&[String]>) -> String {
 	}
 }
 
-/// Put a taken schema back for the next reconcile.
-fn keep_schema(ctx: &Arc<Context>, namespace: &str, replica_name: &str, sql: &Bytes) {
+/// Register the reports a build posted beside its schema, where it posted any.
+///
+/// Reports are optional to a build, so one Canopy does not take in leaves the
+/// build reporting its schema alone rather than retried or failed.
+// spec: INT#building-a-reporting-schema
+async fn register_reports(
+	ctx: &Arc<Context>,
+	target: &str,
+	group: Uuid,
+	rank: &str,
+	run_id: Option<Uuid>,
+	zip: Bytes,
+) -> Option<Uuid> {
+	match ctx
+		.canopy
+		.register_reports(target, group, rank, run_id, zip)
+		.await
+	{
+		Ok(id) => id,
+		Err(err) => {
+			warn!(%target, %group, "registering the reports failed: {err}");
+			None
+		}
+	}
+}
+
+/// Release what a build delivered that no reconcile will register.
+fn drop_delivered(ctx: &Arc<Context>, namespace: &str, replica_name: &str) {
+	ctx.schema_build_results.take(namespace, replica_name);
+	ctx.schema_build_reports.take(namespace, replica_name);
+}
+
+/// Put a taken schema, and the reports beside it, back for the next reconcile.
+fn keep_delivered(
+	ctx: &Arc<Context>,
+	namespace: &str,
+	replica_name: &str,
+	sql: &Bytes,
+	reports: Option<Bytes>,
+) {
 	ctx.schema_build_results.store(
 		namespace,
 		replica_name,
 		String::from_utf8_lossy(sql).into_owned(),
 	);
+	if let Some(reports) = reports {
+		ctx.schema_build_reports
+			.store(namespace, replica_name, reports);
+	}
 }
 
 /// How many times one restore may go round before its build records a failure
@@ -1083,8 +1156,8 @@ mod tests {
 			creds_secret_name: "kamaka-creds",
 			image: "ghcr.io/beyondessential/tamanu-dbt:2.60.0",
 			version: "2.60.0",
-			group: "kamaka",
 			callback_url: "https://canopy.example/public/schema-callback/tok",
+			reports_callback_url: "https://canopy.example/public/schema-callback/reports/tok",
 			callback_token: "tok",
 			pull_secret,
 			placement: &PodPlacement::default(),
@@ -1182,8 +1255,8 @@ mod tests {
 		assert_eq!(
 			env.keys().cloned().collect::<Vec<_>>(),
 			vec![
+				"REPORTS_CALLBACK_URL",
 				"SCHEMA_CALLBACK_URL",
-				"TAMANU_DEPLOYMENT",
 				"TAMANU_DL_DB_DATABASE",
 				"TAMANU_DL_DB_PASSWORD",
 				"TAMANU_DL_DB_URL",
@@ -1194,11 +1267,14 @@ mod tests {
 		);
 
 		assert_eq!(env["TAMANU_VERSION"], "2.60.0");
-		assert_eq!(env["TAMANU_DEPLOYMENT"], "kamaka");
 		assert_eq!(env["TAMANU_DL_DB_DATABASE"], "tamanu");
 		assert_eq!(
 			env["SCHEMA_CALLBACK_URL"],
 			"https://canopy.example/public/schema-callback/tok"
+		);
+		assert_eq!(
+			env["REPORTS_CALLBACK_URL"],
+			"https://canopy.example/public/schema-callback/reports/tok"
 		);
 	}
 

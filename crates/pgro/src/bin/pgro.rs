@@ -23,14 +23,15 @@ use prometheus::Encoder;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, info, warn};
 
-/// Ceiling on a posted reporting schema, matching what canopy will hold. The
+/// Ceiling on a posted reporting schema, and on the reports archive posted
+/// beside it, matching what canopy will hold for either. The
 /// callback exists because a schema does not fit a Job's 4 KiB termination
 /// message, so the default limit is nowhere near it.
 const MAX_SCHEMA_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 /// Everything under here carries the build's callback token as its last path
-/// segment. Kept in step with the route below and with
-/// `Context::schema_build_callback_url`.
+/// segment. Kept in step with the routes below and with
+/// `Context::schema_build_callback_url` and its reports counterpart.
 const SCHEMA_BUILD_CALLBACK_PREFIX: &str = "/api/v1/schema-build-results/";
 
 use pgro::{
@@ -580,6 +581,12 @@ async fn main() -> anyhow::Result<()> {
 			if dropped > 0 {
 				warn!(dropped, "dropped reporting schemas nothing came back for");
 			}
+			let dropped = schema_ctx
+				.schema_build_reports
+				.sweep(schema_build::DELIVERED_SCHEMA_MAX_AGE);
+			if dropped > 0 {
+				warn!(dropped, "dropped reports nothing came back for");
+			}
 		}
 	});
 
@@ -707,6 +714,15 @@ fn build_router(state: ServerState, metrics_registry: prometheus::Registry) -> R
 		.route(
 			"/api/v1/schema-build-results/{namespace}/{replica}/{token}",
 			axum::routing::post(post_schema_build_results)
+				.layer(DefaultBodyLimit::max(MAX_SCHEMA_BODY_BYTES))
+				.route_layer(axum::middleware::from_fn_with_state(
+					state.clone(),
+					verify_build_token,
+				)),
+		)
+		.route(
+			"/api/v1/schema-build-results/{namespace}/{replica}/reports/{token}",
+			axum::routing::post(post_schema_build_reports)
 				.layer(DefaultBodyLimit::max(MAX_SCHEMA_BODY_BYTES))
 				.route_layer(axum::middleware::from_fn_with_state(
 					state.clone(),
@@ -860,6 +876,29 @@ async fn post_schema_build_results(
 		return StatusCode::SERVICE_UNAVAILABLE;
 	}
 
+	StatusCode::NO_CONTENT
+}
+
+/// Accept the reports archive a reporting-schema build POSTs beside its schema.
+///
+/// Reports are optional to a build, so unlike the schema no receipt is
+/// recorded: reports an operator restart lost leave the schema registered
+/// alone rather than the build run again.
+async fn post_schema_build_reports(
+	State(state): State<ServerState>,
+	Path((namespace, replica, _token)): Path<(String, String, String)>,
+	body: axum::body::Bytes,
+) -> StatusCode {
+	info!(
+		namespace = namespace,
+		replica = replica,
+		bytes = body.len(),
+		"received reporting schema build reports"
+	);
+	state
+		.ctx
+		.schema_build_reports
+		.store(&namespace, &replica, body);
 	StatusCode::NO_CONTENT
 }
 
@@ -1190,6 +1229,19 @@ mod tests {
 		);
 	}
 
+	#[test]
+	fn a_reports_callback_span_carries_no_token() {
+		let uri: axum::http::Uri =
+			"/api/v1/schema-build-results/pgro/kamaka/reports/6f1c0c3a-1111-2222-3333-444455556666"
+				.parse()
+				.expect("a uri");
+
+		assert_eq!(
+			loggable_target(&uri),
+			"/api/v1/schema-build-results/pgro/kamaka/reports/REDACTED"
+		);
+	}
+
 	/// Every other callback names only a namespace and a replica, so the target
 	/// is worth having in full.
 	#[test]
@@ -1346,6 +1398,73 @@ mod tests {
 		);
 		assert_eq!(*targets.kopia_image.read().unwrap(), DEFAULT_KOPIA_IMAGE);
 		assert!(!targets.use_port_forward.load(Ordering::Relaxed));
+	}
+
+	#[tokio::test]
+	async fn reports_are_taken_only_from_the_running_build() {
+		use tower::ServiceExt as _;
+
+		let job = serde_json::json!({
+			"apiVersion": "batch/v1",
+			"kind": "Job",
+			"metadata": {
+				"name": "kamaka-schema-build",
+				"namespace": "pgro",
+				"annotations": { "pgro.bes.au/schema-build-token": "tok" },
+			},
+		})
+		.to_string();
+		let svc = tower::service_fn(move |_req: http::Request<kube::client::Body>| {
+			let job = job.clone();
+			async move {
+				Ok::<_, std::convert::Infallible>(http::Response::new(http_body_util::Full::new(
+					bytes::Bytes::from(job),
+				)))
+			}
+		});
+		let ctx = Arc::new(Context::new(
+			kube::Client::new(svc, "default"),
+			Arc::new(
+				canopy::Client::from_config(canopy::CanopyConfig {
+					tailnet_url: "http://canopy.test".parse().unwrap(),
+					socks5_proxy: String::new(),
+					tailnet_addr: None,
+				})
+				.unwrap(),
+			),
+			DEFAULT_MAX_CONCURRENT_RESTORES,
+			DEFAULT_KOPIA_IMAGE.to_string(),
+			false,
+			"http://test.svc:8080".to_string(),
+			DEFAULT_DEPLOYMENT_READY_TIMEOUT_SECS,
+		));
+		let router = build_router(
+			ServerState {
+				heartbeat: Arc::new(AtomicI64::new(Timestamp::now().as_second())),
+				ctx: ctx.clone(),
+			},
+			prometheus::Registry::new(),
+		);
+		let post = |token: &str| {
+			http::Request::post(format!(
+				"/api/v1/schema-build-results/pgro/kamaka/reports/{token}"
+			))
+			.header("content-type", "application/zip")
+			.body(axum::body::Body::from(&b"PK\x05\x06"[..]))
+			.unwrap()
+		};
+
+		let refused = router.clone().oneshot(post("forged")).await.unwrap();
+		assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+		assert!(ctx.schema_build_reports.take("pgro", "kamaka").is_none());
+
+		let taken = router.oneshot(post("tok")).await.unwrap();
+		assert_eq!(taken.status(), StatusCode::NO_CONTENT);
+		assert_eq!(
+			ctx.schema_build_reports.take("pgro", "kamaka").as_deref(),
+			Some(&b"PK\x05\x06"[..]),
+			"the bytes arrive as sent, not as text"
+		);
 	}
 
 	#[tokio::test]

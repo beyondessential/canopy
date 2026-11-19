@@ -1258,7 +1258,8 @@ async fn verification(
 			};
 			// A schema registered against an environment other than the one
 			// restored would be applied by machines the build never read,
-			// while the pair it is filed against reads as built. The build
+			// while the pair it is filed against reads as built, and another
+			// group's artifact would be what the pair offers operators. The build
 			// record is what settles that pair, so it is withheld and the
 			// restore recorded alone, leaving the pair to be dispatched again.
 			// spec: RPT#what-a-build-reports
@@ -1271,8 +1272,8 @@ async fn verification(
 				let registered = database::artifacts::Artifact::get_by_id(&mut conn, *artifact)
 					.await
 					.ok()
-					.and_then(|found| found.rank);
-				if registered != Some(rank) {
+					.map(|found| (found.group_id, found.rank));
+				if registered != Some((Some(args.group), Some(rank))) {
 					elsewhere.push(*artifact);
 				}
 			}
@@ -1282,7 +1283,7 @@ async fn verification(
 					group = %args.group,
 					%rank,
 					artifacts = ?elsewhere,
-					"a build registered its schema against another environment; recording the restore alone"
+					"a build named an artifact of another group or environment; recording the restore alone"
 				);
 				BackupRestoreCheck::record_report(&mut conn, report).await?;
 				return Ok(StatusCode::NO_CONTENT);
