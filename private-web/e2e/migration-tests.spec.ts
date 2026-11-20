@@ -78,6 +78,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			dataBytesAfter: 260_000_000_000,
 			timings: [
 				{ name: "addIndexToFhirJobs", elapsedSecs: 12 },
+				{ name: "dropStrayTrigger", elapsedSecs: 0 },
 				{ name: "backfillNoteTypeIds", elapsedSecs: 5388 },
 			],
 			postMigration: {
@@ -131,6 +132,9 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		const timings = run.getByTestId("migration-timing");
 		await expect(timings.filter({ hasText: "addIndexToFhirJobs" })).toContainText(
 			"12s",
+		);
+		await expect(timings.filter({ hasText: "dropStrayTrigger" })).toContainText(
+			"<1s",
 		);
 		await expect(
 			timings.filter({ hasText: "backfillNoteTypeIds" }),
