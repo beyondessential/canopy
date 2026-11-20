@@ -938,3 +938,142 @@ async fn changelog_is_capped_at_a_mebibyte() {
 	)
 	.await
 }
+
+/// 2.68.2 is the newest patch but changed only the servers, so it has no
+/// mobile package, and 2.69.0 is outside the minor version.
+async fn seed_mobile_packages(conn: &mut diesel_async::AsyncPgConnection) {
+	conn.batch_execute(
+		"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+		('a0000000-0000-0000-0000-000000000680', 2, 68, 0, '', 'published'),
+		('a0000000-0000-0000-0000-000000000681', 2, 68, 1, '', 'published'),
+		('a0000000-0000-0000-0000-000000000682', 2, 68, 2, '', 'published'),
+		('a0000000-0000-0000-0000-000000000690', 2, 69, 0, '', 'published');
+
+		INSERT INTO artifacts (version_id, platform, artifact_type, download_url) VALUES
+		('a0000000-0000-0000-0000-000000000680', 'android', 'mobile', 'https://clients.example/2.68.0/android/tamanu/app-release.apk'),
+		('a0000000-0000-0000-0000-000000000681', 'android', 'mobile', 'https://clients.example/2.68.1/android/tamanu/app-release.apk'),
+		('a0000000-0000-0000-0000-000000000682', 'linux-amd64', 'central', 'https://clients.example/2.68.2/central'),
+		('a0000000-0000-0000-0000-000000000690', 'android', 'mobile', 'https://clients.example/2.69.0/android/tamanu/app-release.apk')",
+	)
+	.await
+	.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mobile_package_refuses_a_range() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		seed_mobile_packages(&mut conn).await;
+
+		for path in [
+			"/versions/~2.68.0/mobile/package",
+			"/versions/2.68/mobile/package?branding=tamanu",
+		] {
+			public.get(path).await.assert_status_bad_request();
+		}
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mobile_package_answers_head() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		seed_mobile_packages(&mut conn).await;
+
+		let response = public
+			.method(
+				axum::http::Method::HEAD,
+				"/versions/2.68.1/mobile/package?branding=tamanu",
+			)
+			.await;
+		response.assert_status(StatusCode::TEMPORARY_REDIRECT);
+		response.assert_header(
+			"location",
+			"https://clients.example/2.68.1/android/tamanu/app-release.apk",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mobile_package_serves_an_exact_version() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		seed_mobile_packages(&mut conn).await;
+
+		let response = public
+			.get("/versions/2.68.0/mobile/package?branding=tamanu")
+			.await;
+		response.assert_status(StatusCode::TEMPORARY_REDIRECT);
+		response.assert_header(
+			"location",
+			"https://clients.example/2.68.0/android/tamanu/app-release.apk",
+		);
+	})
+	.await
+}
+
+/// Central requires its devices to run an exact version, so a known issue on
+/// it must not leave them without a package to update to.
+#[tokio::test(flavor = "multi_thread")]
+async fn mobile_package_serves_an_exact_version_despite_a_known_issue() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		seed_mobile_packages(&mut conn).await;
+		conn.batch_execute(
+			"INSERT INTO version_known_issues (author, description, min_major, min_minor, min_patch)
+			VALUES ('admin', 'broken', 2, 68, 1)",
+		)
+		.await
+		.unwrap();
+
+		let response = public.get("/versions/2.68.1/mobile/package").await;
+		response.assert_status(StatusCode::TEMPORARY_REDIRECT);
+		response.assert_header(
+			"location",
+			"https://clients.example/2.68.1/android/tamanu/app-release.apk",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mobile_package_for_an_exact_version_without_one_is_not_found() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		seed_mobile_packages(&mut conn).await;
+
+		for path in [
+			"/versions/2.68.2/mobile/package",
+			"/versions/2.68.9/mobile/package",
+		] {
+			public.get(path).await.assert_status_not_found();
+		}
+	})
+	.await
+}
+
+/// 2.68.2 changed only the servers, so the install page for the minor version
+/// offers 2.68.1, the newest release with a mobile build.
+#[tokio::test(flavor = "multi_thread")]
+async fn mobile_install_page_skips_a_release_without_a_mobile_build() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		seed_mobile_packages(&mut conn).await;
+
+		let response = public.get("/versions/2.68/mobile").await;
+		response.assert_status_ok();
+		let page = response.text();
+		assert!(page.contains("Version 2.68.1"), "{page}");
+		assert!(page.contains("https://clients.example/2.68.1/android/tamanu/app-release.apk"));
+		assert!(!page.contains("No mobile artifacts available"));
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mobile_install_page_for_a_release_without_a_mobile_build_says_so() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		seed_mobile_packages(&mut conn).await;
+
+		let response = public.get("/versions/2.68.2/mobile").await;
+		response.assert_status_ok();
+		assert!(response.text().contains("No mobile artifacts available"));
+	})
+	.await
+}
