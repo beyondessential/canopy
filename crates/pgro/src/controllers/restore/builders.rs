@@ -1618,6 +1618,17 @@ lc_time = 'C'
 CONFEOF
 fi
 
+PG_MAJOR=$(cat "$PGDATA/PG_VERSION")
+
+# spec: PGRO#replicas
+# Truncating postgresql.auto.conf below drops the source's ALTER SYSTEM tuning,
+# where the source servers set jit off. Set it here, ahead of
+# postgresExtraConfig so a replica can still turn it back on.
+if [ "$PG_MAJOR" -ge 11 ]; then
+  echo >> "$PGDATA/postgresql.conf"
+  echo "jit = off" >> "$PGDATA/postgresql.conf"
+fi
+
 {extra_config_block}
 
 echo "Stripping source-host config overrides from postgresql.conf..."
@@ -1652,8 +1663,6 @@ echo "password_encryption = 'scram-sha-256'" >> "$PGDATA/postgresql.conf"
 echo "logging_collector = off" >> "$PGDATA/postgresql.conf"
 echo "shared_buffers = {shared_buffers_mb}MB" >> "$PGDATA/postgresql.conf"
 echo "listen_addresses = '*'" >> "$PGDATA/postgresql.conf"
-
-PG_MAJOR=$(cat "$PGDATA/PG_VERSION")
 
 echo "Truncating postgresql.auto.conf to discard ALTER SYSTEM overrides from source..."
 : > "$PGDATA/postgresql.auto.conf"
