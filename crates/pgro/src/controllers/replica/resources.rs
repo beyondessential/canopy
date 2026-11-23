@@ -55,60 +55,70 @@ impl SnapshotInfo {
 	}
 }
 
+/// Fixed room a restore that is written into gets on top of its headroom:
+/// 5Gi, in bytes so that adding it to a byte count is exact.
+const WRITTEN_INTO_EXTRA_BYTES: u64 = 5 * 1024 * 1024 * 1024;
+
 /// Size the restore PVC for a snapshot.
+///
+/// The size is what is known to land on the volume — the snapshot, plus the
+/// persistent schemas measured at the last migration when the restore is
+/// written into — with `headroom_percent` of that again as spare room, and a
+/// fixed 5Gi more for a restore that is written into. Headroom is a share of
+/// the contents rather than of the snapshot alone, so a replica whose
+/// persistent schemas have grown keeps the same proportion free.
 ///
 /// `override_size` (`spec.storageSizeOverride`) is a floor, not a replacement:
 /// the syncer always sets it from the intent config, so treating it as an
 /// exact size would truncate any replica whose snapshot outgrew it.
 ///
-/// `maximum` bounds the result. It fails the restore only when the
-/// *snapshot-derived* size exceeds it — a replica genuinely too big for its
+/// `maximum` bounds the result. It fails the restore only when the size at the
+/// default headroom exceeds it — a replica genuinely too big for its
 /// configured cap, where truncating would restore into a volume that fills
-/// partway through. A floor above the maximum is merely contradictory config
-/// and clamps instead.
+/// partway through. Headroom asked for beyond the default is trimmed to the
+/// maximum instead, and so is a floor above it: both are a wish for more room
+/// than the cap allows, not data that does not fit.
+// spec: INT
 pub fn compute_storage_size(
 	snapshot_bytes: ParsedQuantity,
 	override_size: Option<&Quantity>,
 	maximum: &Quantity,
 	writes_into_restore: bool,
 	measured_schema_delta: Option<ParsedQuantity>,
+	headroom_percent: u32,
 ) -> Result<Quantity> {
 	let max_pvc_size = ParsedQuantity::try_from(maximum.clone())
 		.unwrap_or_else(|_| ParsedQuantity::try_from("2Ti").unwrap());
 
-	let computed_size = if writes_into_restore {
-		// Persistent schemas or schema migrations are written into the restore PVC.
-		// Formula: snapshot + max(10% of snapshot, last measured delta) + 5Gi
-		let ten_percent = snapshot_bytes.clone() * Decimal::new(1, 1);
-		let measured = measured_schema_delta.unwrap_or_else(|| ParsedQuantity::from(Decimal::ZERO));
-		let overhead = if measured > ten_percent {
-			measured
+	let contents = match measured_schema_delta {
+		Some(measured) if writes_into_restore => snapshot_bytes + measured,
+		_ => snapshot_bytes,
+	};
+	let size_with = |percent: u32| {
+		let factor = Decimal::ONE + Decimal::from(percent) / Decimal::ONE_HUNDRED;
+		let sized = contents.clone() * factor;
+		if writes_into_restore {
+			sized + ParsedQuantity::from(Decimal::from(WRITTEN_INTO_EXTRA_BYTES))
 		} else {
-			ten_percent
-		};
-		snapshot_bytes + overhead + ParsedQuantity::try_from("5Gi").unwrap()
-	} else {
-		snapshot_bytes * Decimal::new(11, 1) // 1.1x
+			sized
+		}
 	};
 
-	// The maximum guards against a snapshot too large to fit — that's the case
-	// where truncating would restore into a volume that fills partway through.
-	if computed_size > max_pvc_size {
+	let required = size_with(headroom_percent.min(DEFAULT_STORAGE_HEADROOM_PERCENT));
+	if required > max_pvc_size {
 		return Err(crate::error::Error::StorageLimitExceeded {
-			computed: computed_size.into(),
+			computed: required.into(),
 			maximum: max_pvc_size.into(),
 		});
 	}
 
+	let desired = size_with(headroom_percent);
 	let floor = override_size.and_then(|q| ParsedQuantity::try_from(q.clone()).ok());
 	let chosen = match floor {
-		Some(floor) if floor > computed_size => floor,
-		_ => computed_size,
+		Some(floor) if floor > desired => floor,
+		_ => desired,
 	};
 
-	// A floor above the maximum is contradictory configuration rather than a
-	// too-big replica, so the maximum simply wins. Failing instead would wedge
-	// a small replica whose operator capped it below the intent's floor.
 	Ok(if chosen > max_pvc_size {
 		max_pvc_size.into()
 	} else {
@@ -352,6 +362,9 @@ impl PostgresPhysicalReplica {
 			&self.spec.storage_size_maximum,
 			self.writes_into_restore(),
 			measured_schema_delta,
+			self.spec
+				.storage_headroom_percent
+				.unwrap_or(DEFAULT_STORAGE_HEADROOM_PERCENT),
 		)?;
 
 		let mut restore = PostgresPhysicalRestore::new(

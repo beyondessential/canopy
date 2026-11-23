@@ -20,7 +20,7 @@ It takes the starting state its migration runs against: the schemas dropped from
 The defaults model what a real upgrade of a Tamanu application does before its migrations, dropping the reporting schema whose views block the migration and clearing the server identity and the values encrypted under another key that a copy cannot read.
 
 `analytics` keeps a long-lived read-only query replica restored from the latest snapshot, following new snapshots as they arrive.
-It is parametrised by restore cadence, exposure on the tailnet, resource sizing, storage caps, extra users, persistent schemas, a migration target with the starting state its migration runs against, and how long to wait for the replica to become ready.
+It is parametrised by restore cadence, exposure on the tailnet, resource sizing, storage headroom and caps, extra users, persistent schemas, a migration target with the starting state its migration runs against, and how long to wait for the replica to become ready.
 Persistent schemas are migrated into each restore and kept across restores.
 An exposed replica is reachable on the tailnet under a host name derived from its name.
 Redaction is an option Canopy controls on a replica, and the parameters that locate the masking manifest and resolve its version are set by Canopy (see [RST](../public-server/restore-replicas.md), "Redaction").
@@ -49,6 +49,20 @@ The CPU request comes from the intent's floor, a fraction of a core sized for an
 `cpu_request` and `cpu_limit` set the Postgres CPU request and limit, and leave memory derived from the snapshot.
 `memory_request` and `memory_limit` pin Postgres memory in place of the derived value, and setting only one of them pins both request and limit to that value.
 A sizing change reaches the replica's running Postgres pod as soon as the replica's configuration carries it, restarting the pod, without waiting for the next restore.
+
+## Restore volume sizing
+
+Each restore gets a volume of its own, sized when the restore is created from what is known to land on it.
+For a restore that nothing is written into, that is the snapshot.
+For one that carries persistent schemas or runs a migration, it is the snapshot together with the persistent schemas as measured when they were last migrated into a restore.
+
+The volume is those contents plus a headroom that is a percentage of them, and a restore that is written into gets a further fixed 5Gi.
+The headroom is ten percent unless an analytics replica's `storage_headroom_percent` parameter sets another, so that a replica whose workload builds data in place between restores can be given the room it needs.
+Every intent has a smallest volume it will provision, and a restore whose computed size is below it gets that size instead.
+
+`storage_size_maximum` caps the volume.
+A restore whose contents do not fit under the cap at the default headroom fails rather than being given a volume it would fill partway through.
+Headroom asked for beyond the default is spare room rather than data, so where it would take the volume over the cap the volume is the cap, and so is a smallest volume that exceeds it.
 
 ## Migrating a restore to a target version
 

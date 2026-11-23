@@ -195,10 +195,17 @@ pub struct PostgresPhysicalReplicaSpec {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub rank: Option<String>,
 
-	/// Maximum allowed size for the restore PVC. The restore will fail if the
-	/// computed size exceeds this limit. Defaults to 2Ti.
+	/// Maximum allowed size for the restore PVC. The restore fails if its
+	/// contents do not fit under this at the default headroom. Defaults to 2Ti.
 	#[serde(default = "default_storage_size_maximum")]
 	pub storage_size_maximum: Quantity,
+
+	/// Spare room on the restore PVC beyond what is known to land on it (the
+	/// snapshot, plus the persistent schemas measured at the last migration),
+	/// as a percentage of that. Defaults to 10. The maximum trims headroom
+	/// above the default rather than failing the restore.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub storage_headroom_percent: Option<u32>,
 
 	/// If set, apply a redaction manifest to the restored data before the
 	/// replica becomes eligible for switchover. The restore Pod installs
@@ -235,6 +242,9 @@ pub struct RedactionSpec {
 	#[serde(default)]
 	pub version_fallback_to_base: bool,
 }
+
+/// Headroom a restore PVC gets when `storageHeadroomPercent` is unset.
+pub const DEFAULT_STORAGE_HEADROOM_PERCENT: u32 = 10;
 
 fn default_storage_size_maximum() -> Quantity {
 	Quantity("2Ti".to_string())
