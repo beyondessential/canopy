@@ -12,7 +12,7 @@ authors = [
 
 [dependencies]
 aws-config.workspace = true
-aws-sdk-kms = "1.123.0"
+aws-sdk-kms = { version = "1.123.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
 base64 = "0.22"
 jiff = { workspace = true, features = ["serde"] }
 ring = "0.17.14"

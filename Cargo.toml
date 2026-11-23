@@ -30,9 +30,18 @@ exclude = ["crates/canopy-api"]
 [workspace.dependencies]
 anyhow = "1"
 aws-config = "1.8.18"
-aws-sdk-cloudwatch = "1.116.0"
-aws-sdk-s3 = "1.136.0"
-aws-sdk-sts = "1.107.0"
+aws-sdk-cloudwatch = { version = "1.116.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-s3 = { version = "1.136.0", default-features = false, features = [
+	"default-https-client",
+	"http-1x",
+	"rt-tokio",
+	"sigv4a",
+] }
+aws-sdk-sts = { version = "1.107.0", default-features = false, features = [
+	"default-https-client",
+	"rt-tokio",
+	"sigv4a",
+] }
 aws-smithy-mocks = "0.3.0"
 axum = "0.8.9"
 axum-test = "21.0.0"
