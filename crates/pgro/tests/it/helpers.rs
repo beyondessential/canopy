@@ -252,6 +252,7 @@ pub fn build_replica(name: &str, opts: ReplicaOpts) -> PostgresPhysicalReplica {
 			persistent_schemas: None,
 			redaction: opts.redaction,
 			storage_size_maximum: Quantity("2Ti".to_string()),
+			storage_headroom_percent: None,
 		},
 	);
 	replica.metadata.labels = Some(BTreeMap::from([

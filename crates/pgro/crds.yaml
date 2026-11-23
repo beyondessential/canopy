@@ -862,11 +862,21 @@ spec:
               storageClass:
                 nullable: true
                 type: string
+              storageHeadroomPercent:
+                description: |-
+                  Spare room on the restore PVC beyond what is known to land on it (the
+                  snapshot, plus the persistent schemas measured at the last migration),
+                  as a percentage of that. Defaults to 10. The maximum trims headroom
+                  above the default rather than failing the restore.
+                format: uint32
+                minimum: 0.0
+                nullable: true
+                type: integer
               storageSizeMaximum:
                 default: 2Ti
                 description: |-
-                  Maximum allowed size for the restore PVC. The restore will fail if the
-                  computed size exceeds this limit. Defaults to 2Ti.
+                  Maximum allowed size for the restore PVC. The restore fails if its
+                  contents do not fit under this at the default headroom. Defaults to 2Ti.
                 nullable: true
                 x-kubernetes-int-or-string: true
               storageSizeOverride:
@@ -1163,7 +1173,9 @@ spec:
                 nullable: true
                 type: string
               storageSize:
-                description: Calculated PVC size (snapshot_size * 1.1)
+                description: |-
+                  Calculated PVC size: the snapshot and measured persistent schemas, plus
+                  the replica's headroom.
                 x-kubernetes-int-or-string: true
             required:
             - replica

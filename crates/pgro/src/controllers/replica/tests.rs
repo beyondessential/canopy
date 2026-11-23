@@ -61,6 +61,7 @@ fn storage_size_override_does_not_cap_a_larger_snapshot() {
 		&Quantity("2Ti".into()),
 		false,
 		None,
+		DEFAULT_STORAGE_HEADROOM_PERCENT,
 	)
 	.expect("under the 2Ti maximum");
 
@@ -84,6 +85,7 @@ fn storage_size_override_is_a_floor_for_small_snapshots() {
 		&Quantity("2Ti".into()),
 		false,
 		None,
+		DEFAULT_STORAGE_HEADROOM_PERCENT,
 	)
 	.expect("under the 2Ti maximum");
 
@@ -106,6 +108,7 @@ fn floor_above_the_maximum_clamps_rather_than_failing() {
 		&Quantity("10Gi".into()),
 		false,
 		None,
+		DEFAULT_STORAGE_HEADROOM_PERCENT,
 	)
 	.expect("a floor over the cap clamps to the cap");
 
@@ -128,6 +131,7 @@ fn storage_size_maximum_still_rejects_an_oversized_snapshot() {
 		&Quantity("100Gi".into()),
 		false,
 		None,
+		DEFAULT_STORAGE_HEADROOM_PERCENT,
 	)
 	.expect_err("a 500Gi snapshot cannot fit a 100Gi maximum");
 
@@ -135,6 +139,97 @@ fn storage_size_maximum_still_rejects_an_oversized_snapshot() {
 		matches!(err, crate::error::Error::StorageLimitExceeded { .. }),
 		"got {err:?}"
 	);
+}
+
+const GIB: u64 = 1024 * 1024 * 1024;
+
+fn gib(n: u64) -> ParsedQuantity {
+	ParsedQuantity::from(Decimal::from(n * GIB))
+}
+
+fn sized(
+	snapshot: ParsedQuantity,
+	maximum: &str,
+	measured: Option<ParsedQuantity>,
+	headroom_percent: u32,
+) -> crate::error::Result<ParsedQuantity> {
+	compute_storage_size(
+		snapshot,
+		None,
+		&Quantity(maximum.into()),
+		true,
+		measured,
+		headroom_percent,
+	)
+	.map(|size| ParsedQuantity::try_from(size).unwrap())
+}
+
+/// Headroom is a share of everything known to land on the volume. Taking it
+/// from the snapshot alone left a replica whose persistent schemas had grown
+/// to a tenth of its snapshot with only the fixed 5Gi free.
+#[test]
+fn headroom_covers_the_persistent_schemas_as_well_as_the_snapshot() {
+	let size = sized(gib(100), "2Ti", Some(gib(10)), 10).unwrap();
+	// (100 + 10) * 1.1 + 5
+	assert_eq!(size, gib(126));
+}
+
+#[test]
+fn a_headroom_of_a_hundred_percent_doubles_the_room_for_the_contents() {
+	let size = sized(gib(100), "2Ti", Some(gib(10)), 100).unwrap();
+	// (100 + 10) * 2 + 5
+	assert_eq!(size, gib(225));
+}
+
+/// A plain replica is never written into, so last cycle's measurement of a
+/// since-removed persistent schema must not inflate it.
+#[test]
+fn a_plain_restore_ignores_a_measured_schema_size() {
+	let size = ParsedQuantity::try_from(
+		compute_storage_size(
+			gib(100),
+			None,
+			&Quantity("2Ti".into()),
+			false,
+			Some(gib(10)),
+			DEFAULT_STORAGE_HEADROOM_PERCENT,
+		)
+		.unwrap(),
+	)
+	.unwrap();
+	assert_eq!(size, gib(110));
+}
+
+/// Headroom beyond the default is a wish for spare room, not data that has to
+/// fit: a cap it overshoots trims it, where failing would stop a replica
+/// restoring because its operator asked for more room than its cap allows.
+#[test]
+fn headroom_beyond_the_default_is_trimmed_to_the_maximum() {
+	// At 100% this wants 225Gi; at the default it needs 126Gi.
+	let size = sized(gib(100), "200Gi", Some(gib(10)), 100).unwrap();
+	assert_eq!(size, gib(200));
+}
+
+/// Raising the headroom must not turn the cap into a silent truncation of the
+/// data itself: contents that overshoot it at the default still fail.
+#[test]
+fn contents_too_big_for_the_maximum_fail_whatever_the_headroom() {
+	for headroom_percent in [10, 100] {
+		let err = sized(gib(100), "110Gi", Some(gib(10)), headroom_percent)
+			.expect_err("126Gi cannot fit a 110Gi maximum");
+		assert!(
+			matches!(err, crate::error::Error::StorageLimitExceeded { .. }),
+			"got {err:?}"
+		);
+	}
+}
+
+/// An operator may ask for less than the default, and a cap that the default
+/// would overshoot then holds the replica.
+#[test]
+fn a_headroom_below_the_default_is_honoured() {
+	let size = sized(gib(100), "120Gi", Some(gib(10)), 0).unwrap();
+	assert_eq!(size, gib(115));
 }
 
 fn make_replica(
@@ -182,6 +277,7 @@ fn make_replica(
 			storage_size_maximum: k8s_openapi::apimachinery::pkg::api::resource::Quantity(
 				"2Ti".to_string(),
 			),
+			storage_headroom_percent: None,
 		},
 		status: schema_migration_phase.map(|p| PostgresPhysicalReplicaStatus {
 			schema_migration_phase: Some(p),
@@ -460,6 +556,7 @@ fn snapshot_list_test_replica() -> PostgresPhysicalReplica {
 			storage_size_maximum: k8s_openapi::apimachinery::pkg::api::resource::Quantity(
 				"2Ti".to_string(),
 			),
+			storage_headroom_percent: None,
 		},
 		status: None,
 	}
@@ -701,13 +798,14 @@ fn a_restore_written_into_gets_headroom_beyond_the_plain_margin() {
 				&Quantity("2Ti".into()),
 				writes_into_restore,
 				None,
+				DEFAULT_STORAGE_HEADROOM_PERCENT,
 			)
 			.expect("under the 2Ti maximum"),
 		)
 		.unwrap()
 	};
 
-	assert!(size(true) >= size(false) + ParsedQuantity::try_from("5Gi").unwrap());
+	assert!(size(true) >= size(false) + gib(5));
 }
 
 fn snapshot_list_proxy() -> CanopyProxyArgs<'static> {

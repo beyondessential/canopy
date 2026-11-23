@@ -31,7 +31,10 @@ use k8s_openapi::{
 use serde_json::{Map, Value, json};
 
 use crate::{
-	types::{CanopySource, ExtraUserSpec, PostgresPhysicalReplicaSpec, RedactionSpec},
+	types::{
+		CanopySource, DEFAULT_STORAGE_HEADROOM_PERCENT, ExtraUserSpec, PostgresPhysicalReplicaSpec,
+		RedactionSpec,
+	},
 	util::TimeSpan,
 };
 
@@ -81,6 +84,9 @@ pub mod params {
 	pub const SWITCHOVER_GRACE: &str = "switchover_grace";
 	/// `bytes` — cap on the restore PVC size.
 	pub const STORAGE_SIZE_MAXIMUM: &str = "storage_size_maximum";
+	/// `integer` — spare room on the restore PVC, as a percentage of the
+	/// snapshot and persistent schemas it holds.
+	pub const STORAGE_HEADROOM_PERCENT: &str = "storage_headroom_percent";
 	/// `text` — comma-separated schemas migrated into the restore and kept
 	/// across restores (the dbt workload). Empty/unset = a plain replica.
 	pub const PERSISTENT_SCHEMAS: &str = "persistent_schemas";
@@ -245,6 +251,13 @@ fn analytics_param_schema() -> ParamSchema {
 		(
 			params::STORAGE_SIZE_MAXIMUM.to_string(),
 			param(ParamType::Bytes, None),
+		),
+		(
+			params::STORAGE_HEADROOM_PERCENT.to_string(),
+			param(
+				ParamType::Integer,
+				Some(json!(DEFAULT_STORAGE_HEADROOM_PERCENT)),
+			),
 		),
 		(
 			params::PERSISTENT_SCHEMAS.to_string(),
@@ -630,6 +643,10 @@ impl IntentConfig {
 		let storage_size_maximum = param_i64(p, params::STORAGE_SIZE_MAXIMUM)
 			.map(|bytes| Quantity(bytes.to_string()))
 			.unwrap_or_else(|| self.storage_size_maximum.clone());
+		// A value that is not a whole, non-negative percentage is left unset,
+		// which sizes the restore at the default.
+		let storage_headroom_percent = param_i64(p, params::STORAGE_HEADROOM_PERCENT)
+			.and_then(|percent| u32::try_from(percent).ok());
 		let persistent_schemas = param_str(p, params::PERSISTENT_SCHEMAS)
 			.map(parse_persistent_schemas)
 			.filter(|schemas| !schemas.is_empty())
@@ -725,6 +742,7 @@ impl IntentConfig {
 			rank,
 			redaction: redaction_spec(p),
 			storage_size_maximum,
+			storage_headroom_percent,
 		}
 	}
 
@@ -1136,7 +1154,7 @@ mod tests {
 		// Only the params pgro actually acts on are advertised.
 		assert_eq!(
 			params.len(),
-			18,
+			19,
 			"advertising a param pgro doesn't read, or dropping one it does"
 		);
 		assert!(params.get("anonymise").is_none());
@@ -1187,6 +1205,11 @@ mod tests {
 		assert_eq!(v[2]["params"]["minimum_ttl"]["type"], "duration");
 		assert_eq!(v[2]["params"]["minimum_ttl"]["default"], 7200);
 		assert_eq!(v[2]["params"]["storage_size_maximum"]["type"], "bytes");
+		assert_eq!(
+			v[2]["params"]["storage_headroom_percent"]["type"],
+			"integer"
+		);
+		assert_eq!(v[2]["params"]["storage_headroom_percent"]["default"], 10);
 		assert_eq!(v[2]["params"]["persistent_schemas"]["type"], "text");
 		assert_eq!(v[2]["params"]["expose"]["type"], "boolean");
 		assert_eq!(v[2]["params"]["redaction_manifest_url"]["type"], "text");
@@ -1424,6 +1447,29 @@ mod tests {
 				"{url:?} must not enable redaction"
 			);
 		}
+	}
+
+	#[test]
+	fn storage_headroom_percent_reaches_the_replica_spec() {
+		let spec_for = |params| {
+			config_for("analytics").unwrap().to_replica_spec(&entry(
+				"analytics",
+				"example-site",
+				params,
+			))
+		};
+
+		assert_eq!(
+			spec_for(json!({ "storage_headroom_percent": 100 })).storage_headroom_percent,
+			Some(100)
+		);
+		// Unset or nonsensical leaves the spec field unset, so sizing falls
+		// back to the default rather than to no headroom at all.
+		assert_eq!(spec_for(json!({})).storage_headroom_percent, None);
+		assert_eq!(
+			spec_for(json!({ "storage_headroom_percent": -5 })).storage_headroom_percent,
+			None
+		);
 	}
 
 	#[test]

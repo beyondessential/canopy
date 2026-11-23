@@ -40,7 +40,8 @@ pub struct PostgresPhysicalRestoreSpec {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub snapshot_time: Option<String>,
 
-	/// Calculated PVC size (snapshot_size * 1.1)
+	/// Calculated PVC size: the snapshot and measured persistent schemas, plus
+	/// the replica's headroom.
 	pub storage_size: Quantity,
 
 	/// Tamanu version whose schema migrations to apply once the replica is
