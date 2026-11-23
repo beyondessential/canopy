@@ -41,3 +41,9 @@ Each worklist entry is one replica: a Postgres instance restored from a snapshot
 Where a replica is scheduled follows the cluster's placement defaults (see [PLACE](placement.md)).
 The database roles a replica carries, and how their credentials are exposed, are in [USER](replica-users.md).
 What a replica reports, and how Canopy alerts on it, are in [RST](../public-server/restore-replicas.md).
+
+A replica runs Postgres with JIT compilation off, unless the replica's own Postgres configuration turns it on.
+
+> [!NOTE]
+> The servers replicas are restored from run with JIT off, and a restore does not carry their setting overrides across.
+> On the long reporting queries replicas serve, JIT's compile time outweighs what it saves.

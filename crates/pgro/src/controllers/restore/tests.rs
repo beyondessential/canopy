@@ -3551,6 +3551,54 @@ fn setup_auth_exposes_locale_reindex_progress_to_the_analytics_user() {
 	assert!(gate < function);
 }
 
+#[test]
+fn setup_auth_turns_jit_off_ahead_of_extra_config() {
+	let (mut restore, mut replica) = test_restore_and_replica();
+	restore.status = Some(PostgresPhysicalRestoreStatus {
+		postgres_version: Some("16".to_string()),
+		..Default::default()
+	});
+	replica.spec.postgres_extra_config = Some("jit = on".to_string());
+	let deploy = build_deployment(
+		&restore,
+		"test-restore",
+		"default",
+		&replica,
+		&PodPlacement::default(),
+	)
+	.unwrap();
+	let script = deploy
+		.spec
+		.unwrap()
+		.template
+		.spec
+		.unwrap()
+		.init_containers
+		.unwrap()
+		.into_iter()
+		.find(|c| c.name == "setup-auth")
+		.expect("setup-auth init container must exist")
+		.args
+		.unwrap()
+		.remove(0);
+
+	let jit_off = script
+		.find(r#"echo "jit = off" >> "$PGDATA/postgresql.conf""#)
+		.expect("restore sets jit off");
+	let gate = script[..jit_off]
+		.rfind(r#"if [ "$PG_MAJOR" -ge 11 ]; then"#)
+		.expect("jit only exists from PG 11");
+	assert!(
+		script[..gate].contains(r#"PG_MAJOR=$(cat "$PGDATA/PG_VERSION")"#),
+		"the major version must be read before the jit gate"
+	);
+	let extra = script.find("jit = on").expect("extra config is appended");
+	assert!(
+		jit_off < extra,
+		"postgresExtraConfig must follow jit = off so a replica can turn it back on"
+	);
+}
+
 mod reindex_watch {
 	use jiff::{SignedDuration, Timestamp};
 
