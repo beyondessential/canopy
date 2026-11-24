@@ -147,6 +147,8 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           repository: beyondessential/infra
+          ssh-key: ${{ secrets.INFRA_SSH }}
+          persist-credentials: false
           ref: ${{ vars.OPS_REF }}
           path: ops
 
@@ -209,6 +211,8 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           repository: beyondessential/infra
+          ssh-key: ${{ secrets.INFRA_SSH }}
+          persist-credentials: false
           ref: ${{ vars.OPS_REF }}
           path: ops
 
