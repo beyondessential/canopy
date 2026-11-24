@@ -148,6 +148,7 @@ jobs:
         with:
           repository: beyondessential/infra
           ssh-key: ${{ secrets.INFRA_SSH }}
+          persist-credentials: false
           ref: ${{ vars.OPS_REF }}
           path: ops
 
@@ -211,6 +212,7 @@ jobs:
         with:
           repository: beyondessential/infra
           ssh-key: ${{ secrets.INFRA_SSH }}
+          persist-credentials: false
           ref: ${{ vars.OPS_REF }}
           path: ops
 
