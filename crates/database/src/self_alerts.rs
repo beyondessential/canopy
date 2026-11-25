@@ -333,7 +333,7 @@ Nothing is closed or lost meanwhile: a repository that cannot be read keeps its 
 
 ## Solve
 
-For a repository that cannot be reached, check Canopy's egress to GitHub, and whether GitHub's unauthenticated limits are being hit. For a lockfile that does not parse, the message names the lockfile and what is wrong with it: fix it on the repository's default branch, and Canopy reads the fix within minutes.
+For a repository that cannot be reached, check Canopy's egress to GitHub, and whether GitHub's rate limits are being hit. A private repository answers 404 unless `CANOPY_GITHUB_TOKEN` is set to a token that can read it, so a repository that has just gone private, or a token that has expired or lost the repository, shows up here. For a lockfile that does not parse, the message names the lockfile and what is wrong with it: fix it on the repository's default branch, and Canopy reads the fix within minutes.
 
 A repository with no lockfile Canopy can read is either one that should not be tracked, or one in an ecosystem Canopy does not read yet. Either is a change to Canopy rather than to the repository.";
 
