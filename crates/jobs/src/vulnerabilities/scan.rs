@@ -374,7 +374,7 @@ pub fn spawn() -> JoinHandle<()> {
 	let pool = database::init();
 	let scanner = Scanner::new(
 		OsvClient::new(super::osv_client::BASE_URL),
-		GitHub::new(Endpoints::default()),
+		GitHub::new(Endpoints::default()).with_token(crate::github::token()),
 	);
 
 	task::spawn(watch_repositories(scanner.clone(), pool.clone()));

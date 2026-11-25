@@ -36,7 +36,7 @@ const TICK: Duration = Duration::from_secs(3600);
 const JOB: &str = "ansible-catalogue";
 
 /// Where the catalogue is published. Only a test points this anywhere but
-/// infra's public repository, which is read with no credentials.
+/// infra's repository.
 #[derive(Clone, Debug)]
 pub struct Source {
 	/// GitHub's API, which names the commit the file is read at.
@@ -46,6 +46,7 @@ pub struct Source {
 	pub repo: String,
 	pub branch: String,
 	pub path: String,
+	pub token: Option<SecretString>,
 }
 
 impl Default for Source {
@@ -56,6 +57,7 @@ impl Default for Source {
 			repo: "beyondessential/infra".into(),
 			branch: "main".into(),
 			path: "ansible/variables.schema.json".into(),
+			token: None,
 		}
 	}
 }
@@ -78,8 +80,7 @@ pub async fn fetch(client: &reqwest::Client, source: &Source) -> Result<(Value, 
 		],
 	)
 	.map_err(|e| Failure::Unreachable(format!("the repository's address is unusable: {e}")))?;
-	let response = client
-		.get(commits_url)
+	let response = crate::github::authenticate(client.get(commits_url), source.token.as_ref())
 		.header("accept", "application/vnd.github+json")
 		.send()
 		.await
@@ -110,8 +111,7 @@ pub async fn fetch(client: &reqwest::Client, source: &Source) -> Result<(Value, 
 		"{}/{}/{commit}/{}",
 		source.raw_base, source.repo, source.path
 	);
-	let response = client
-		.get(&file_url)
+	let response = crate::github::authenticate(client.get(&file_url), source.token.as_ref())
 		.send()
 		.await
 		.map_err(|e| Failure::Unreachable(format!("reading the catalogue: {e}")))?;
@@ -292,7 +292,10 @@ pub fn spawn(secrets: BackupSecrets) -> JoinHandle<()> {
 				return;
 			}
 		};
-		let source = Source::default();
+		let source = Source {
+			token: crate::github::token(),
+			..Source::default()
+		};
 		loop {
 			match pool.get().await {
 				Ok(mut db) => refresh(&mut db, &secrets, &client, &source, Timestamp::now()).await,
@@ -389,6 +392,52 @@ mod tests {
 				..Source::default()
 			}
 		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_private_repository_is_read_with_the_token() {
+		async fn private(headers: axum::http::HeaderMap) -> StatusCode {
+			let expected = "Basic eC1hY2Nlc3MtdG9rZW46c2VjcmV0LXRva2Vu";
+			if headers.get("authorization").and_then(|v| v.to_str().ok()) == Some(expected) {
+				StatusCode::OK
+			} else {
+				StatusCode::NOT_FOUND
+			}
+		}
+		async fn commits(headers: axum::http::HeaderMap) -> (StatusCode, Json<Value>) {
+			(private(headers).await, Json(json!([{ "sha": COMMIT }])))
+		}
+		async fn file(headers: axum::http::HeaderMap) -> (StatusCode, String) {
+			(private(headers).await, catalogue_document().to_string())
+		}
+
+		let app = Router::new()
+			.route("/repos/beyondessential/infra/commits", get(commits))
+			.route(
+				&format!("/beyondessential/infra/{COMMIT}/ansible/variables.schema.json"),
+				get(file),
+			);
+		let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+		let base = format!("http://{}", listener.local_addr().unwrap());
+		tokio::spawn(async move { axum::serve(listener, app).await });
+		let source = Source {
+			api_base: base.clone(),
+			raw_base: base,
+			..Source::default()
+		};
+		let client = reqwest::Client::new();
+
+		assert!(matches!(
+			fetch(&client, &source).await,
+			Err(Failure::Unreachable(_))
+		));
+		let with_token = Source {
+			token: Some(SecretString::from("secret-token".to_owned())),
+			..source
+		};
+		let (document, commit) = fetch(&client, &with_token).await.unwrap();
+		assert_eq!(commit, COMMIT);
+		assert_eq!(document, catalogue_document());
 	}
 
 	fn catalogue_document() -> Value {

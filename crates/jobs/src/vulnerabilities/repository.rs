@@ -26,6 +26,7 @@ use std::{
 	time::Duration,
 };
 
+use commons_servers::backup_secrets::SecretString;
 use database::{packages::RepositoryPackage, vulnerabilities::Repository};
 use futures::{StreamExt as _, TryStreamExt as _, stream};
 use serde::Deserialize;
@@ -100,6 +101,7 @@ pub struct GitHub {
 	http: reqwest::Client,
 	endpoints: Endpoints,
 	max_file_bytes: usize,
+	token: Option<SecretString>,
 }
 
 #[derive(Deserialize)]
@@ -195,7 +197,13 @@ impl GitHub {
 				.unwrap_or_default(),
 			endpoints,
 			max_file_bytes: MAX_FILE_BYTES,
+			token: None,
 		}
+	}
+
+	pub fn with_token(mut self, token: Option<SecretString>) -> Self {
+		self.token = token;
+		self
 	}
 
 	/// Read files no larger than this, for a test that would rather not serve
@@ -218,9 +226,7 @@ impl GitHub {
 	}
 
 	async fn get(&self, what: &str, url: reqwest::Url) -> Result<reqwest::Response, Failure> {
-		let response = self
-			.http
-			.get(url)
+		let response = crate::github::authenticate(self.http.get(url), self.token.as_ref())
 			.send()
 			.await
 			.map_err(|e| Failure::Unreachable(format!("{what}: {e}")))?;
