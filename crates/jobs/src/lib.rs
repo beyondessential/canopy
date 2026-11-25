@@ -8,6 +8,7 @@ pub mod ansible;
 pub mod artifact_sweep;
 pub mod backup;
 pub mod domains;
+pub mod github;
 pub mod identity;
 pub mod relay;
 pub mod session_sweep;
