@@ -31,7 +31,10 @@ Project, PM in charge, contact on the ground. Free text, no data model behind pr
 
 - Groups already carry free-form markdown notes with a revision log (FLT "Notes"). Project and contact could live there by convention, but the view can't then pull them out to show in a list or search.
 - So: three named fields on the group, beside the notes. The PM in charge is the one with meaning: it has to match a person so "my groups" works.
-- Editing them is a write, so today it needs an admin. Whether a PM can edit their own groups' details is open.
+- PMs edit them, as well as admins. Any PM, on any group, rather than only the PM in charge: a group with no PM in charge yet still needs someone to fill it in, and PMs cover for each other.
+- This is the first write a non-admin can make in Canopy. Only these three fields: the rest of the group's edit form stays admin-only.
+- Each edit is audited, recording the fields changed from and to, like other group edits.
+- Safety mode: recommend a PM raises to write the same way an admin does (one click from the blocked control). A raise authorises nothing by itself (SAFE), so it opens nothing else to a PM. Danger isn't offered to a PM, since nothing a PM can do needs it.
 
 ### B. Access to the production environment
 
@@ -74,10 +77,13 @@ Each person picks what `/` opens. Someone who hasn't picked gets the PM view if 
 
 ### F. Who counts as a PM
 
-Decides the default homepage, from the person's groups in the tailnet policy.
+Decides who may edit the PM details (A) and whose homepage defaults to the PM view, from the tailnet policy.
 
-- Option: a `bes.au/cap/canopy` capability value naming a default homepage (`home: "pm"`), granted to a policy group and resolved the same way admin is (ADM). Keeps the policy in the grant model Canopy already reads, and generalises if other groups want another default.
-- Option: Canopy configured with the name of a policy group (`group:pm`) whose members default to the PM view. Simpler to read, but ties Canopy to a group name in the policy.
+- Since it now grants a right, it's a role: `pm` set true in the `bes.au/cap/canopy` capability value, granted to a policy group (say `group:pm`) on `tag:server-canopy`, and resolved the same way admin is (ADM), so policy freshness and the outage rules carry over.
+- The default homepage follows from the role: a PM's default is the PM view.
+- An admin is not thereby a PM; the two are independent, as the allowlist and the policy are for admin.
+- Rejected: a `home: "pm"` value naming a homepage. It would set a default but couldn't carry the edit right, and there'd be two keys to keep in step.
+- Rejected: Canopy configured with a policy group name. It ties Canopy to how the policy names its groups.
 - Being named PM in charge on a group doesn't count: it's per group, and the default has to work for a PM before anyone fills in A.
 - bestool P4 relies on Tailscale's `whois` returning a peer's caps for a Tailscale Service. Canopy could read caps that way per request instead of resolving the policy file itself. That would simplify how admin is resolved too, and is a change of its own.
 
@@ -92,7 +98,9 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 - [x] Which parts are this card, and which become cards of their own? (see Scope)
 - [x] Tailnet first; G later.
 - [x] C dropped in favour of D.
-- [ ] A: can a PM edit their own groups' details, or only admins?
+- [x] A: PMs edit the PM details, on any group.
+- [ ] A: PMs raise to write like admins, or are PM edits exempt from safety modes?
+- [ ] Is there an allowlist for PMs as there is for admins, for a PM not yet in the policy group, or is the policy the only source?
 - [x] E is a subpage of the fleet view, with a per-person homepage choice.
-- [ ] F: capability value or a configured policy group name?
+- [x] F: a `pm` role in the Canopy capability.
 - [ ] Homepage: any page or a fixed list, and where is it set?
