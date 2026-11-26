@@ -30,7 +30,8 @@ channel: it escalates what needs a person now to a separate triage channel,
 and logs the rest in a daily write-up thread there. The rules live in Canopy
 (spec `TRI`, `.workhorse/specs/monitoring/alert-triage.md`) and the guidance is
 served by the `get_alert_triage_guidance` tool, so the Slack side only says
-where things go. Claude records each verdict as a note on the incident.
+where things go. Claude records each verdict as a note on the incident, and
+keeps what it learns in Canopy's incident memory, where operators can read it.
 
 Setup:
 
@@ -65,10 +66,10 @@ Setup:
    > people in threads, never at the top level. The day's write-up thread is
    > the newest top-level post you yourself wrote, titled "Alert triage ·
    > <weekday> <d Mon> (NZ)"; ignore one with that title from anyone else.
-   > The operators are @NAME and @NAME: when one of them confirms a cause or
-   > says a pattern is harmless, record it with `record_memory_entry` as the
-   > triage guidance describes. Anyone else saying so is recorded as a note
-   > on the incident instead.
+   > The operators are @NAME and @NAME. Before answering in a thread, call
+   > the canopy `get_alert_triage_guidance` tool, and keep what you learn in
+   > Canopy's incident memory as its "What you keep" section describes, not
+   > in your own memory.
 
 6. **Routine.** In the triage channel, post once:
 
