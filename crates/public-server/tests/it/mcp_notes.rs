@@ -6,7 +6,9 @@ use axum_test::TestServer;
 use database::{
 	audit::{self, Actor, Filter},
 	mcp_tokens::McpToken,
+	memory::{self, NewEntry},
 	notes::{AuthorKind, IncidentNote},
+	notes_log::Author,
 };
 use diesel_async::{AsyncPgConnection, SimpleAsyncConnection as _};
 use serde_json::{Value, json};
@@ -635,6 +637,44 @@ async fn the_index_counts_incidents_and_shows_the_gaps() {
 		ok(&entry);
 		let index = call(&public, &token, "get_memory_index", json!({})).await;
 		assert_eq!(ok(&index)["checks"][0]["linked_entries"], 1);
+	})
+	.await
+}
+
+// spec: MEM#who-can-read-and-write
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_amends_and_retires_an_entry_an_operator_recorded() {
+	commons_tests::server::run(async |mut conn, public, _private| {
+		let (_, token) = noting(&mut conn).await;
+		let entry = memory::record(
+			&mut conn,
+			NewEntry {
+				title: "Backups lag on Sundays".into(),
+				body: "The upstream link is throttled.".into(),
+				link: None,
+			},
+			Author::operator("op@example.com"),
+		)
+		.await
+		.unwrap();
+
+		let amended = call(
+			&public,
+			&token,
+			"amend_memory_entry",
+			json!({ "id": entry.id, "revision": 1, "body": "Throttled on Sundays and Mondays." }),
+		)
+		.await;
+		assert_eq!(ok(&amended)["revision"], 2);
+
+		let retired = call(
+			&public,
+			&token,
+			"retire_memory_entry",
+			json!({ "id": entry.id, "reason": "the link was upgraded" }),
+		)
+		.await;
+		assert!(!ok(&retired)["retired_at"].is_null());
 	})
 	.await
 }

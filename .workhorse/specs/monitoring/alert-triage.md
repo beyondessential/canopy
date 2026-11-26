@@ -4,7 +4,7 @@ id: TRI
 
 # Alert triage
 
-Applies to how an agent triages the incident notifications Canopy posts to Slack: the guidance Canopy serves for it, how a verdict is recorded on the incident, and the daily write-up.
+Applies to how an agent triages the incident notifications Canopy posts to Slack: the guidance Canopy serves for it, how a verdict is recorded on the incident, what the agent keeps in the incident memory, and the daily write-up.
 
 ## How an alert reaches triage
 
@@ -18,7 +18,7 @@ The alerts channel is public, so the agent triages only the notifications Canopy
 
 ## What triage reads
 
-The agent triages through the incident's own record: the incident, its live issues with their results and whether each escalates, and its notes; each failing check's documentation and stability record; and the [incident memory](incident-memory.md) linked to a failing check, the incident's group, or the incident.
+The agent triages through the incident's own record: the incident, its live issues with their results and whether each escalates, and its notes; each failing check's documentation and stability record; and the [incident memory](incident-memory.md) linked to a failing check, the incident's group, or the incident, with the entries that apply to the fleet as a whole.
 Where that does not explain a failure, the agent reads further about the incident's own group, machines and applications before deciding.
 It compares an incident only with others in the same group and environment.
 
@@ -32,7 +32,7 @@ The guidance is what the agent follows, and holds the whole of how it weighs an 
 
 The guidance sets out what bears on the decision rather than fixed rules: the environment's rank, the incident's worst live result and whether a failing check escalates, what has changed since the incident was last triaged, and whether the documentation, the stability record, the memory and the notes explain the failure.
 
-An alert for an incident that has closed or been resolved is logged, and reported in the incident's escalation thread when it has one.
+An alert for an incident that has closed or been resolved is logged, and reported in the incident's escalation thread when it has one, after the agent has [reviewed the incident](#reviewing-a-closed-incident) for what to keep.
 A maintenance notification links no incident and is logged in the write-up alone.
 
 > [!NOTE]
@@ -57,9 +57,39 @@ Other news on an escalated incident, such as a reminder that changes nothing or 
 Every alert, escalated or logged, adds one reply to the day's write-up thread, an escalated alert's reply linking its escalation.
 The agent replies under the notification itself with one line saying whether it was escalated or logged and linking where.
 
-When an operator confirms a cause or says that a pattern is harmless, in an escalation's thread or the write-up thread, the agent records it in the incident memory, linked to the check, group, or incident it concerns.
-A memory entry it records describes the pattern and how to recognise it, in the agent's own words, and names who said it and when.
-The channels are public and a memory entry quiets later alerts, so the agent records one only on the word of someone its configuration names as an operator; the same from anyone else is recorded as a note on the incident, naming who said it.
+## What triage keeps
+
+The agent keeps what it learns in the [incident memory](incident-memory.md), in whichever session it learns it: triaging an alert, answering in a thread, or writing the daily write-up.
+What it keeps is what a later triage would otherwise work out again: a cause, a harmless pattern, a reading that misleads, how one failure was told apart from another, where a site's logs or a fix are kept, and who answered for a site or check.
+A reading that misleads covers a check that misreads at a known time, such as during a site's backup window, and a query whose answer misleads, such as one that leaves out what a reader would expect it to cover.
+
+An entry is linked to the narrowest thing it concerns: a check, a group, or one incident.
+An entry that concerns how triage reads the fleet in general carries no link, and applies to the fleet as a whole.
+Before recording an entry, the agent looks for one that already says it, and amends that one instead.
+
+An entry describes what was learned and how to recognise it, in the agent's own words rather than a check's raw output.
+It names where its content came from: the incident the agent found it on, or who said it and when.
+
+The agent amends or retires any entry its own reading contradicts, whoever recorded it, saying why.
+
+> [!NOTE]
+> The incident memory is the agent's working memory, kept in Canopy rather than in the agent's own memory, so operators can read it, each entry sits beside what it concerns, and it outlasts any one conversation. An agent correcting an operator's entry loses nothing, since an entry's history keeps every version.
+
+### What needs an operator's word
+
+An entry saying a pattern is harmless lets a later triage log what it would otherwise escalate, so the agent records one only on an operator's word: a person its configuration names as an operator, saying so in the triage channel, or a note an operator wrote on the incident.
+The same from anyone else is recorded as a note on the incident, naming who said it.
+
+> [!NOTE]
+> The channels are public and their text is free, so a direction planted in one could otherwise quiet a real outage. An entry of any other kind leaves the decision with the next triage, which weighs it as the claim it is.
+
+### Reviewing a closed incident
+
+A published incident [notifies again when it closes](incidents.md#notification), so every incident triage has seen comes back to the agent once its story is complete.
+On that alert, the agent reads the incident's notes, its escalation thread when it has one, and its reply in the write-up thread with the replies under it, and keeps in the incident memory what they hold that the memory lacks.
+Its report of the close names the entries it recorded or amended, or says there was nothing to keep.
+
+A remark made about the incident after it has closed is kept in the same way when it reaches the agent.
 
 ## The daily write-up
 
