@@ -74,7 +74,7 @@ Each person picks what `/` opens. Someone who hasn't picked gets the `home` thei
 
 - Canopy keeps no per-user preferences today (it caches display names in `tailscale_users`, and sessions hold only safety mode), so this is new storage keyed by login.
 - Any page, since the policy default (F) is a path too.
-- Where it's set: leading option is a "make this my homepage" toggle in each page's header, shown filled on the page that is your homepage. Fallback, if the toggle doesn't hold up in mockups: a per-person page under Settings. (There's no per-person menu in the shell today: the sidebar has the sections, Settings holds Canopy-wide settings, and the safety mode band is the only per-session control.)
+- Where it's set: a home toggle in the top-right corner of the sidebar, beside the Canopy mark, on every page. Faint by default, stronger on the page that is your homepage (filled icon), full on hover. One place on every page, so it doesn't shift with each page's own header or action row. Clicking it on any other page makes that page your homepage.
 
 ### F. Who counts as a PM
 
@@ -119,11 +119,10 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 
 In `.workhorse/design/mockups/v6/`:
 
-- `pm-view.html`: the PM view at `/fleet/pm`, a "Projects" page under Fleet. Your groups first with a sky accent, then everyone else's; search; each group's PM details and its production Tamanu with public and tailnet links. Homepage toggle on.
+- `pm-view.html`: the PM view at `/fleet/pm`, a "Projects" page under Fleet. Your groups first with a sky accent, then everyone else's; search; each group's PM details and its production Tamanu with public and tailnet links. Sidebar home toggle in its "your homepage" state.
 - `pm-details-edit.html`: group detail gains a Project panel; a PM in write mode edits it in a dialog. The rest of the group stays admin-only, so a PM sees no Add machine, Edit or Archive.
-- `homepage-toggle.html`: the toggle off, at the right of the Groups list's top row (pages here have no heading, so the toggle sits in the top action row).
-- `homepage-settings.html`: the fallback, a Homepage page under a new "You" heading in Settings.
-- `permissions.html`: Settings > Access > Permissions, replacing Admins. Levels against tailnet grant and email list, with the grant explained.
+- `homepage-toggle.html`: the Groups list with the sidebar home toggle hovered, showing its tooltip.
+- `permissions.html`: Settings > Access > Permissions, replacing Admins. Levels against tailnet grant and email list, with the grant explained. Home toggle at rest.
 
 ## Open questions
 
@@ -141,4 +140,6 @@ In `.workhorse/design/mockups/v6/`:
 - [x] H: levels are a ladder, admin > support > PM > all.
 - [x] F: two grants naming different `home`s: decided (see F).
 - [x] F: keep reading the policy file until the operator's ingress can forward caps.
-- [x] Homepage: any page; set by a header toggle (lead) or a Settings page (fallback), to settle in mockups.
+- [x] Homepage: any page, set by a home toggle in the sidebar's top-right corner.
+- [ ] 12. Sidebar label for the PM view ("Projects" in the mockups).
+- [ ] 14. How someone goes back to the policy default once they've picked a homepage.
