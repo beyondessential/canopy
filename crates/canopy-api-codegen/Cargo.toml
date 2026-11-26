@@ -18,4 +18,4 @@ prettyplease = "0.3.0"
 schemars = "0.8.22"
 serde_json = "1.0.150"
 syn = { version = "3.0.3", features = ["full", "parsing", "printing"] }
-typify = "0.7.0"
+typify = "0.8.0"
