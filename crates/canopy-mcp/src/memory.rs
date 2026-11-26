@@ -306,7 +306,8 @@ impl CanopyMcp {
 		),
 		description = "Record an incident memory entry: what a later investigator would otherwise \
 		               rediscover, such as a recurring cause, how one check's failure was told \
-		               apart from another, a standing quirk of a site, or where a fix is kept. \
+		               apart from another, a standing quirk of a site, a reading that misleads, \
+		               where a fix is kept, or who answered for a site or check. \
 		               Not a log of what happened during one incident, which is that incident's \
 		               own notes (`add_incident_note`). Check `find_memory` first and amend an \
 		               entry that already says it rather than adding another. `title` is at most \
