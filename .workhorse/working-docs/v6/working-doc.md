@@ -10,6 +10,16 @@ A view of Canopy for project managers, giving each group with a production envir
 
 - The card's "deployment" is a group. The PM view covers production environments only; clone, demo, test and dev are left out.
 - A group has at most one production environment (one environment per rank), so "a deployment" and "a group's production environment" are one-to-one here.
+- Tailnet only for now. Public access (G) comes later.
+- The PM view is a subpage of the fleet view, beside the groups list, archived and figures tabs.
+- Each person chooses their homepage: what `/` opens, which today is always the status page. Someone who hasn't chosen gets a default, which is the PM view for people in certain groups (F) and the status page for everyone else.
+
+## Scope
+
+- This card: A, B, E, F, and the homepage choice.
+- D (token sign-in to Tamanu) becomes its own cards, one here and one in Tamanu.
+- C (credentials) is dropped in favour of D, with a root password kept in Bitwarden for rare use.
+- G (public internet access) becomes a later card.
 
 ## Parts
 
@@ -49,17 +59,26 @@ Canopy mints a short-lived token for the signed-in PM and links to `https://<tam
 
 ### E. The PM view
 
-The list of groups with production environments, the PM's own groups in a section at the top and highlighted, a search box across groups, and each group's details from A and B (and D's sign-in links).
+The list of groups with production environments, the PM's own groups in a section at the top and highlighted, a search box across groups, and each group's details from A and B (and D's sign-in links once D lands).
 
-- Whether this is a separate page, a mode of the existing fleet view, or a per-user preference that changes the landing page is open.
-- Canopy keeps no per-user preferences today (it caches display names in `tailscale_users`, and sessions hold only safety mode), so a preference would be new storage keyed by login.
+- A tab of the fleet view (`/fleet/…`, beside `archived` and `figures`).
+- "My groups" are the groups naming the signed-in person as PM in charge, matched on their tailnet login.
+
+### Homepage choice
+
+Each person picks what `/` opens. Someone who hasn't picked gets the PM view if F says they're a PM, otherwise the status page.
+
+- Canopy keeps no per-user preferences today (it caches display names in `tailscale_users`, and sessions hold only safety mode), so this is new storage keyed by login.
+- Is the choice between any page, or a short fixed list (status, PM view, fleet, incidents…)?
+- Where it's set: a menu on the user's avatar, or a "make this my homepage" action on the page itself.
 
 ### F. Who counts as a PM
 
-Needed if the view defaults on for PMs, or if PMs get rights others don't.
+Decides the default homepage, from the person's groups in the tailnet policy.
 
-- Option: a `bes.au/cap/canopy` capability value (`pm: true`), resolved from the tailnet policy the same way admin is (ADM).
-- Option: anyone named as PM in charge on some group is a PM. No policy change; falls out of A.
+- Option: a `bes.au/cap/canopy` capability value naming a default homepage (`home: "pm"`), granted to a policy group and resolved the same way admin is (ADM). Keeps the policy in the grant model Canopy already reads, and generalises if other groups want another default.
+- Option: Canopy configured with the name of a policy group (`group:pm`) whose members default to the PM view. Simpler to read, but ties Canopy to a group name in the policy.
+- Being named PM in charge on a group doesn't count: it's per group, and the default has to work for a PM before anyone fills in A.
 - bestool P4 relies on Tailscale's `whois` returning a peer's caps for a Tailscale Service. Canopy could read caps that way per request instead of resolving the policy file itself. That would simplify how admin is resolved too, and is a change of its own.
 
 ### G. Public internet access
@@ -70,9 +89,10 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 
 ## Open questions
 
-- [ ] Which parts are this card, and which become cards of their own?
-- [ ] The card says "let's just start with testing": was that "start with Tailscale", i.e. leave G for later?
-- [ ] C: drop credentials in favour of D, or store some in Canopy meanwhile?
+- [x] Which parts are this card, and which become cards of their own? (see Scope)
+- [x] Tailnet first; G later.
+- [x] C dropped in favour of D.
 - [ ] A: can a PM edit their own groups' details, or only admins?
-- [ ] E: separate page, view mode, or per-user preference?
-- [ ] F: capability, implied by being named PM in charge, or both?
+- [x] E is a subpage of the fleet view, with a per-person homepage choice.
+- [ ] F: capability value or a configured policy group name?
+- [ ] Homepage: any page or a fixed list, and where is it set?
