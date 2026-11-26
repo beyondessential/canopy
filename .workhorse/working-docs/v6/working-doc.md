@@ -90,6 +90,7 @@ Sets the default homepage, and decides who may edit the PM details (A), from the
   - Today: it reads the whole policy file through the Tailscale API (needs the policy-read scope), resolves grant sources itself (groups, bare users, `autogroup:member`; other autogroups resolve to nobody), and refreshes on a timer. It can list everyone each level resolves to, which the permissions page (H) wants.
   - Per request from Tailscale: Serve (v1.92+) forwards the caller's caps in a `Tailscale-App-Capabilities` header when started with `--accept-app-caps`, and strips any incoming copy. Tailscale does the resolving, so every source form works and there's no refresh lag. But Canopy is published through the Kubernetes operator's ingress, which (as of upstream main, checked locally) doesn't expose that setting, and the header only describes the caller, so the page couldn't list who holds a level.
   - P4's `whois` with `svc_name` gives the same per-caller answer, but needs a tailscaled Canopy can query, which it doesn't have.
+- Decided: keep reading the policy file, extended to the level keys and `home`. Move to the header once the operator's ingress can forward caps.
 - Either way a cap arrives as a list with one value per matching grant, in no guaranteed order, so the rule for two different `home`s is needed whichever source is used.
 
 ### H. Access levels and the permissions page
@@ -136,5 +137,5 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 - [x] H: the support/admin line is the support card's to decide.
 - [x] H: levels are a ladder, admin > support > PM > all.
 - [ ] F: two grants naming different `home`s for one person.
-- [ ] F: keep reading the policy file, or move to per-request caps from Tailscale?
+- [x] F: keep reading the policy file until the operator's ingress can forward caps.
 - [x] Homepage: any page; set by a header toggle (lead) or a Settings page (fallback), to settle in mockups.
