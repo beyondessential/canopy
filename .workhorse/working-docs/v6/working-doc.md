@@ -102,6 +102,9 @@ The Admins settings page (today an email allowlist) becomes a permissions page. 
 - The email lists keep the admin allowlist's property: a control-plane outage never withdraws a level held through a list.
 - Editing the lists stays admin-only, and each change is audited, as admin allowlist changes are.
 - `home` (F) isn't a level: it's a default, and stays its own key.
+- Support is the day-to-day operator: they add and edit machines, applications and groups, and do most of what admins do today. Admin is support plus Canopy's own settings, such as MCP access, and some of those are admin-only to see as well as to change.
+- That splits today's single admin gate (every write handler takes `TailscaleAdmin`) into two grades, so every handler needs placing as support or admin, and the settings pages admins alone may see need a read gate, which Canopy doesn't have today (reads are open to all).
+- Who in the policy gets support rather than admin is a tailnet policy change alongside this.
 
 ### G. Public internet access
 
@@ -128,7 +131,8 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 - [x] E is a subpage of the fleet view, with a per-person homepage choice.
 - [x] F: default homepage from a `home` path in the Canopy capability (tailscale#55).
 - [x] F: the PM access level grants editing A (H).
-- [ ] H: what the support level grants.
+- [x] H: support grants fleet work (machines, applications, groups); admin adds Canopy's settings.
+- [ ] H: exactly where the support/admin line falls, for writes and for which settings pages are admin-only to read.
 - [ ] H: are levels nested (admin includes PM's rights, and so on) or independent?
 - [ ] F: two grants naming different `home`s for one person.
 - [ ] F: keep reading the policy file, or move to per-request caps from Tailscale?
