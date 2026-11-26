@@ -15,7 +15,8 @@ A check is named by its source and its presented name (see [CHK](checks.md), "Na
 An entry records who recorded it and when, who last amended it and when, and whether it is retired.
 A title is at most 512 characters and a body at most 16,384, and an entry over either is refused with the limit named.
 
-An entry is for what a later investigator would otherwise rediscover: a recurring cause, how a check's failure was told apart from another, a standing quirk of a site, where a fix is kept.
+An entry is for what a later investigator would otherwise rediscover: a recurring cause, how a check's failure was told apart from another, a standing quirk of a site, a reading that misleads, where a fix is kept, who answered for a site or check.
+The [alert triage](alert-triage.md#what-triage-keeps) agent keeps what it learns here.
 It is not a log of what happened during one incident, which is the incident's own timeline and notes (see [INC](incidents.md)).
 
 ## Changing entries
@@ -42,6 +43,10 @@ An entry's text is held in its history, and the audit entry names the entry and 
 Any tailnet user can read entries in the operator interface.
 Recording, amending, retiring, and restoring there are for administrators.
 Through the fleet query interface, an agent reads entries freely and writes them where its access token carries the notes grant.
+An agent that writes entries can amend, retire, and restore any entry, whoever recorded it.
+
+> [!NOTE]
+> Memory is the agents' store, which operators read and contribute to, so an agent keeps it correct whoever wrote what it corrects. An incident's notes are each a person's or an agent's own statement on the record, which is why an agent cannot edit an operator's note.
 
 ## The memory page
 

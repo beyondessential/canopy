@@ -14,9 +14,10 @@ Triage agents never write to incident memory. The guidance's only write path is 
 - **The operator gate covers only what quiets an alert.** An entry saying a pattern is harmless still needs an operator's word (a named operator in Slack, or an operator-authored note in Canopy), and still counts only where the check's stability record bears it out. Everything else is recorded on the agent's own evidence.
 - **The agent may amend and retire any entry**, operator-written ones included, when its evidence contradicts it. Memory exists for the agent; the entry's history keeps every change attributed and reversible. This is deliberately unlike notes, where an agent cannot edit an operator's note.
 
-## Touches
+## Build
 
-- `crates/canopy-mcp/src/alert_triage_guidance.md`: replace "Learning" with the record-as-you-learn rule, the close review step, the wider scope, fleet-wide reads, provenance and the operator gate.
-- Alert triage spec (TRI): the reading and reporting sections.
-- Incident memory spec (MEM): possibly a line on what agents keep there.
-- `plugins/canopy-mcp/README.md`: the triage-channel instructions lose their memory sentence (the operator list stays, for the harmless-pattern gate).
+- [x] Alert triage spec (TRI): fleet-wide reads, "What triage keeps" with the operator gate and the closed-incident review
+- [x] Incident memory spec (MEM): wider entry purpose, link to triage, an agent may change any entry
+- [ ] `crates/canopy-mcp/src/alert_triage_guidance.md`: read fleet-wide entries; replace "Learning" with what to keep, linking, provenance, amending any entry, the operator gate; add the closed-incident review to the order of work, with its line in the close report
+- [ ] `crates/canopy-mcp/src/memory.rs`: widen `record_memory_entry`'s description to match MEM's list of what an entry is for
+- [ ] `plugins/canopy-mcp/README.md`: the triage-channel instructions keep the operator list for the harmless-pattern gate, and tell Claude to keep what it learns in Canopy memory rather than its own
