@@ -12,7 +12,7 @@ A view of Canopy for project managers, giving each group with a production envir
 - A group has at most one production environment (one environment per rank), so "a deployment" and "a group's production environment" are one-to-one here.
 - Tailnet only for now. Public access (G) comes later.
 - The PM view is a subpage of the fleet view, beside the groups list, archived and figures tabs.
-- Each person chooses their homepage: what `/` opens, which today is always the status page. Someone who hasn't chosen gets a default, which is the PM view for people in certain groups (F) and the status page for everyone else.
+- Each person chooses their homepage: what `/` opens, which today is always the status page. Someone who hasn't chosen gets a default, which is the PM view for PMs (F) and the status page for everyone else.
 
 ## Scope
 
@@ -79,7 +79,7 @@ Each person picks what `/` opens. Someone who hasn't picked gets the PM view if 
 
 Decides who may edit the PM details (A) and whose homepage defaults to the PM view, from the tailnet policy.
 
-- Since it now grants a right, it's a role: `pm` set true in the `bes.au/cap/canopy` capability value, granted to a policy group (say `group:pm`) on `tag:server-canopy`, and resolved the same way admin is (ADM), so policy freshness and the outage rules carry over.
+- Decided: a role, added to the app capability grants in the tailnet policy. `pm` set true in the `bes.au/cap/canopy` capability value, granted to a policy group (say `group:pm`) on `tag:server-canopy`, and resolved the same way admin is (ADM), so policy freshness and the outage rules carry over.
 - The default homepage follows from the role: a PM's default is the PM view.
 - An admin is not thereby a PM; the two are independent, as the allowlist and the policy are for admin.
 - Rejected: a `home: "pm"` value naming a homepage. It would set a default but couldn't carry the edit right, and there'd be two keys to keep in step.
