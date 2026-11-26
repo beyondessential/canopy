@@ -12,7 +12,7 @@ A view of Canopy for project managers, giving each group with a production envir
 - A group has at most one production environment (one environment per rank), so "a deployment" and "a group's production environment" are one-to-one here.
 - Tailnet only for now. Public access (G) comes later.
 - The PM view is a subpage of the fleet view, beside the groups list, archived and figures tabs.
-- Each person chooses their homepage: what `/` opens, which today is always the status page. Someone who hasn't chosen gets a default, which is the PM view for PMs (F) and the status page for everyone else.
+- Each person chooses their homepage: what `/` opens, which today is always the status page. Someone who hasn't chosen gets a default, which is the page their policy grants name (F), the PM view for PMs and the status page for everyone else.
 
 ## Scope
 
@@ -64,12 +64,12 @@ Canopy mints a short-lived token for the signed-in PM and links to `https://<tam
 
 The list of groups with production environments, the PM's own groups in a section at the top and highlighted, a search box across groups, and each group's details from A and B (and D's sign-in links once D lands).
 
-- A tab of the fleet view (`/fleet/…`, beside `archived` and `figures`).
+- A tab of the fleet view at `/fleet/pm`, beside `archived` and `figures`.
 - "My groups" are the groups naming the signed-in person as PM in charge, matched on their tailnet login.
 
 ### Homepage choice
 
-Each person picks what `/` opens. Someone who hasn't picked gets the PM view if F says they're a PM, otherwise the status page.
+Each person picks what `/` opens. Someone who hasn't picked gets the `home` their policy grants name (F), otherwise the status page.
 
 - Canopy keeps no per-user preferences today (it caches display names in `tailscale_users`, and sessions hold only safety mode), so this is new storage keyed by login.
 - Is the choice between any page, or a short fixed list (status, PM view, fleet, incidents…)?
@@ -77,13 +77,14 @@ Each person picks what `/` opens. Someone who hasn't picked gets the PM view if 
 
 ### F. Who counts as a PM
 
-Decides who may edit the PM details (A) and whose homepage defaults to the PM view, from the tailnet policy.
+Sets the default homepage, and decides who may edit the PM details (A), from the tailnet policy's app capability grants.
 
-- Decided: a role, added to the app capability grants in the tailnet policy. `pm` set true in the `bes.au/cap/canopy` capability value, granted to a policy group (say `group:pm`) on `tag:server-canopy`, and resolved the same way admin is (ADM), so policy freshness and the outage rules carry over.
-- The default homepage follows from the role: a PM's default is the PM view.
-- An admin is not thereby a PM; the two are independent, as the allowlist and the policy are for admin.
-- Rejected: a `home: "pm"` value naming a homepage. It would set a default but couldn't carry the edit right, and there'd be two keys to keep in step.
-- Rejected: Canopy configured with a policy group name. It ties Canopy to how the policy names its groups.
+- Proposed grant (beyondessential/tailscale#55): the Tamanu PM team gets `home: "/fleet/pm"` in the `bes.au/cap/canopy` value on `tag:server-canopy`, beside on-call's `admin: true` grant. Resolved the same way admin is (ADM), so policy freshness and the outage rules carry over.
+- `home` is a path, not a role: the policy can give any team any default page. So the PM view lives at `/fleet/pm`.
+- Canopy takes `home` only as a path within Canopy (starts with a single `/`), so a policy value can never send someone off-site.
+- `home` doesn't carry the right to edit A. That needs its own key, e.g. `pm: true` in the same grant.
+- One person can get several cap values from several grants, so two grants can name different `home`s.
+- An admin is not thereby a PM; the two are independent.
 - Being named PM in charge on a group doesn't count: it's per group, and the default has to work for a PM before anyone fills in A.
 - bestool P4 relies on Tailscale's `whois` returning a peer's caps for a Tailscale Service. Canopy could read caps that way per request instead of resolving the policy file itself. That would simplify how admin is resolved too, and is a change of its own.
 
@@ -102,5 +103,7 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 - [ ] A: PMs raise to write like admins, or are PM edits exempt from safety modes?
 - [ ] Is there an allowlist for PMs as there is for admins, for a PM not yet in the policy group, or is the policy the only source?
 - [x] E is a subpage of the fleet view, with a per-person homepage choice.
-- [x] F: a `pm` role in the Canopy capability.
+- [x] F: default homepage from a `home` path in the Canopy capability (tailscale#55).
+- [ ] F: what grants the right to edit A: a `pm: true` key beside `home`?
+- [ ] F: two grants naming different `home`s for one person.
 - [ ] Homepage: any page or a fixed list, and where is it set?
