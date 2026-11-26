@@ -20,6 +20,7 @@ A view of Canopy for project managers, giving each group with a production envir
 - D (token sign-in to Tamanu) becomes its own cards, one here and one in Tamanu.
 - C (credentials) is dropped in favour of D, with a root password kept in Bitwarden for rare use.
 - G (public internet access) becomes a later card.
+- The support level becomes its own card, which adds it to the ladder between admin and PM and decides where the support/admin line falls. This card's permissions page carries admin, PM and all, laid out so a level slots in.
 
 ## Parts
 
@@ -132,7 +133,7 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 - [x] F: default homepage from a `home` path in the Canopy capability (tailscale#55).
 - [x] F: the PM access level grants editing A (H).
 - [x] H: support grants fleet work (machines, applications, groups); admin adds Canopy's settings.
-- [ ] H: exactly where the support/admin line falls, for writes and for which settings pages are admin-only to read.
+- [x] H: the support/admin line is the support card's to decide.
 - [x] H: levels are a ladder, admin > support > PM > all.
 - [ ] F: two grants naming different `home`s for one person.
 - [ ] F: keep reading the policy file, or move to per-request caps from Tailscale?
