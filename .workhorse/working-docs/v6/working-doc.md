@@ -73,7 +73,7 @@ Each person picks what `/` opens. Someone who hasn't picked gets the PM view if 
 
 - Canopy keeps no per-user preferences today (it caches display names in `tailscale_users`, and sessions hold only safety mode), so this is new storage keyed by login.
 - Is the choice between any page, or a short fixed list (status, PM view, fleet, incidents…)?
-- Where it's set: a menu on the user's avatar, or a "make this my homepage" action on the page itself.
+- Where it's set: there's no per-person menu in the shell today (the sidebar has the sections, Settings holds Canopy-wide settings, and the safety mode band is the only per-session control). Options: a home toggle in the header of each page on the list; a new per-person page under Settings; a homepage picker beside the safety mode band.
 
 ### F. Who counts as a PM
 
