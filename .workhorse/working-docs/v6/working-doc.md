@@ -72,8 +72,8 @@ The list of groups with production environments, the PM's own groups in a sectio
 Each person picks what `/` opens. Someone who hasn't picked gets the `home` their policy grants name (F), otherwise the status page.
 
 - Canopy keeps no per-user preferences today (it caches display names in `tailscale_users`, and sessions hold only safety mode), so this is new storage keyed by login.
-- Is the choice between any page, or a short fixed list (status, PM view, fleet, incidents…)?
-- Where it's set: there's no per-person menu in the shell today (the sidebar has the sections, Settings holds Canopy-wide settings, and the safety mode band is the only per-session control). Options: a home toggle in the header of each page on the list; a new per-person page under Settings; a homepage picker beside the safety mode band.
+- Any page, since the policy default (F) is a path too.
+- Where it's set: leading option is a "make this my homepage" toggle in each page's header, shown filled on the page that is your homepage. Fallback, if the toggle doesn't hold up in mockups: a per-person page under Settings. (There's no per-person menu in the shell today: the sidebar has the sections, Settings holds Canopy-wide settings, and the safety mode band is the only per-session control.)
 
 ### F. Who counts as a PM
 
@@ -94,6 +94,13 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 
 - The private server today trusts Tailscale's identity headers and rejects anything else on its UI routes, so this is a second front door with its own identity, and everything behind it has to decide what a non-tailnet person may see.
 
+## Mockups to make
+
+- The PM view at `/fleet/pm`: my groups at the top, highlighted; search; each group's PM details and production access links.
+- Editing the PM details as a PM.
+- The homepage toggle in a page header, on and off (lead).
+- A per-person homepage page under Settings (fallback, for comparison).
+
 ## Open questions
 
 - [x] Which parts are this card, and which become cards of their own? (see Scope)
@@ -106,4 +113,4 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 - [x] F: default homepage from a `home` path in the Canopy capability (tailscale#55).
 - [ ] F: what grants the right to edit A: a `pm: true` key beside `home`?
 - [ ] F: two grants naming different `home`s for one person.
-- [ ] Homepage: any page or a fixed list, and where is it set?
+- [x] Homepage: any page; set by a header toggle (lead) or a Settings page (fallback), to settle in mockups.
