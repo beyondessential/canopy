@@ -9,7 +9,7 @@ use axum::{
 	body::{Body, Bytes},
 	extract::{Path, State},
 	http::{StatusCode, header},
-	response::IntoResponse,
+	response::{IntoResponse, Redirect},
 	routing::{Router, get},
 };
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
@@ -64,6 +64,18 @@ async fn latest_matching_ready(
 	conn: &mut AsyncPgConnection,
 	range: node_semver::Range,
 ) -> Result<Version> {
+	ready_matching(conn, range)
+		.await?
+		.into_iter()
+		.next()
+		.ok_or(AppError::NoMatchingVersions)
+}
+
+/// Every *ready* version that satisfies `range`, newest first.
+async fn ready_matching(
+	conn: &mut AsyncPgConnection,
+	range: node_semver::Range,
+) -> Result<Vec<Version>> {
 	use database::schema::versions::*;
 
 	let floor = range.min_version().ok_or(AppError::UnusableRange)?;
@@ -82,11 +94,11 @@ async fn latest_matching_ready(
 	let ids: Vec<_> = candidates.iter().map(|v| v.id).collect();
 	let affected = VersionKnownIssue::affected_versions(conn, &ids).await?;
 
-	candidates
+	Ok(candidates
 		.into_iter()
 		.filter(|v| !affected.contains(&v.id))
-		.find(|v| range.satisfies(&v.as_semver()))
-		.ok_or(AppError::NoMatchingVersions)
+		.filter(|v| range.satisfies(&v.as_semver()))
+		.collect())
 }
 
 /// The version a read names.
@@ -122,10 +134,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
 pub fn pages() -> Router<AppState> {
 	// Streaming download proxy doesn't have a JSON wire shape; mount as a
 	// plain route so it stays out of the OpenAPI spec.
-	let pages: Router<AppState> = Router::new().route(
-		"/{version}/artifacts/{artifact_id}/download",
-		get(download_artifact),
-	);
+	let pages: Router<AppState> = Router::new()
+		.route(
+			"/{version}/artifacts/{artifact_id}/download",
+			get(download_artifact),
+		)
+		.route("/{version}/mobile/package", get(mobile_package));
 
 	#[cfg(feature = "ui")]
 	let pages = pages
@@ -602,19 +616,66 @@ async fn view_mobile_install(
 	headers: axum::http::HeaderMap,
 ) -> Result<Html<String>> {
 	let mut db = db.get().await?;
-	let version = VersionRange::from_str(&version)?;
-	let version = latest_matching_ready(&mut db, version.0).await?;
-	let artifacts = offered_artifacts(&mut db, &version, Scope::Unscoped, &headers)
-		.await?
-		.into_iter()
-		.filter(|a| a.artifact_type == "mobile")
-		.map(ArtifactWithQR::from)
-		.collect::<Vec<_>>();
+	let candidates = ready_matching(&mut db, VersionRange::from_str(&version)?.0).await?;
+	if candidates.is_empty() {
+		return Err(AppError::NoMatchingVersions);
+	}
+
+	// A release that changed only the servers has no mobile build, so the page
+	// offers the newest ready version that has one, as the package address does.
+	let mut shown = None;
+	for candidate in candidates {
+		let artifacts = offered_artifacts(&mut db, &candidate, Scope::Unscoped, &headers)
+			.await?
+			.into_iter()
+			.filter(|a| a.artifact_type == "mobile")
+			.map(ArtifactWithQR::from)
+			.collect::<Vec<_>>();
+		let has_build = !artifacts.is_empty();
+		if shown.is_none() || has_build {
+			shown = Some((candidate, artifacts));
+		}
+		if has_build {
+			break;
+		}
+	}
+	let (version, artifacts) = shown.expect("there is at least one candidate");
 
 	let mut context = Context::new();
 	context.insert("version", &version);
 	context.insert("artifacts", &artifacts);
 	Ok(Html(tera.render("mobile", &context)?))
+}
+
+/// Redirect to the Android package of an exact version.
+///
+/// This is the address central hands an out-of-date Tamanu mobile app to
+/// update itself from, so it is answered for GET and HEAD alike (axum answers
+/// HEAD from the GET handler) and points at the file's own host, which serves
+/// the length, byte ranges, and HTTPS the app's download relies on. Central
+/// names the exact release its devices must run, so a range is refused, and a
+/// version with no package is a 404 rather than another version's package:
+/// the app installs what it is given.
+async fn mobile_package(
+	Path(version): Path<String>,
+	State(db): State<Db>,
+	headers: axum::http::HeaderMap,
+) -> Result<Redirect> {
+	if node_semver::Version::parse(&version).is_err() {
+		return Err(AppError::BadRequest(
+			"The mobile package is served for an exact version only".into(),
+		));
+	}
+
+	let mut db = db.get().await?;
+	// Answered for itself, known issue or not: devices cannot sync until they run it.
+	let version = version_named(&mut db, &version).await?;
+	let package = offered_artifacts(&mut db, &version, Scope::Unscoped, &headers)
+		.await?
+		.into_iter()
+		.find(|a| a.artifact_type == "mobile" && a.platform == "android")
+		.ok_or(AppError::ArtifactNotFound)?;
+	Ok(Redirect::temporary(&package.download_url))
 }
 
 /// Check for available updates from a given version.
