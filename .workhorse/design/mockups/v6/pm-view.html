@@ -1,0 +1,171 @@
+<!-- spec: none yet; see .workhorse/working-docs/v6/working-doc.md -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Projects, for a PM with two groups</title>
+<style>
+* { box-sizing: border-box; }
+html { font-size: 16px; }
+body { margin: 0; font-family: "Roboto", "Helvetica", "Arial", sans-serif; font-size: 1rem; line-height: 1.5; letter-spacing: 0.00938em; color: rgba(0,0,0,0.87); background: #fff; }
+a { color: inherit; }
+.shell { display: flex; min-height: 100vh; }
+.sidebar { width: 240px; flex-shrink: 0; background: #f5f5f5; /* grey[100], the app bar's chrome */ border-right: 1px solid rgba(0,0,0,0.12); display: flex; flex-direction: column; height: 100vh; position: sticky; top: 0; }
+.brand { padding: 12px 24px; display: flex; align-items: center; gap: 8px; color: #388e3c; /* primary, leaf */ text-decoration: none; }
+.brand .mark { width: 24px; height: 24px; border-radius: 50%; border: 3px solid #388e3c; position: relative; }
+.brand .mark::before, .brand .mark::after { content: ""; position: absolute; background: #32669a; }
+.brand .mark::before { left: 7px; top: 2px; width: 4px; height: 14px; }
+.brand .mark::after { left: 2px; top: 7px; width: 14px; height: 4px; }
+.brand span { font-size: 1.25rem; font-weight: 500; line-height: 1.6; letter-spacing: 0.0075em; }
+nav.main { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; }
+nav.main ul { list-style: none; margin: 0; padding: 0; }
+.section { display: flex; align-items: center; border-radius: 4px; padding: 6px 16px; color: rgba(0,0,0,0.6); font-weight: 500; font-size: 1rem; text-decoration: none; }
+.section:hover { background: rgba(0,0,0,0.04); }
+.section.current { color: #32669a; /* secondary, sky */ }
+.section .chev { margin-left: auto; width: 20px; height: 20px; color: rgba(0,0,0,0.54); }
+.count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: #d32f2f; color: #fff; font-size: 0.75rem; line-height: 20px; text-align: center; }
+.count.warning { background: #ed6c02; }
+.count + .chev { margin-left: 8px; }
+.pages { padding-left: 12px; margin-top: 2px; margin-bottom: 8px; }
+.pages h3 { display: block; margin: 0; padding: 4px 16px 2px; font-size: 0.6875rem; font-weight: 500; line-height: 1.66; letter-spacing: 0.08333em; text-transform: uppercase; color: rgba(0,0,0,0.6); }
+.pages h3.later { padding-top: 12px; }
+.page { display: block; border-radius: 4px; padding: 4px 16px; margin-top: 2px; font-size: 1rem; text-decoration: none; color: rgba(0,0,0,0.87); }
+.page:hover { background: rgba(0,0,0,0.04); }
+.page.selected { background: rgba(56,142,60,0.08); color: #388e3c; font-weight: 500; }
+.page.new { position: relative; }
+.ext { margin-top: 8px; }
+.ext a { display: flex; align-items: center; gap: 4px; }
+.ext svg { width: 1em; height: 1em; }
+.band { min-height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 16px 0 24px; border-top: 1px solid rgba(0,0,0,0.12); color: rgba(0,0,0,0.6); font-size: 0.875rem; font-weight: 500; line-height: 1.75; letter-spacing: 0.02857em; }
+.band .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.band .name { flex: 1; }
+.band svg { width: 20px; height: 20px; }
+.band.write { border-top-color: #ed6c02; color: #fff; background-color: #ed6c02; /* warning */ background-image: repeating-linear-gradient(135deg, rgba(255,152,0,0.5), rgba(255,152,0,0.5) 6px, rgba(255,152,0,0) 6px, rgba(255,152,0,0) 12px); }
+.band .left { font-variant-numeric: tabular-nums; opacity: 0.75; }
+main { flex: 1; min-width: 0; }
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+.stack { display: flex; flex-direction: column; }
+.gap1 { gap: 8px; } .gap2 { gap: 16px; } .gap3 { gap: 24px; }
+.row { display: flex; align-items: center; }
+h1.h4 { margin: 0; font-size: 2.125rem; font-weight: 400; line-height: 1.235; letter-spacing: 0.00735em; }
+h1.h5, h2.h5 { margin: 0 0 0.35em; font-size: 1.5rem; font-weight: 400; line-height: 1.334; }
+h2.h6 { margin: 0 0 0.35em; font-size: 1.25rem; font-weight: 500; line-height: 1.6; letter-spacing: 0.0075em; }
+.overline { margin: 0; font-size: 0.75rem; font-weight: 400; line-height: 2.66; letter-spacing: 0.08333em; text-transform: uppercase; color: rgba(0,0,0,0.6); }
+.body2 { font-size: 0.875rem; line-height: 1.43; letter-spacing: 0.01071em; }
+.secondary { color: rgba(0,0,0,0.6); }
+.caption { font-size: 0.75rem; line-height: 1.66; letter-spacing: 0.03333em; color: rgba(0,0,0,0.6); }
+.paper { border: 1px solid rgba(0,0,0,0.12); border-radius: 4px; background: #fff; }
+.p2 { padding: 16px; } .p3 { padding: 24px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; font-family: inherit; font-size: 0.875rem; font-weight: 500; line-height: 1.75; letter-spacing: 0.02857em; text-transform: uppercase; border-radius: 4px; padding: 5px 15px; border: 1px solid rgba(56,142,60,0.5); color: #388e3c; background: transparent; cursor: pointer; white-space: nowrap; }
+.btn.contained { padding: 6px 16px; border: 0; background: #388e3c; color: #fff; box-shadow: 0 3px 1px -2px rgba(0,0,0,0.2), 0 2px 2px 0 rgba(0,0,0,0.14), 0 1px 5px 0 rgba(0,0,0,0.12); }
+.btn.text { border: 0; padding: 6px 8px; }
+.btn.write { border-color: #ed6c02; color: #ed6c02; }
+.btn.contained.write { background: #ed6c02; color: #fff; }
+.btn svg { width: 20px; height: 20px; margin-left: -4px; }
+.iconbtn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; border: 0; background: transparent; color: rgba(0,0,0,0.54); cursor: pointer; padding: 8px; }
+.iconbtn:hover { background: rgba(0,0,0,0.04); }
+.iconbtn.small { width: 34px; height: 34px; padding: 5px; }
+.iconbtn svg { width: 24px; height: 24px; }
+.iconbtn.small svg { width: 20px; height: 20px; }
+.iconbtn.on { color: #388e3c; }
+.chip { display: inline-flex; align-items: center; height: 24px; padding: 0 7px; border-radius: 16px; border: 1px solid #bdbdbd; font-size: 0.8125rem; color: rgba(0,0,0,0.87); white-space: nowrap; }
+.chip.filled { border-color: transparent; background: rgba(0,0,0,0.08); }
+.chip .x { width: 16px; height: 16px; margin: 0 -3px 0 5px; color: rgba(0,0,0,0.26); }
+.link { color: #388e3c; text-decoration: none; }
+.link:hover { text-decoration: underline; }
+.namelink { color: rgba(0,0,0,0.87); text-decoration: none; font-weight: 500; }
+.namelink:hover { text-decoration: underline; }
+.field { position: relative; }
+.field input, .field textarea, .field .select { width: 100%; font: inherit; font-size: 1rem; letter-spacing: 0.00938em; color: rgba(0,0,0,0.87); border: 1px solid rgba(0,0,0,0.23); border-radius: 4px; padding: 16.5px 14px; background: transparent; }
+.field.small input, .field.small .select { padding: 8.5px 14px; }
+.field label { position: absolute; left: 9px; top: -9px; padding: 0 5px; background: #fff; font-size: 0.75rem; line-height: 1.4375em; color: rgba(0,0,0,0.6); }
+.field .helper { margin: 3px 14px 0; font-size: 0.75rem; line-height: 1.66; letter-spacing: 0.03333em; color: rgba(0,0,0,0.6); }
+.field.adorn input { padding-left: 40px; }
+.field .adorn-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; color: rgba(0,0,0,0.54); }
+.field .select { display: flex; align-items: center; justify-content: space-between; }
+.field .select svg { width: 24px; height: 24px; color: rgba(0,0,0,0.54); margin-right: -6px; }
+table.t { width: 100%; border-collapse: collapse; font-size: 0.875rem; line-height: 1.43; letter-spacing: 0.01071em; }
+table.t th { text-align: left; font-weight: 500; padding: 6px 16px 6px 0; border-bottom: 1px solid rgba(224,224,224,1); color: rgba(0,0,0,0.87); }
+table.t td { padding: 6px 16px 6px 0; border-bottom: 1px solid rgba(224,224,224,1); vertical-align: top; }
+table.t tr:last-child td { border-bottom: 0; }
+.mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 0.8125rem; }
+.avatar { width: 24px; height: 24px; border-radius: 50%; background: #bdbdbd; color: #fff; font-size: 0.75rem; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.person { display: inline-flex; align-items: center; gap: 6px; }
+.tooltip { position: absolute; white-space: nowrap; background: rgba(97,97,97,0.92); color: #fff; font-size: 0.6875rem; font-weight: 500; line-height: 1.4em; padding: 4px 8px; border-radius: 4px; }
+.mock-note { margin: 0 0 16px; padding: 8px 12px; border: 1px dashed rgba(0,0,0,0.3); border-radius: 4px; font-size: 0.8125rem; color: rgba(0,0,0,0.6); background: #fafafa; }
+</style>
+</head>
+<body>
+<div class="shell">
+<aside class="sidebar"><a class="brand" href="#"><span class="mark" aria-hidden="true"></span><span>Canopy</span></a><nav class="main" aria-label="Main"><ul><li><a class="section" href="#">Status</a></li><li><a class="section" href="#">Incidents<span class="count">2</span><span class="chev"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></a></li><li><a class="section current" href="#">Fleet<span class="chev"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg></span></a><div class="pages" role="group" aria-label="Fleet pages"><a class="page" href="#">Groups</a><a class="page selected" href="#">Projects</a><a class="page" href="#">Archived</a><a class="page" href="#">Figures</a></div></li><li><a class="section" href="#">Versions</a></li><li><a class="section" href="#">Upgrades</a></li><li><a class="section" href="#">Vulnerabilities<span class="count warning">5</span><span class="chev"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></a></li><li><a class="section" href="#">Maintenance</a></li><li><a class="section" href="#">Devices<span class="chev"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></a></li><li><a class="section" href="#">Bestool</a></li><li><a class="section" href="#">Settings<span class="chev"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></span></a></li><li class="ext"><a class="section" href="#">Public <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg></a></li></ul></nav><div class="band"><span class="dot"></span><span class="name">Read-only</span><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg></div></aside>
+<main><div class="container">
+<div class="stack gap2">
+  <div class="row" style="gap: 8px;">
+    <div class="field small adorn" style="flex: 1; max-width: 480px;"><span class="adorn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></span><input placeholder="Search groups, projects, people" aria-label="Search"></div>
+    <span style="margin-left: auto;"><span style="position: relative; display: inline-flex;"><button class="iconbtn on" aria-label="Your homepage" aria-pressed="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></button><span class="tooltip" style="right: 0; top: 44px;">Your homepage</span></span></span>
+  </div>
+  <div>
+    <h2 class="overline">Yours</h2>
+    <div class="stack gap1"><div class="paper p2" style="border-left: 3px solid #32669a; /* secondary */">
+  <div class="row" style="gap: 16px; align-items: baseline;">
+    <a class="namelink" href="#">Northgate District</a>
+    <span class="body2">District hospital rollout, phase 2</span>
+  </div>
+  <div class="row body2" style="gap: 32px; margin: 8px 0 12px; flex-wrap: wrap;">
+    <span class="row" style="gap: 8px;"><span class="secondary">PM in charge</span><span class="person"><span class="avatar">SL</span>Sam Lee</span></span>
+    <span class="row" style="gap: 8px;"><span class="secondary">Contact</span>Ana Tufuga, IT lead, ana@northgate.example.org</span>
+  </div>
+  <table class="t">
+    <thead><tr><th style="width: 32%;">Tamanu</th><th style="width: 34%;">Public</th><th>Tailnet</th></tr></thead>
+    <tbody><tr><td>Central</td><td><a class="link" href="#">central.northgate.example.org</a></td><td><a class="link" href="#">northgate-central.tail0000.ts.net</a></td></tr><tr><td>Facility: Northgate Hospital</td><td><a class="link" href="#">northgate-hospital.example.org</a></td><td><a class="link" href="#">northgate-hosp-fac.tail0000.ts.net</a></td></tr><tr><td>Facility: Bay Clinic</td><td><span class="secondary">None</span></td><td><a class="link" href="#">bay-clinic-fac.tail0000.ts.net</a></td></tr></tbody>
+  </table>
+</div><div class="paper p2" style="border-left: 3px solid #32669a; /* secondary */">
+  <div class="row" style="gap: 16px; align-items: baseline;">
+    <a class="namelink" href="#">Riverside Health</a>
+    <span class="body2">National HIS, Riverside region</span>
+  </div>
+  <div class="row body2" style="gap: 32px; margin: 8px 0 12px; flex-wrap: wrap;">
+    <span class="row" style="gap: 8px;"><span class="secondary">PM in charge</span><span class="person"><span class="avatar">SL</span>Sam Lee</span></span>
+    <span class="row" style="gap: 8px;"><span class="secondary">Contact</span>Ops desk, +00 555 0142</span>
+  </div>
+  <table class="t">
+    <thead><tr><th style="width: 32%;">Tamanu</th><th style="width: 34%;">Public</th><th>Tailnet</th></tr></thead>
+    <tbody><tr><td>Central</td><td><a class="link" href="#">central.riverside.example.org</a></td><td><a class="link" href="#">riverside-central.tail0000.ts.net</a></td></tr><tr><td>Facility: Riverside General</td><td><a class="link" href="#">riverside-general.example.org</a></td><td><span class="secondary">None</span></td></tr></tbody>
+  </table>
+</div></div>
+  </div>
+  <div>
+    <h2 class="overline">Everyone else's</h2>
+    <div class="stack gap1"><div class="paper p2" style="">
+  <div class="row" style="gap: 16px; align-items: baseline;">
+    <a class="namelink" href="#">Eastern Isles</a>
+    <span class="body2">Island clinics</span>
+  </div>
+  <div class="row body2" style="gap: 32px; margin: 8px 0 12px; flex-wrap: wrap;">
+    <span class="row" style="gap: 8px;"><span class="secondary">PM in charge</span><span class="person"><span class="avatar">JK</span>Jo Kim</span></span>
+    <span class="row" style="gap: 8px;"><span class="secondary">Contact</span>Mele Fifita, ministry liaison</span>
+  </div>
+  <table class="t">
+    <thead><tr><th style="width: 32%;">Tamanu</th><th style="width: 34%;">Public</th><th>Tailnet</th></tr></thead>
+    <tbody><tr><td>Central</td><td><a class="link" href="#">central.easternisles.example.org</a></td><td><a class="link" href="#">eisles-central.tail0000.ts.net</a></td></tr><tr><td>Facility: Harbour Clinic</td><td><span class="secondary">None</span></td><td><a class="link" href="#">harbour-fac.tail0000.ts.net</a></td></tr><tr><td>Facility: Outer Island Post</td><td><span class="secondary">None</span></td><td><a class="link" href="#">outer-post-fac.tail0000.ts.net</a></td></tr></tbody>
+  </table>
+</div><div class="paper p2" style="">
+  <div class="row" style="gap: 16px; align-items: baseline;">
+    <a class="namelink" href="#">Highlands Province</a>
+    <span class="body2">Provincial rollout</span>
+  </div>
+  <div class="row body2" style="gap: 32px; margin: 8px 0 12px; flex-wrap: wrap;">
+    <span class="row" style="gap: 8px;"><span class="secondary">PM in charge</span><span class="secondary">None</span></span>
+    <span class="row" style="gap: 8px;"><span class="secondary">Contact</span><span class="secondary">None</span></span>
+  </div>
+  <table class="t">
+    <thead><tr><th style="width: 32%;">Tamanu</th><th style="width: 34%;">Public</th><th>Tailnet</th></tr></thead>
+    <tbody><tr><td>Central</td><td><a class="link" href="#">central.highlands.example.org</a></td><td><a class="link" href="#">highlands-central.tail0000.ts.net</a></td></tr></tbody>
+  </table>
+</div></div>
+  </div>
+</div>
+</div></main>
+</div>
+</body>
+</html>

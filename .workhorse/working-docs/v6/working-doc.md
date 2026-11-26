@@ -115,13 +115,15 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 
 - The private server today trusts Tailscale's identity headers and rejects anything else on its UI routes, so this is a second front door with its own identity, and everything behind it has to decide what a non-tailnet person may see.
 
-## Mockups to make
+## Mockups
 
-- The PM view at `/fleet/pm`: my groups at the top, highlighted; search; each group's PM details and production access links.
-- Editing the PM details as a PM.
-- The homepage toggle in a page header, on and off (lead).
-- A per-person homepage page under Settings (fallback, for comparison).
-- The permissions page: levels against grant and email list, with the tailnet explanation.
+In `.workhorse/design/mockups/v6/`:
+
+- `pm-view.html`: the PM view at `/fleet/pm`, a "Projects" page under Fleet. Your groups first with a sky accent, then everyone else's; search; each group's PM details and its production Tamanu with public and tailnet links. Homepage toggle on.
+- `pm-details-edit.html`: group detail gains a Project panel; a PM in write mode edits it in a dialog. The rest of the group stays admin-only, so a PM sees no Add machine, Edit or Archive.
+- `homepage-toggle.html`: the toggle off, at the right of the Groups list's top row (pages here have no heading, so the toggle sits in the top action row).
+- `homepage-settings.html`: the fallback, a Homepage page under a new "You" heading in Settings.
+- `permissions.html`: Settings > Access > Permissions, replacing Admins. Levels against tailnet grant and email list, with the grant explained.
 
 ## Open questions
 
