@@ -85,7 +85,11 @@ Sets the default homepage, and decides who may edit the PM details (A), from the
 - `home` doesn't carry the right to edit A. That comes from the PM access level (H): `pm: true` in a grant, or the PM email list.
 - One person can get several cap values from several grants, so two grants can name different `home`s.
 - Being named PM in charge on a group doesn't count: it's per group, and the default has to work for a PM before anyone fills in A.
-- bestool P4 relies on Tailscale's `whois` returning a peer's caps for a Tailscale Service. Canopy could read caps that way per request instead of resolving the policy file itself. That would simplify how admin is resolved too, and is a change of its own.
+- Where Canopy gets a person's caps from:
+  - Today: it reads the whole policy file through the Tailscale API (needs the policy-read scope), resolves grant sources itself (groups, bare users, `autogroup:member`; other autogroups resolve to nobody), and refreshes on a timer. It can list everyone each level resolves to, which the permissions page (H) wants.
+  - Per request from Tailscale: Serve (v1.92+) forwards the caller's caps in a `Tailscale-App-Capabilities` header when started with `--accept-app-caps`, and strips any incoming copy. Tailscale does the resolving, so every source form works and there's no refresh lag. But Canopy is published through the Kubernetes operator's ingress, which (as of upstream main, checked locally) doesn't expose that setting, and the header only describes the caller, so the page couldn't list who holds a level.
+  - P4's `whois` with `svc_name` gives the same per-caller answer, but needs a tailscaled Canopy can query, which it doesn't have.
+- Either way a cap arrives as a list with one value per matching grant, in no guaranteed order, so the rule for two different `home`s is needed whichever source is used.
 
 ### H. Access levels and the permissions page
 
@@ -127,4 +131,5 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 - [ ] H: what the support level grants.
 - [ ] H: are levels nested (admin includes PM's rights, and so on) or independent?
 - [ ] F: two grants naming different `home`s for one person.
+- [ ] F: keep reading the policy file, or move to per-request caps from Tailscale?
 - [x] Homepage: any page; set by a header toggle (lead) or a Settings page (fallback), to settle in mockups.
