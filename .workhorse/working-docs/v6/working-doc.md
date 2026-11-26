@@ -95,7 +95,7 @@ Sets the default homepage, and decides who may edit the PM details (A), from the
 
 The Admins settings page (today an email allowlist) becomes a permissions page. Not a full permissions model: a fixed set of access levels, and for each, the ways a person gets it.
 
-- Levels: admin, support, PM, all.
+- Levels: admin, support, PM, all. They're a ladder: each includes everything below it, and a person's level is the highest any grant or email list gives them.
 - Each level is reached two ways: a `bes.au/cap/canopy` grant in the tailnet policy carrying that level's key set true (`admin`, `support`, `pm`), or an email list of its own on the page. Either alone suffices, as for admin today (ADM). The page reads as a table: levels down the side, the two ways across.
 - The page spells out how the tailnet side works: the capability name, the key for each level, the destination tag, and that the grant's sources are who gets it. Ideally also who the policy currently resolves to each level, so an operator can check a grant took effect.
 - "All" is everyone with access to Canopy at all. On the tailnet that's whoever the policy lets reach Canopy (today `autogroup:member` on `tag:server-canopy`), so its email list first matters once G lets people in from outside.
@@ -133,7 +133,7 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 - [x] F: the PM access level grants editing A (H).
 - [x] H: support grants fleet work (machines, applications, groups); admin adds Canopy's settings.
 - [ ] H: exactly where the support/admin line falls, for writes and for which settings pages are admin-only to read.
-- [ ] H: are levels nested (admin includes PM's rights, and so on) or independent?
+- [x] H: levels are a ladder, admin > support > PM > all.
 - [ ] F: two grants naming different `home`s for one person.
 - [ ] F: keep reading the policy file, or move to per-request caps from Tailscale?
 - [x] Homepage: any page; set by a header toggle (lead) or a Settings page (fallback), to settle in mockups.
