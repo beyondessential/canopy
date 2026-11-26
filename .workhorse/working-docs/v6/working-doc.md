@@ -16,7 +16,7 @@ A view of Canopy for project managers, giving each group with a production envir
 
 ## Scope
 
-- This card: A, B, E, F, and the homepage choice.
+- This card: A, B, E, F, H, and the homepage choice.
 - D (token sign-in to Tamanu) becomes its own cards, one here and one in Tamanu.
 - C (credentials) is dropped in favour of D, with a root password kept in Bitwarden for rare use.
 - G (public internet access) becomes a later card.
@@ -34,7 +34,7 @@ Project, PM in charge, contact on the ground. Free text, no data model behind pr
 - PMs edit them, as well as admins. Any PM, on any group, rather than only the PM in charge: a group with no PM in charge yet still needs someone to fill it in, and PMs cover for each other.
 - This is the first write a non-admin can make in Canopy. Only these three fields: the rest of the group's edit form stays admin-only.
 - Each edit is audited, recording the fields changed from and to, like other group edits.
-- Safety mode: recommend a PM raises to write the same way an admin does (one click from the blocked control). A raise authorises nothing by itself (SAFE), so it opens nothing else to a PM. Danger isn't offered to a PM, since nothing a PM can do needs it.
+- Safety mode: a PM raises to write through the same interface as an admin (the mode control, or one click from the blocked control). A raise authorises nothing by itself (SAFE), so it opens nothing else to a PM. Danger isn't offered to a PM, since nothing a PM can do needs it.
 
 ### B. Access to the production environment
 
@@ -82,11 +82,22 @@ Sets the default homepage, and decides who may edit the PM details (A), from the
 - Proposed grant (beyondessential/tailscale#55): the Tamanu PM team gets `home: "/fleet/pm"` in the `bes.au/cap/canopy` value on `tag:server-canopy`, beside on-call's `admin: true` grant. Resolved the same way admin is (ADM), so policy freshness and the outage rules carry over.
 - `home` is a path, not a role: the policy can give any team any default page. So the PM view lives at `/fleet/pm`.
 - Canopy takes `home` only as a path within Canopy (starts with a single `/`), so a policy value can never send someone off-site.
-- `home` doesn't carry the right to edit A. That needs its own key, e.g. `pm: true` in the same grant.
+- `home` doesn't carry the right to edit A. That comes from the PM access level (H): `pm: true` in a grant, or the PM email list.
 - One person can get several cap values from several grants, so two grants can name different `home`s.
-- An admin is not thereby a PM; the two are independent.
 - Being named PM in charge on a group doesn't count: it's per group, and the default has to work for a PM before anyone fills in A.
 - bestool P4 relies on Tailscale's `whois` returning a peer's caps for a Tailscale Service. Canopy could read caps that way per request instead of resolving the policy file itself. That would simplify how admin is resolved too, and is a change of its own.
+
+### H. Access levels and the permissions page
+
+The Admins settings page (today an email allowlist) becomes a permissions page. Not a full permissions model: a fixed set of access levels, and for each, the ways a person gets it.
+
+- Levels: admin, support, PM, all.
+- Each level is reached two ways: a `bes.au/cap/canopy` grant in the tailnet policy carrying that level's key set true (`admin`, `support`, `pm`), or an email list of its own on the page. Either alone suffices, as for admin today (ADM). The page reads as a table: levels down the side, the two ways across.
+- The page spells out how the tailnet side works: the capability name, the key for each level, the destination tag, and that the grant's sources are who gets it. Ideally also who the policy currently resolves to each level, so an operator can check a grant took effect.
+- "All" is everyone with access to Canopy at all. On the tailnet that's whoever the policy lets reach Canopy (today `autogroup:member` on `tag:server-canopy`), so its email list first matters once G lets people in from outside.
+- The email lists keep the admin allowlist's property: a control-plane outage never withdraws a level held through a list.
+- Editing the lists stays admin-only, and each change is audited, as admin allowlist changes are.
+- `home` (F) isn't a level: it's a default, and stays its own key.
 
 ### G. Public internet access
 
@@ -100,6 +111,7 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 - Editing the PM details as a PM.
 - The homepage toggle in a page header, on and off (lead).
 - A per-person homepage page under Settings (fallback, for comparison).
+- The permissions page: levels against grant and email list, with the tailnet explanation.
 
 ## Open questions
 
@@ -107,10 +119,12 @@ PMs not on Tailscale reach Canopy over the internet behind Google OAuth.
 - [x] Tailnet first; G later.
 - [x] C dropped in favour of D.
 - [x] A: PMs edit the PM details, on any group.
-- [ ] A: PMs raise to write like admins, or are PM edits exempt from safety modes?
-- [ ] Is there an allowlist for PMs as there is for admins, for a PM not yet in the policy group, or is the policy the only source?
+- [x] A: PMs raise to write through the same safety mode interface.
+- [x] Each access level has an email list beside its tailnet grant (H).
 - [x] E is a subpage of the fleet view, with a per-person homepage choice.
 - [x] F: default homepage from a `home` path in the Canopy capability (tailscale#55).
-- [ ] F: what grants the right to edit A: a `pm: true` key beside `home`?
+- [x] F: the PM access level grants editing A (H).
+- [ ] H: what the support level grants.
+- [ ] H: are levels nested (admin includes PM's rights, and so on) or independent?
 - [ ] F: two grants naming different `home`s for one person.
 - [x] Homepage: any page; set by a header toggle (lead) or a Settings page (fallback), to settle in mockups.
