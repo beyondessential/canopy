@@ -12,6 +12,13 @@ export SERVER_VERSIONS_SECRET=rig
 export PUBLIC_URL="$RIG_BASE_URL/public"
 export META_LOG="${META_LOG:-private_server=info,warn}"
 
+# Every request to the base URL acts as an administrator holding a danger-mode
+# session, which is only safe while nothing off this machine can reach it.
+case "${RIG_HOST:-}" in
+  127.0.0.1 | ::1 | localhost) ;;
+  *) echo "serve: RIG_HOST is ${RIG_HOST:-unset}, and the admin server is only served on loopback" >&2; exit 1 ;;
+esac
+
 server="$RIG_SOURCE/target/debug/private-server"
 headers_port=$(free_port)
 
@@ -19,14 +26,17 @@ trap 'kill $(jobs -p) 2>/dev/null || true; wait' EXIT
 CANOPY_TRUST_TAILSCALE_HEADERS=1 BIND_ADDRESS="127.0.0.1:$headers_port" "$server" &
 wait_for "the header-trusting server" "http://127.0.0.1:$headers_port/healthz"
 
-cert=$(node -e 'process.stdout.write(encodeURIComponent(require("node:fs").readFileSync(process.argv[1], "utf8")))' "$RIG_OUT/device.pem")
-cat > "$RIG_INFO_FILE" <<JSON
-{
-  "headerAuthUrl": "http://127.0.0.1:$headers_port",
-  "deviceId": "$(cat "$RIG_OUT/device-id")",
-  "deviceCertificateHeader": "mtls-certificate: $cert",
-  "deviceCertificateFile": "$RIG_OUT/device.pem"
-}
-JSON
+# Written by node so the certificate's percent-encoding and every other value
+# are quoted as JSON, whatever they hold.
+node -e '
+  const [out, headerAuthUrl, deviceId, pem] = process.argv.slice(1);
+  const cert = encodeURIComponent(require("node:fs").readFileSync(pem, "utf8"));
+  require("node:fs").writeFileSync(out, JSON.stringify({
+    headerAuthUrl,
+    deviceId,
+    deviceCertificateHeader: `mtls-certificate: ${cert}`,
+    deviceCertificateFile: pem,
+  }, null, 2));
+' "$RIG_INFO_FILE" "http://127.0.0.1:$headers_port" "$(cat "$RIG_OUT/device-id")" "$RIG_OUT/device.pem"
 
 BIND_ADDRESS="$RIG_HOST:$RIG_PORT" "$server"
