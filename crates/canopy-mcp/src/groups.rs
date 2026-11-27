@@ -15,8 +15,9 @@ use database::{
 		ServerGroupBackupConfig, ServerGroupBackupSchedule,
 	},
 	reported_detail::ReportedDetail,
-	server_groups::ServerGroup,
+	server_groups::{NamedProjectDetails, ServerGroup},
 	statuses::Status,
+	tailscale_users::TailscaleUser,
 };
 use jiff::Timestamp;
 use rmcp::{
@@ -35,7 +36,9 @@ use crate::{
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FindGroupsArgs {
-	/// Free-text term matched against group name or id. Omit to list all.
+	/// Free-text term matched against the group's name or id, or its project
+	/// details (project, PM in charge, contact on the ground). Omit to list
+	/// all.
 	pub query: Option<String>,
 }
 
@@ -99,6 +102,10 @@ struct GroupDetail {
 	/// `replace_notes`.
 	notes_revision: i64,
 	tags: commons_types::server::TagMap,
+	/// The project the group serves, its PM in charge (with the display name
+	/// Canopy knows for them, where it knows one) and its contact on the
+	/// ground.
+	project_details: NamedProjectDetails,
 	effective_version: Option<VersionStr>,
 	created_at: Timestamp,
 	updated_at: Timestamp,
@@ -111,7 +118,8 @@ impl CanopyMcp {
 	#[tool(
 		// Every tool reads; none changes anything (see the SAFE spec).
 		annotations(read_only_hint = true),
-		description = "Find server groups by name/id, with live member count, effective version, \
+		description = "Find server groups by name, id, or project details (project, PM in charge, \
+		               contact on the ground), with live member count, effective version, \
 		               highest member rank, backup config state, and last-backup time."
 	)]
 	async fn find_groups(
@@ -120,7 +128,7 @@ impl CanopyMcp {
 	) -> Result<CallToolResult, McpError> {
 		let mut conn = self.conn().await?;
 		let groups = match args.query.as_deref() {
-			Some(q) if !q.is_empty() => ServerGroup::search(&mut conn, q).await.map_err(mcp_err)?,
+			Some(q) if !q.is_empty() => ServerGroup::find(&mut conn, q).await.map_err(mcp_err)?,
 			_ => ServerGroup::list_all(&mut conn).await.map_err(mcp_err)?,
 		};
 		let ids: Vec<Uuid> = groups.iter().map(|g| g.id).collect();
@@ -157,8 +165,9 @@ impl CanopyMcp {
 	#[tool(
 		// Every tool reads; none changes anything (see the SAFE spec).
 		annotations(read_only_hint = true),
-		description = "Full detail for one group: members (with version/health), backup config, \
-		               schedules, repo stats, and recent backup/maintenance activity."
+		description = "Full detail for one group: project details (project, PM in charge, contact \
+		               on the ground), members (with version/health), backup config, schedules, \
+		               repo stats, and recent backup/maintenance activity."
 	)]
 	async fn get_group(
 		&self,
@@ -254,12 +263,25 @@ impl CanopyMcp {
 				.map_err(mcp_err)?
 				.revision;
 
+		let pm_names = TailscaleUser::names_ignoring_case(
+			&mut conn,
+			&group
+				.pm_in_charge
+				.as_deref()
+				.into_iter()
+				.collect::<Vec<_>>(),
+		)
+		.await
+		.map_err(mcp_err)?;
+		let project_details = group.project_details().named(&pm_names);
+
 		ok_json(&GroupDetail {
 			id: group.id,
 			name: group.name.clone(),
 			notes: group.notes.clone(),
 			notes_revision,
 			tags: group.tags.clone(),
+			project_details,
 			effective_version: group.effective_version.clone(),
 			created_at: group.created_at,
 			updated_at: group.updated_at,

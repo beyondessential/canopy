@@ -378,6 +378,61 @@ async fn group_listing_and_detail() {
 	.await
 }
 
+// spec: MCP#discovery
+// spec: MCP#detail
+#[tokio::test(flavor = "multi_thread")]
+async fn groups_carry_and_are_found_by_their_project_details() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed(&mut conn).await;
+		conn.batch_execute(&format!(
+			"UPDATE server_groups SET project = 'Hospital rollout', \
+			 pm_in_charge = 'Pat@Example.com', ground_contact = 'Sam at the ward' \
+			 WHERE id = '{GROUP}'; \
+			 INSERT INTO server_groups (name) VALUES ('Unrelated'); \
+			 INSERT INTO tailscale_users (login, name) VALUES ('pat@example.com', 'Pat Smith');"
+		))
+		.await
+		.expect("seed project details");
+
+		let detail = call_tool!(
+			private,
+			"get_group",
+			serde_json::json!({ "group_id": GROUP })
+		);
+		assert_eq!(
+			detail["project_details"],
+			serde_json::json!({
+				"project": "Hospital rollout",
+				"pm_in_charge": "Pat@Example.com",
+				"pm_in_charge_name": "Pat Smith",
+				"ground_contact": "Sam at the ward",
+			})
+		);
+
+		for term in ["hospital", "PAT@example", "ward"] {
+			let found = call_tool!(private, "find_groups", serde_json::json!({ "query": term }));
+			let ids: Vec<&str> = found["groups"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.map(|g| g["id"].as_str().unwrap())
+				.collect();
+			assert_eq!(ids, [GROUP], "{term:?} matches the group's project details");
+		}
+		let by_name = call_tool!(
+			private,
+			"find_groups",
+			serde_json::json!({ "query": "prod gr" })
+		);
+		assert_eq!(
+			by_name["groups"].as_array().unwrap().len(),
+			1,
+			"and its name still"
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn fleet_summary_rolls_up() {
 	commons_tests::server::run(async |mut conn, _public, private| {

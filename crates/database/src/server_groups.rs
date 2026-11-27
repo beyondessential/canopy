@@ -1093,6 +1093,37 @@ impl ServerGroup {
 		Ok(())
 	}
 
+	/// Live groups whose identifier is `term`, or whose name or project
+	/// details contain it ignoring case, in order of name.
+	// spec: MCP#discovery
+	pub async fn find(db: &mut AsyncPgConnection, term: &str) -> Result<Vec<Self>> {
+		use crate::schema::server_groups::dsl;
+
+		if let Ok(id) = term.parse::<Uuid>()
+			&& let Ok(group) = Self::get_by_id(db, id).await
+			&& group.deleted_at.is_none()
+		{
+			return Ok(vec![group]);
+		}
+
+		let pattern = format!("%{term}%");
+		dsl::server_groups
+			.select(Self::as_select())
+			.filter(dsl::deleted_at.is_null())
+			.filter(
+				dsl::name
+					.ilike(&pattern)
+					.nullable()
+					.or(dsl::project.ilike(&pattern))
+					.or(dsl::pm_in_charge.ilike(&pattern))
+					.or(dsl::ground_contact.ilike(&pattern)),
+			)
+			.order((dsl::name.asc(), dsl::id.asc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Loose search by UUID or name substring, capped at 50 results, used by
 	/// the admin UI's group picker.
 	pub async fn search(db: &mut AsyncPgConnection, query: &str) -> Result<Vec<Self>> {
