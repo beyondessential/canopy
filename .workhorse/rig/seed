@@ -1,0 +1,41 @@
+#!/bin/sh
+set -eu
+. "$RIG_RECIPE_DIR/lib.sh"
+
+"$RIG_SOURCE/target/debug/migrate"
+"$RIG_SOURCE/target/debug/seed"
+
+# The seeder gives every device a placeholder key. Swap the key of the device
+# bound to the box under the Suva Facility application, the one rig.json offers
+# testers, for a real certificate's, so the device API can be driven as it.
+# Named by the application rather than by the placeholder's bytes, which are
+# the seeder's to change.
+app="Suva Facility"
+mkdir -p "$RIG_OUT"
+# The device's private key is written here, so it is readable by nobody else
+# whatever umask the manager runs the step with.
+(umask 077
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+  -subj "/CN=canopy-rig-device" -keyout "$RIG_OUT/device.key" -out "$RIG_OUT/device.pem" 2>/dev/null)
+spki=$(openssl x509 -in "$RIG_OUT/device.pem" -noout -pubkey | openssl pkey -pubin -outform DER | od -An -v -tx1 | tr -d ' \n')
+# od ends a failed pipeline happily, and the shell has no pipefail, so an empty
+# key would be stored as the device's and the lease would offer a device that
+# cannot authenticate.
+[ -n "$spki" ] || { echo "seed: the generated certificate's public key could not be read" >&2; exit 1; }
+# The box carries more than one key, so one of them is replaced, not all.
+# psql interpolates :'app' in what it reads, but not in a -c string.
+device=$(psql_rig -v ON_ERROR_STOP=1 -qtA -v app="$app" <<SQL
+  UPDATE device_keys SET key_data = decode('$spki', 'hex')
+  WHERE id = (
+    SELECT k.id FROM device_keys k
+    JOIN machines m ON m.device_id = k.device_id
+    JOIN applications a ON a.machine_id = m.id
+    WHERE a.name = :'app' AND k.is_active
+    ORDER BY k.created_at, k.id
+    LIMIT 1
+  )
+  RETURNING device_id
+SQL
+)
+[ -n "$device" ] || { echo "seed: no device is bound to the box under $app" >&2; exit 1; }
+printf '%s' "$device" > "$RIG_OUT/device-id"

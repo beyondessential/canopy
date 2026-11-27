@@ -14,3 +14,6 @@ TODO.txt
 /private-web/playwright-report
 /test-results
 /playwright-report
+
+# What the rig recipe's seed step leaves for its lease (.workhorse/rig/seed)
+/.rig-out
