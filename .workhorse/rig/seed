@@ -12,8 +12,11 @@ set -eu
 # the seeder's to change.
 app="Suva Facility"
 mkdir -p "$RIG_OUT"
+# The device's private key is written here, so it is readable by nobody else
+# whatever umask the manager runs the step with.
+(umask 077
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
-  -subj "/CN=canopy-rig-device" -keyout "$RIG_OUT/device.key" -out "$RIG_OUT/device.pem" 2>/dev/null
+  -subj "/CN=canopy-rig-device" -keyout "$RIG_OUT/device.key" -out "$RIG_OUT/device.pem" 2>/dev/null)
 spki=$(openssl x509 -in "$RIG_OUT/device.pem" -noout -pubkey | openssl pkey -pubin -outform DER | od -An -v -tx1 | tr -d ' \n')
 # od ends a failed pipeline happily, and the shell has no pipefail, so an empty
 # key would be stored as the device's and the lease would offer a device that
