@@ -8,3 +8,15 @@ cd "$RIG_SOURCE"
 # Every crate the servers depend on, compiled once per Cargo.lock. Each build
 # gets a copy of this target and recompiles only the workspace's own crates.
 cargo_build_rig_bins
+
+# The workspace's own crates go again: what is kept here is the third-party
+# build alone. Kept, they carry this install's paths (the SPA bundle a debug
+# server reads from disk, for one), and a build of the same commit, checked out
+# before this ran, would take them as fresh and serve from a directory that is
+# gone once this step ends.
+set --
+for package in $(cargo metadata --no-deps --format-version 1 --offline |
+  node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => console.log(JSON.parse(s).packages.map((p) => p.name).join(" ")))'); do
+  set -- "$@" -p "$package"
+done
+cargo clean --offline "$@"
