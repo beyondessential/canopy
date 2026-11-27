@@ -17,14 +17,15 @@ import {
 	AppSidebar,
 	Brand,
 	IncidentCount,
+	firstPage,
 	navSections,
 } from "./components/AppSidebar";
-import { AdminProvider } from "./hooks/useIsAdmin";
+import { AdminProvider, useAdminStatus } from "./hooks/useIsAdmin";
 import { SafetyModeProvider } from "./hooks/useSafetyMode";
 import { SafetyModeControl } from "./components/SafetyModeControl";
 import { ApplicationTypesProvider } from "./hooks/useApplicationTypes";
 import { useReloadInterval } from "./hooks/useReloadInterval";
-import Admins from "./routes/Admins";
+import Permissions from "./routes/Permissions";
 import NotFound from "./routes/NotFound";
 import { HomepageProvider } from "./hooks/useHomepage";
 import { HomeRedirect } from "./components/HomeToggle";
@@ -86,6 +87,14 @@ import VulnerabilitySources from "./routes/VulnerabilitySources";
 ///
 /// Replaces rather than pushes, so the back button goes where the operator came
 /// from instead of bouncing off the redirect.
+/** Settings lands on the first of its pages the caller is shown, once their
+ * level is known. */
+function SettingsIndex() {
+	const { resolved, isAdmin } = useAdminStatus();
+	if (!resolved) return null;
+	return <Navigate to={firstPage("/settings", isAdmin === true)} replace />;
+}
+
 function Moved({ to }: { to: (id: string) => string }) {
 	const { id = "" } = useParams<{ id: string }>();
 	return <Navigate to={to(id)} replace />;
@@ -370,11 +379,12 @@ export default function App() {
 						}
 					/>
 					<Route path="/settings">
+						<Route index element={<SettingsIndex />} />
+						<Route path="permissions" element={<Permissions />} />
 						<Route
-							index
-							element={<Navigate to="/settings/admins" replace />}
+							path="admins"
+							element={<Navigate to="/settings/permissions" replace />}
 						/>
-						<Route path="admins" element={<Admins />} />
 						<Route path="backup-defaults" element={<BackupDefaults />} />
 						<Route path="recovery" element={<RecoveryVault />} />
 						<Route path="healthchecks" element={<Healthchecks />} />

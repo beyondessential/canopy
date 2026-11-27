@@ -140,7 +140,7 @@ const SECTIONS: NavSection[] = [
 			{
 				heading: "Access",
 				pages: [
-					page("Admins", "/settings/admins"),
+					page("Permissions", "/settings/permissions", true),
 					page("MCP access", "/settings/mcp-tokens"),
 					page("Certificate authority", "/settings/certificate-authority"),
 					page("Identity provider", "/settings/identity-provider"),
@@ -170,6 +170,16 @@ const SECTIONS: NavSection[] = [
 /** The sections offered, given whether the SQL console is available. */
 export function navSections(sqlAvailable: boolean): NavSection[] {
 	return SECTIONS.filter((section) => sqlAvailable || !section.needsSql);
+}
+
+/** The first of a section's pages the caller is shown, which is where the
+ * section itself lands. */
+export function firstPage(sectionTo: string, isAdmin: boolean): string {
+	const section = SECTIONS.find((s) => s.to === sectionTo);
+	const visible = section?.groups
+		?.flatMap((group) => group.pages)
+		.find((p) => isAdmin || !p.adminOnly);
+	return visible?.to ?? sectionTo;
 }
 
 /** The Canopy mark and name, linking home. */
