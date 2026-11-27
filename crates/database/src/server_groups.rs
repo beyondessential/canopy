@@ -872,6 +872,13 @@ impl ServerGroup {
 			};
 			out.insert(gid, better);
 		}
+		for (gid, rank) in Self::ranked_machines(db, group_ids).await? {
+			let better = match out.get(&gid).copied() {
+				None => rank,
+				Some(existing) => higher_rank(existing, rank),
+			};
+			out.insert(gid, better);
+		}
 		Ok(out)
 	}
 
@@ -913,8 +920,8 @@ impl ServerGroup {
 		Ok(counts)
 	}
 
-	/// Every environment across `group_ids`: each group's live applications at
-	/// one rank, in the order the groups were given and then by rank,
+	/// Every environment across `group_ids`: each group's live members at one
+	/// rank, in the order the groups were given and then by rank,
 	/// production first. A pending application is in no environment, so a group
 	/// with nothing ranked has none.
 	///
@@ -937,6 +944,27 @@ impl ServerGroup {
 		group_ids: &[Uuid],
 	) -> Result<Vec<Environment>> {
 		Self::environments_inner(db, group_ids, false).await
+	}
+
+	/// The group and rank of each live ranked machine in `group_ids`: a machine
+	/// is in the environment its rank names whether or not anything on it has
+	/// reported, so a group's environments read its machines beside its
+	/// applications.
+	// spec: GRP#environments
+	async fn ranked_machines(
+		db: &mut AsyncPgConnection,
+		group_ids: &[Uuid],
+	) -> Result<Vec<(Uuid, ServerRank)>> {
+		use crate::schema::machines::dsl;
+
+		dsl::machines
+			.select((dsl::group_id.assume_not_null(), dsl::rank.assume_not_null()))
+			.filter(dsl::group_id.eq_any(group_ids))
+			.filter(dsl::rank.is_not_null())
+			.filter(dsl::deleted_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
 	}
 
 	async fn environments_inner(
@@ -992,6 +1020,9 @@ impl ServerGroup {
 				})
 				.or_insert(id);
 		}
+		for (group_id, rank) in Self::ranked_machines(db, group_ids).await? {
+			present.entry(group_id).or_default().insert(rank);
+		}
 
 		// A caller that only needs the ranks does not pay for the version each
 		// environment reports.
@@ -1024,8 +1055,7 @@ impl ServerGroup {
 		Ok(out)
 	}
 
-	/// One of a group's environments, if the group has applications at that
-	/// rank.
+	/// One of a group's environments, if the group has members at that rank.
 	// spec: GRP#environments
 	pub async fn environment(
 		db: &mut AsyncPgConnection,

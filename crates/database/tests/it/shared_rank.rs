@@ -606,6 +606,32 @@ async fn a_group_with_only_pending_boxes_is_left_out_of_the_headline_ranks() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_ranked_machine_with_nothing_reported_is_in_its_environment() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = machine(&mut conn, group).await;
+		Machine::set_rank(&mut conn, machine.id, ServerRank::Production, Some("op"))
+			.await
+			.expect("rank");
+
+		let environments = ServerGroup::environments(&mut conn, &[group])
+			.await
+			.unwrap();
+		assert_eq!(environments.len(), 1);
+		assert_eq!(environments[0].rank, ServerRank::Production);
+		assert!(environments[0].headline);
+		assert_eq!(environments[0].version, None);
+		assert_eq!(
+			ServerGroup::headline_rank(&mut conn, Some(group))
+				.await
+				.unwrap(),
+			Some(ServerRank::Production)
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_archived_machine_cannot_be_ranked_and_serves_no_environment() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group = group(&mut conn).await;
