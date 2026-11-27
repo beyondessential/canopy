@@ -432,39 +432,43 @@ impl TailnetDirectory {
 		self.inner.cache.read().await.by_node_id.clone()
 	}
 
-	/// Force-refresh the cache from the Tailscale control plane.
-	pub async fn refresh(&self) -> Result<()> {
-		let token = self.access_token().await?;
+	/// Read one of the control plane's tailnet-scoped resources, named for the
+	/// errors this reports.
+	///
+	/// A token can expire between the time it is minted and the time it is
+	/// sent, so a refusal drops it and retries exactly once.
+	async fn read(&self, resource: &str, what: &str) -> Result<reqwest::Response> {
 		let url = format!(
-			"{}/api/v2/tailnet/{}/devices",
+			"{}/api/v2/tailnet/{}/{resource}",
 			self.inner.config.api_base.trim_end_matches('/'),
 			self.inner.config.tailnet,
 		);
-		let resp = self
-			.inner
-			.client
-			.get(&url)
-			.bearer_auth(&token)
-			.send()
-			.await
-			.map_err(|e| AppError::custom(format!("tailscale devices request: {e}")))?;
-
-		if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-			// Token expired between the time we minted it and now. Drop and
-			// retry exactly once.
-			self.inner.oauth.write().await.token = None;
-			let token = self.access_token().await?;
-			let retry = self
-				.inner
+		let send = async |token: String| {
+			self.inner
 				.client
 				.get(&url)
-				.bearer_auth(&token)
+				.bearer_auth(token)
+				.header(reqwest::header::ACCEPT, "application/json")
 				.send()
 				.await
-				.map_err(|e| AppError::custom(format!("tailscale devices retry: {e}")))?;
-			return self.ingest(retry).await;
+		};
+
+		let resp = send(self.access_token().await?)
+			.await
+			.map_err(|e| AppError::custom(format!("tailscale {what} request: {e}")))?;
+		if resp.status() != reqwest::StatusCode::UNAUTHORIZED {
+			return Ok(resp);
 		}
 
+		self.inner.oauth.write().await.token = None;
+		send(self.access_token().await?)
+			.await
+			.map_err(|e| AppError::custom(format!("tailscale {what} retry: {e}")))
+	}
+
+	/// Force-refresh the cache from the Tailscale control plane.
+	pub async fn refresh(&self) -> Result<()> {
+		let resp = self.read("devices", "devices").await?;
 		self.ingest(resp).await
 	}
 
@@ -514,37 +518,7 @@ impl TailnetDirectory {
 
 	/// Force-refresh what the tailnet policy grants on Canopy.
 	pub async fn refresh_policy(&self) -> Result<()> {
-		let token = self.access_token().await?;
-		let url = format!(
-			"{}/api/v2/tailnet/{}/acl",
-			self.inner.config.api_base.trim_end_matches('/'),
-			self.inner.config.tailnet,
-		);
-		let resp = self
-			.inner
-			.client
-			.get(&url)
-			.bearer_auth(&token)
-			.header(reqwest::header::ACCEPT, "application/json")
-			.send()
-			.await
-			.map_err(|e| AppError::custom(format!("tailscale policy request: {e}")))?;
-
-		if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-			self.inner.oauth.write().await.token = None;
-			let token = self.access_token().await?;
-			let retry = self
-				.inner
-				.client
-				.get(&url)
-				.bearer_auth(&token)
-				.header(reqwest::header::ACCEPT, "application/json")
-				.send()
-				.await
-				.map_err(|e| AppError::custom(format!("tailscale policy retry: {e}")))?;
-			return self.ingest_policy(retry).await;
-		}
-
+		let resp = self.read("acl", "policy").await?;
 		self.ingest_policy(resp).await
 	}
 
@@ -567,35 +541,7 @@ impl TailnetDirectory {
 
 	/// Force-refresh the tailnet's members.
 	pub async fn refresh_users(&self) -> Result<()> {
-		let token = self.access_token().await?;
-		let url = format!(
-			"{}/api/v2/tailnet/{}/users?type=member",
-			self.inner.config.api_base.trim_end_matches('/'),
-			self.inner.config.tailnet,
-		);
-		let resp = self
-			.inner
-			.client
-			.get(&url)
-			.bearer_auth(&token)
-			.send()
-			.await
-			.map_err(|e| AppError::custom(format!("tailscale users request: {e}")))?;
-
-		if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-			self.inner.oauth.write().await.token = None;
-			let token = self.access_token().await?;
-			let retry = self
-				.inner
-				.client
-				.get(&url)
-				.bearer_auth(&token)
-				.send()
-				.await
-				.map_err(|e| AppError::custom(format!("tailscale users retry: {e}")))?;
-			return self.ingest_users(retry).await;
-		}
-
+		let resp = self.read("users?type=member", "users").await?;
 		self.ingest_users(resp).await
 	}
 
