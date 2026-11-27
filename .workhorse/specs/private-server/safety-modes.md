@@ -103,6 +103,8 @@ Silencing a check on a machine that already exists removes a protection and is d
 A handler that lets an already-trusted machine obtain credentials is graded write, because making a machine trusted is itself danger and the decision to trust it has already been made there.
 Opening a machine's restore window is graded on this basis.
 
+Signing in to Tamanu is graded read-only although it issues a token: the token is the caller's own, for one Tamanu, for a minute, and issuing it changes nothing on the fleet or in Canopy's records (see [TSI](tamanu-sign-in.md)).
+
 Recording, withdrawing or editing a vulnerability triage decision is graded write: it amends Canopy's records, and the item's history keeps what it replaced (see [VTR](../security/vulnerability-triage.md)).
 
 The fleet query interface (see [MCP](mcp.md)) changes nothing on the fleet, so every one of its tools is read-only except its triage writes, recording, withdrawing and editing triage decisions, which are graded write.
