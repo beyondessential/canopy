@@ -11,6 +11,10 @@ Give Workhorse's loops a Canopy they can build and drive (`.workhorse/rig/`), an
 - Each build compiles into its own `target/`. A `build.build-dir` shared across builds is not safe: Cargo takes another checkout's workspace crates as fresh while that checkout's source is still on disk.
 - The Rust tooling is the person's (`env.fromPerson`, `env.personHome`): their cargo config, toolchains, sccache cache and jobserver (`MAKEFLAGS`, so steve's pool covers rig builds), defaulted from their home where they set no variable. An sccache server the rig needs starts in its own systemd scope, never in a step's cgroup. `lib.sh` and `rust-toolchain.toml` are in the deps hash, since they decide the paths a dependency build is fingerprinted by.
 
+## Explicitly rejected
+
+- A `dev` entry point (live rigs). It would make every person's rig live, compile each save a second time beside the person's own tooling, and start each lease from a cold target, while a build of the latest commit is now about half a minute away.
+
 ## Checklist
 
 - [x] Recipe: `rig.json`, `deps`, `build`, `seed`, `serve`, `lib.sh`, `NOTES.md`
