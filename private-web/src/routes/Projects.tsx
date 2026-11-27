@@ -263,6 +263,11 @@ function TamanuName({ app, toldApart }: { app: ProjectTamanu; toldApart: boolean
 /// spec: PRJ#what-each-group-shows
 function Address({ href }: { href: string | null }) {
 	if (!href) return <NoneText />;
+	// Older addresses were stored without a scheme check, so one that is not a
+	// web address reads as text rather than opening as a link.
+	if (!/^https?:\/\//i.test(href)) {
+		return <>{href}</>;
+	}
 	return (
 		<MuiLink href={href} target="_blank" rel="noopener noreferrer" underline="hover">
 			{href.replace(/^https?:\/\//, "").replace(/\/$/, "")}
