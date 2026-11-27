@@ -20532,6 +20532,26 @@
           "200": {
             "description": "Snippet soft-deleted."
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
           "500": {
             "content": {
               "application/json": {
@@ -20543,6 +20563,11 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
         "summary": "Soft-delete a saved snippet.",
         "tags": [
           "bestool"
@@ -20719,6 +20744,26 @@
             },
             "description": ""
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
           "500": {
             "content": {
               "application/json": {
@@ -20732,7 +20777,7 @@
         },
         "security": [
           {
-            "tailscale-user": []
+            "tailscale-admin": []
           }
         ],
         "summary": "Save a SQL snippet.",

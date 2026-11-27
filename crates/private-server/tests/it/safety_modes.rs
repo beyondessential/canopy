@@ -515,9 +515,9 @@ async fn an_operator_who_is_not_an_administrator_still_has_a_mode() {
 	trust_headers();
 
 	commons_tests::server::run(async |_conn, _public, private| {
-		// Not on the allowlist: they reach the handlers that are not restricted
-		// to administrators, and those are graded like any other, so they need a
-		// session and a raise the same way.
+		// On no list: below admin, a caller is graded like any other, so they
+		// need a session and a raise the same way, and only then meet the
+		// handler's own level check.
 		let session = private
 			.post("/api/safety/session")
 			.add_header("Tailscale-User-Login", OTHER)
@@ -530,8 +530,8 @@ async fn an_operator_who_is_not_an_administrator_still_has_a_mode() {
 			.expect("session id")
 			.to_owned();
 
-		// Read-only to begin with, so a write-graded handler they may reach is
-		// refused for the mode.
+		// Read-only to begin with, so a write-graded handler is refused for the
+		// mode before their level is considered.
 		let refused = private
 			.post("/api/bestool/save_snippet")
 			.add_header("Tailscale-User-Login", OTHER)
@@ -542,7 +542,7 @@ async fn an_operator_who_is_not_an_administrator_still_has_a_mode() {
 		refused.assert_status_forbidden();
 		assert!(problem_type(&refused.json()).ends_with("safety-mode-too-low"));
 
-		// Raising needs no administrator status, and then the handler answers.
+		// Raising needs no administrator status, and then the handler decides.
 		let raised = private
 			.post("/api/safety/raise")
 			.add_header("Tailscale-User-Login", OTHER)
@@ -560,9 +560,8 @@ async fn an_operator_who_is_not_an_administrator_still_has_a_mode() {
 			.add_header(SESSION_HEADER, &id)
 			.json(&json!({"name": "snip", "sql": "SELECT 1"}))
 			.await;
-		assert_ne!(
-			saved.status_code().as_u16(),
-			403,
+		assert!(
+			!problem_type(&saved.json()).ends_with("safety-mode-too-low"),
 			"a raised operator is not turned away for their mode"
 		);
 	})

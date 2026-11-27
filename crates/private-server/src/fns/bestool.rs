@@ -2,7 +2,7 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleUser;
+use commons_servers::tailscale_auth::TailscaleAdmin;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -120,16 +120,18 @@ pub struct SaveArgs {
 	post,
 	path = "/save_snippet",
 	tag = "bestool",
-	security(("tailscale-user" = [])),
+	security(("tailscale-admin" = [])),
 	request_body = SaveArgs,
 	responses(
 		(status = 200, body = BestoolSnippetDetail),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
 pub async fn save_snippet(
 	State(state): State<AppState>,
-	user: TailscaleUser,
+	TailscaleAdmin(user): TailscaleAdmin,
 	Json(args): Json<SaveArgs>,
 ) -> Result<Json<BestoolSnippetDetail>> {
 	let mut conn = state.db.get().await?;
@@ -227,14 +229,18 @@ pub async fn get_latest_snippet_id(
 	post,
 	path = "/delete_snippet",
 	tag = "bestool",
+	security(("tailscale-admin" = [])),
 	request_body = GetArgs,
 	responses(
 		(status = 200, description = "Snippet soft-deleted."),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
 pub async fn delete_snippet(
 	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
 	Json(args): Json<GetArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
