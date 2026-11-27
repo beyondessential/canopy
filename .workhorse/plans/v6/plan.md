@@ -69,7 +69,7 @@ Saving and deleting a snippet take `TailscaleAdmin`, like every other write; rea
 
 ### Settings
 
-`/settings/admins` becomes `/settings/permissions` ("Permissions" under Access), with a redirect from the old path. `Admins.tsx` becomes `Permissions.tsx`.
+`/settings/admins` becomes `/settings/permissions` ("Permissions" under Access), with a redirect from the old path. `Admins.tsx` becomes `Permissions.tsx`. The sidebar entry shows to admins only, and `access::list` takes `TailscaleAdmin`, as `admins::list` does today.
 
 ## Cross-repo
 

@@ -17,8 +17,8 @@
 - [ ] Each level's tailnet column names its key and the sources the policy grants it to, with member counts; all names who may reach Canopy (verifies spec: ADM)
 - [ ] Shows when the policy was last read (verifies spec: ADM)
 - [ ] An admin adds and removes a login on the PM list, each needing danger mode and each leaving an audit entry naming level and login (verifies spec: ADM)
-- [ ] A PM sees no add or remove controls (verifies spec: ADM)
 - [ ] `/settings/admins` leads to the permissions page
+- [ ] A PM or all-level caller has no Permissions entry in the sidebar, and the server refuses them the lists and the policy's grants (verifies spec: ADM)
 
 ## Project details
 

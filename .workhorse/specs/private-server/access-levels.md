@@ -67,6 +67,7 @@ A caller's level is resolved afresh for each request, so taking a level from som
 ## The permissions page
 
 The operator interface presents the levels on a permissions page under the settings' access section, one row per level, highest first, each saying what the level may do.
+Only an administrator sees the page, and only an administrator reads the lists or what the policy grants each level.
 Beside each level are its two sources:
 
 - its tailnet grant, naming the capability key that confers it and the sources the policy currently grants it to, each with how many people it resolves to;
