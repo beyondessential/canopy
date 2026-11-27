@@ -14,6 +14,6 @@ Adds support between admin and PM on the permissions page's ladder, reached by i
 
 That splits today's single admin gate into two grades: every write handler is placed as support or admin, and the admin-only settings pages gain a read gate. Where the support/admin line falls is this card's to decide, along with the tailnet policy change that gives people support.
 
-## Reach Canopy from the public internet
+## Reach Canopy from the public internet · D7
 
 People not on the tailnet, PMs first, reach Canopy over the internet by signing in with Google. This is a second front door beside the tailnet's identity headers, so everything behind it decides what someone from outside the tailnet may see. It gives the "all" level an email list on the permissions page, naming who may come in this way.
