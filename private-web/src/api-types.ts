@@ -3439,6 +3439,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/homepage/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clear the caller's choice, so the root opens their default again.
+         * @description Has no effect where the caller has chosen nothing.
+         */
+        post: operations["homepage_clear"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/homepage/get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The caller's homepage.
+         * @description Returns the path the caller has chosen, if any, and the default the tailnet
+         *     policy gives them, if any. The root opens the chosen path, else the
+         *     default, else the status page.
+         */
+        post: operations["homepage_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/homepage/set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Choose the caller's homepage, replacing any earlier choice.
+         * @description Refuses a path that does not begin with a single `/`, is `/` alone, or
+         *     carries a query or fragment.
+         */
+        post: operations["homepage_set"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/identity/add_relying_party": {
         parameters: {
             query?: never;
@@ -9176,6 +9239,16 @@ export interface components {
              */
             id: string;
         };
+        /** @description The caller's homepage: the page they chose, and their default. */
+        Homepage: {
+            /** @description The path the caller has chosen, if any. */
+            chosen?: string | null;
+            /**
+             * @description The default the tailnet policy gives the caller, if any. Where it gives
+             *     none, the default is the status page.
+             */
+            default?: string | null;
+        };
         /** @description One host's machine, chosen by the operator. */
         HostChoice: {
             /** @description The host's key in the file. */
@@ -14295,6 +14368,14 @@ export interface components {
             relying_party_ids: string[];
             /** @description The machine or application. */
             subject: components["schemas"]["GrantSubject"];
+        };
+        /** @description A page to choose as homepage. */
+        SetHomepageArgs: {
+            /**
+             * @description The page's path within the interface, beginning with a single `/`,
+             *     without a query or fragment.
+             */
+            path: string;
         };
         /** @description Request to set a machine's schedule override for one backup type. */
         SetMachineScheduleArgs: {
@@ -21113,6 +21194,98 @@ export interface operations {
                 };
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    homepage_clear: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cleared, or there was no choice. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    homepage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Homepage"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    homepage_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetHomepageArgs"];
+            };
+        };
+        responses: {
+            /** @description Chosen. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The path is not a page's path. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -27,6 +27,7 @@ use utoipa::{
 		(name = "dns_names", description = "DNS names: the address records each application asks Canopy to publish, the requests a machine made that resolved to no application, the denials, and the pause that applies to both kinds."),
 		(name = "domains", description = "Managed DNS zones and the domains each group controls."),
 		(name = "healthchecks", description = "Healthcheck catalog: severities, conditional rules, and sample data."),
+		(name = "homepage", description = "The operator's own homepage: the page they chose for the root, and the default the tailnet policy gives them."),
 		(name = "identity", description = "Canopy as an OpenID Connect issuer: its signing keys, the relying parties it issues identity tokens for, and which machines and applications hold grants."),
 		(name = "incidents", description = "Operational incidents (groups of issues against a server)."),
 		(name = "ansible", description = "What Ansible is served for an environment: its machines and the variables that configure them, the lease a run holds, and the run state."),

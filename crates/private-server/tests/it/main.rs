@@ -29,6 +29,7 @@ mod enrollment_ticket;
 mod group_card_version;
 mod health;
 mod healthchecks;
+mod homepage;
 mod identity;
 mod instance_silences;
 mod issues;

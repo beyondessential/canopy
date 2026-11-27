@@ -15,6 +15,7 @@ pub mod devices;
 pub mod dns_names;
 pub mod domains;
 pub mod healthchecks;
+pub mod homepage;
 pub mod identity;
 pub mod incidents;
 pub mod issues;
@@ -183,6 +184,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/dns_names", dns_names::routes())
 			.nest("/domains", domains::routes())
 			.nest("/healthchecks", healthchecks::routes())
+			.nest("/homepage", homepage::routes())
 			.nest("/identity", identity::routes())
 			.nest("/incidents", incidents::routes())
 			.nest("/ansible", ansible::routes())

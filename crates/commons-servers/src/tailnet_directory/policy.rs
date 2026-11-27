@@ -1,16 +1,23 @@
-//! What the tailnet policy grants on Canopy: access levels.
+//! What the tailnet policy grants on Canopy: access levels, and default
+//! homepages.
 //!
 //! Spec: `.workhorse/specs/private-server/access-levels.md` (id `ADM`), "The
-//! Canopy grant" and "Resolving grant sources".
+//! Canopy grant" and "Resolving grant sources", and
+//! `.workhorse/specs/private-server/homepage.md` (id `HOME`), "The default
+//! homepage".
 
 use std::collections::{HashMap, HashSet};
 
-use database::access_lists::{ListLevel, normalise_login};
+use database::{
+	access_lists::{ListLevel, normalise_login},
+	operator_homepages,
+};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// The Canopy application capability, whose values carry level keys, and the
-/// service tag a grant must target for them to count.
+/// The Canopy application capability, whose values carry level keys and a
+/// default homepage, and the service tag a grant must target for them to
+/// count.
 pub const CANOPY_CAP: &str = "bes.au/cap/canopy";
 pub const CANOPY_SERVICE_TAG: &str = "tag:server-canopy";
 
@@ -96,11 +103,20 @@ impl LevelGrants {
 	}
 }
 
+/// A default homepage a grant gives its sources.
+#[derive(Debug, Clone)]
+struct HomeGrant {
+	path: String,
+	priority: f64,
+	coverage: Coverage,
+}
+
 /// Everything one read of the policy grants on Canopy.
 #[derive(Debug, Default, Clone)]
 pub(super) struct PolicyGrants {
 	admin: LevelGrants,
 	pm: LevelGrants,
+	homes: Vec<HomeGrant>,
 }
 
 impl PolicyGrants {
@@ -118,6 +134,10 @@ impl PolicyGrants {
 				.iter()
 				.map(|src| resolve_source(policy, src))
 				.collect();
+			let mut grant_coverage = Coverage::default();
+			for (_, coverage) in &sources {
+				grant_coverage.extend(coverage);
+			}
 
 			let key_set = |key: &str| {
 				values
@@ -129,6 +149,24 @@ impl PolicyGrants {
 			}
 			if key_set("pm") {
 				out.pm.add(&sources);
+			}
+
+			for value in values {
+				let Some(path) = value.get("home").and_then(serde_json::Value::as_str) else {
+					continue;
+				};
+				if !operator_homepages::is_valid_path(path) {
+					tracing::warn!(home = %path, "canopy grant carries a home that is not a page's path; ignoring");
+					continue;
+				}
+				out.homes.push(HomeGrant {
+					path: path.to_owned(),
+					priority: value
+						.get("priority")
+						.and_then(serde_json::Value::as_f64)
+						.unwrap_or(0.0),
+					coverage: grant_coverage.clone(),
+				});
 			}
 		}
 		out
@@ -151,6 +189,17 @@ impl PolicyGrants {
 	/// The sources conferring a level.
 	pub(super) fn sources(&self, level: ListLevel) -> Vec<ConferringSource> {
 		self.level_grants(level).sources.clone()
+	}
+
+	/// The default homepage the policy gives a lowercased login.
+	pub(super) fn default_home(&self, login: &str) -> Option<String> {
+		choose_default_home(
+			self.homes
+				.iter()
+				.filter(|home| home.coverage.covers(login))
+				.map(|home| (home.path.as_str(), home.priority)),
+		)
+		.map(ToOwned::to_owned)
 	}
 }
 
@@ -201,12 +250,75 @@ fn resolve_source(policy: &PolicyFile, src: &str) -> (ConferringSource, Coverage
 	)
 }
 
+/// How many segments a path has, not counting empty ones, so a trailing `/`
+/// adds none.
+fn segments(path: &str) -> usize {
+	path.split('/').filter(|s| !s.is_empty()).count()
+}
+
+/// Pick one default homepage from those a person's grants give them: the
+/// highest priority, then the path with the most segments, then the path
+/// first in alphabetical order.
+// spec: HOME#the-default-homepage
+pub fn choose_default_home<'a>(
+	candidates: impl IntoIterator<Item = (&'a str, f64)>,
+) -> Option<&'a str> {
+	candidates
+		.into_iter()
+		.max_by(|(a, a_priority), (b, b_priority)| {
+			a_priority
+				.total_cmp(b_priority)
+				.then_with(|| segments(a).cmp(&segments(b)))
+				.then_with(|| b.cmp(a))
+		})
+		.map(|(path, _)| path)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
 
 	fn resolve(json: serde_json::Value) -> PolicyGrants {
 		PolicyGrants::resolve(&serde_json::from_value(json).unwrap())
+	}
+
+	#[test]
+	fn default_home_goes_to_the_highest_priority() {
+		assert_eq!(
+			choose_default_home([("/fleet/pm/projects", 0.0), ("/status", 2.0)]),
+			Some("/status"),
+		);
+	}
+
+	#[test]
+	fn default_home_at_equal_priority_goes_to_more_segments() {
+		assert_eq!(
+			choose_default_home([("/status", 1.0), ("/fleet/pm", 1.0)]),
+			Some("/fleet/pm"),
+		);
+	}
+
+	#[test]
+	fn a_trailing_slash_adds_no_segment() {
+		// `/zebra/` has one segment, as `/alpha` does, so alphabetical order
+		// decides.
+		assert_eq!(
+			choose_default_home([("/zebra/", 0.0), ("/alpha", 0.0)]),
+			Some("/alpha"),
+		);
+	}
+
+	#[test]
+	fn default_home_at_equal_priority_and_segments_goes_alphabetically() {
+		assert_eq!(
+			choose_default_home([("/fleet/pm", 0.0), ("/fleet/groups", 0.0)]),
+			Some("/fleet/groups"),
+		);
+	}
+
+	#[test]
+	fn no_homes_no_default() {
+		assert_eq!(choose_default_home([]), None);
 	}
 
 	#[test]
@@ -260,7 +372,7 @@ mod tests {
 
 		let neither = resolve(serde_json::json!({
 			"grants": [{
-				"app": { "bes.au/cap/canopy": [{ "admin": false }] },
+				"app": { "bes.au/cap/canopy": [{ "admin": false, "home": "/status/x" }] },
 				"dst": ["tag:server-canopy"],
 				"src": ["dana@bes.au"],
 			}],
@@ -272,12 +384,13 @@ mod tests {
 	fn another_capability_confers_nothing() {
 		let grants = resolve(serde_json::json!({
 			"grants": [{
-				"app": { "bes.au/cap/other": [{ "admin": true }] },
+				"app": { "bes.au/cap/other": [{ "admin": true, "home": "/fleet/pm" }] },
 				"dst": ["tag:server-canopy"],
 				"src": ["dana@bes.au"],
 			}],
 		}));
 		assert_eq!(grants.level("dana@bes.au"), None);
+		assert_eq!(grants.default_home("dana@bes.au"), None);
 	}
 
 	#[test]
@@ -357,5 +470,100 @@ mod tests {
 			],
 		);
 		assert!(grants.sources(ListLevel::Admin).is_empty());
+	}
+
+	#[test]
+	fn home_is_given_to_the_grants_sources_on_the_canopy_tag_only() {
+		let grants = resolve(serde_json::json!({
+			"groups": { "group:pm": ["pat@bes.au"] },
+			"grants": [
+				{
+					"app": { "bes.au/cap/canopy": [{ "pm": true, "home": "/fleet/pm" }] },
+					"dst": ["tag:server-canopy"],
+					"src": ["group:pm"],
+				},
+				{
+					"app": { "bes.au/cap/canopy": [{ "home": "/elsewhere", "priority": 9 }] },
+					"dst": ["tag:server-other"],
+					"src": ["*"],
+				},
+			],
+		}));
+		assert_eq!(
+			grants.default_home("pat@bes.au").as_deref(),
+			Some("/fleet/pm")
+		);
+		assert_eq!(grants.default_home("other@bes.au"), None);
+	}
+
+	#[test]
+	fn a_home_that_is_not_a_page_path_is_ignored() {
+		for home in [
+			"//evil.example",
+			"https://evil.example/status",
+			"fleet",
+			"/",
+			"/status?x=1",
+			"/status#top",
+		] {
+			let grants = resolve(serde_json::json!({
+				"grants": [{
+					"app": { "bes.au/cap/canopy": [{ "home": home, "priority": 5 }, { "home": "/status" }] },
+					"dst": ["tag:server-canopy"],
+					"src": ["*"],
+				}],
+			}));
+			assert_eq!(
+				grants.default_home("anyone@bes.au").as_deref(),
+				Some("/status"),
+				"{home:?} should be ignored",
+			);
+		}
+	}
+
+	#[test]
+	fn a_priority_that_is_not_a_number_ranks_at_zero() {
+		let grants = resolve(serde_json::json!({
+			"grants": [{
+				"app": { "bes.au/cap/canopy": [
+					{ "home": "/status", "priority": "10" },
+					{ "home": "/fleet/pm", "priority": 0 },
+				] },
+				"dst": ["tag:server-canopy"],
+				"src": ["*"],
+			}],
+		}));
+		// Were "10" read as ten, `/status` would win.
+		assert_eq!(
+			grants.default_home("anyone@bes.au").as_deref(),
+			Some("/fleet/pm")
+		);
+	}
+
+	#[test]
+	fn homes_from_several_grants_settle_by_priority() {
+		let grants = resolve(serde_json::json!({
+			"groups": { "group:pm": ["pat@bes.au"] },
+			"grants": [
+				{
+					"app": { "bes.au/cap/canopy": [{ "home": "/fleet/pm/deep/path" }] },
+					"dst": ["tag:server-canopy"],
+					"src": ["*"],
+				},
+				{
+					"app": { "bes.au/cap/canopy": [{ "home": "/status", "priority": 1 }] },
+					"dst": ["tag:server-canopy"],
+					"src": ["group:pm"],
+				},
+			],
+		}));
+		assert_eq!(
+			grants.default_home("pat@bes.au").as_deref(),
+			Some("/status")
+		);
+		assert_eq!(
+			grants.default_home("anyone@bes.au").as_deref(),
+			Some("/fleet/pm/deep/path"),
+		);
 	}
 }

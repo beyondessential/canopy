@@ -5217,6 +5217,26 @@
         ],
         "type": "object"
       },
+      "Homepage": {
+        "description": "The caller's homepage: the page they chose, and their default.",
+        "properties": {
+          "chosen": {
+            "description": "The path the caller has chosen, if any.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default": {
+            "description": "The default the tailnet policy gives the caller, if any. Where it gives\nnone, the default is the status page.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "HostChoice": {
         "description": "One host's machine, chosen by the operator.",
         "properties": {
@@ -14053,6 +14073,19 @@
         "required": [
           "subject",
           "relying_party_ids"
+        ],
+        "type": "object"
+      },
+      "SetHomepageArgs": {
+        "description": "A page to choose as homepage.",
+        "properties": {
+          "path": {
+            "description": "The page's path within the interface, beginning with a single `/`,\nwithout a query or fragment.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
         ],
         "type": "object"
       },
@@ -25224,6 +25257,129 @@
         "x-canopy-safety-mode": "write"
       }
     },
+    "/api/homepage/clear": {
+      "post": {
+        "description": "Has no effect where the caller has chosen nothing.",
+        "operationId": "homepage_clear",
+        "responses": {
+          "200": {
+            "description": "Cleared, or there was no choice."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "Clear the caller's choice, so the root opens their default again.",
+        "tags": [
+          "homepage"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/homepage/get": {
+      "post": {
+        "description": "Returns the path the caller has chosen, if any, and the default the tailnet\npolicy gives them, if any. The root opens the chosen path, else the\ndefault, else the status page.",
+        "operationId": "homepage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Homepage"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "The caller's homepage.",
+        "tags": [
+          "homepage"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/homepage/set": {
+      "post": {
+        "description": "Refuses a path that does not begin with a single `/`, is `/` alone, or\ncarries a query or fragment.",
+        "operationId": "homepage_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetHomepageArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Chosen."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The path is not a page's path."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "Choose the caller's homepage, replacing any earlier choice.",
+        "tags": [
+          "homepage"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
     "/api/identity/add_relying_party": {
       "post": {
         "description": "Two never share an audience. Registering is recorded in the audit log.",
@@ -31096,6 +31252,10 @@
     {
       "description": "Healthcheck catalog: severities, conditional rules, and sample data.",
       "name": "healthchecks"
+    },
+    {
+      "description": "The operator's own homepage: the page they chose for the root, and the default the tailnet policy gives them.",
+      "name": "homepage"
     },
     {
       "description": "Canopy as an OpenID Connect issuer: its signing keys, the relying parties it issues identity tokens for, and which machines and applications hold grants.",

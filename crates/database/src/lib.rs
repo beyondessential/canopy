@@ -41,6 +41,7 @@ pub mod memory;
 pub mod migration_tests;
 pub mod notes;
 pub mod notes_log;
+pub mod operator_homepages;
 pub mod operator_sessions;
 pub mod osv;
 pub mod packages;

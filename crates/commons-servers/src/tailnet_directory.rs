@@ -27,7 +27,9 @@ use tokio::sync::RwLock;
 
 mod policy;
 
-pub use policy::{CANOPY_CAP, CANOPY_SERVICE_TAG, ConferringSource, SourceCoverage};
+pub use policy::{
+	CANOPY_CAP, CANOPY_SERVICE_TAG, ConferringSource, SourceCoverage, choose_default_home,
+};
 use policy::{PolicyFile, PolicyGrants};
 
 /// Resolved node identity for a tailnet IP. `addresses` carries every
@@ -111,7 +113,8 @@ struct Cache {
 	last_refresh: Option<Instant>,
 	/// What the tailnet policy grants on Canopy, as of the last successful
 	/// read. `None` until a read succeeds; a failed read leaves the previous
-	/// value in place, so a control-plane outage never withdraws a level.
+	/// value in place, so a control-plane outage never withdraws a level or a
+	/// default homepage.
 	policy: Option<PolicyRead>,
 }
 
@@ -235,6 +238,14 @@ impl TailnetDirectory {
 		let login = normalise_login(login);
 		let cache = self.inner.cache.read().await;
 		cache.policy.as_ref()?.grants.level(&login)
+	}
+
+	/// The default homepage the tailnet policy gives the login, ignoring its
+	/// case, as of the last successful read.
+	pub async fn default_home_by_policy(&self, login: &str) -> Option<String> {
+		let login = normalise_login(login);
+		let cache = self.inner.cache.read().await;
+		cache.policy.as_ref()?.grants.default_home(&login)
 	}
 
 	/// What the policy grants each level, and when it was last read.
@@ -669,7 +680,7 @@ mod tests {
 			[],
 			serde_json::json!({
 				"grants": [{
-					"app": { "bes.au/cap/canopy": [{ "pm": true }] },
+					"app": { "bes.au/cap/canopy": [{ "pm": true, "home": "/fleet/pm" }] },
 					"dst": ["tag:server-canopy"],
 					"src": ["pat@bes.au"],
 				}],
@@ -683,6 +694,10 @@ mod tests {
 			.expect_err("the test directory's API is unreachable");
 
 		assert_eq!(dir.level_by_policy("Pat@bes.au").await, Some(ListLevel::Pm));
+		assert_eq!(
+			dir.default_home_by_policy("pat@bes.au").await.as_deref(),
+			Some("/fleet/pm"),
+		);
 		assert_eq!(dir.policy_summary().await.read_at, before);
 	}
 

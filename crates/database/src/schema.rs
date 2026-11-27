@@ -928,6 +928,13 @@ diesel::table! {
 }
 
 diesel::table! {
+	operator_homepages (login) {
+		login -> Text,
+		path -> Text,
+	}
+}
+
+diesel::table! {
 	operator_sessions (id) {
 		id -> Uuid,
 		login -> Text,
@@ -1566,6 +1573,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	migration_tests,
 	migration_timings,
 	notes_revisions,
+	operator_homepages,
 	operator_sessions,
 	post_migration_timings,
 	recovery_vault_writes,
