@@ -28,7 +28,7 @@ A run takes those from Canopy, rather than from how it was started, so a lease t
 
 Canopy serves the environment's shape and the caller renders it into Ansible's inventory, so no Ansible format appears in the response.
 
-What a run is served carries secret values, so it is served to an administrator (see [ADM](../admin-access.md)), and a run reads it as the administrator running it.
+What a run is served carries secret values, so it is served to an administrator (see [ADM](../access-levels.md)), and a run reads it as the administrator running it.
 It is served only to the holder of the environment's lease (see [ANSRUN](runs.md), "Run leases").
 
 ## Managed machines
