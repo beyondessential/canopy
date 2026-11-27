@@ -57,6 +57,17 @@ export CARGO_TERM_COLOR=never
 # A rig build is built once, and sccache cannot cache an incremental compile.
 export CARGO_INCREMENTAL=0
 
+# The binaries a lease runs. deps warms the dependency build with exactly the
+# set build compiles, so a binary named in one and not the other costs a
+# recompile of what the shared build was meant to cover.
+cargo_build_rig_bins() {
+  set --
+  for bin in private-server migrate seed; do
+    set -- "$@" --bin "$bin"
+  done
+  cargo build --locked "$@"
+}
+
 # What the seed step leaves for the lease: the seeded device's certificate.
 RIG_OUT="$RIG_SOURCE/.rig-out"
 

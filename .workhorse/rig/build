@@ -14,4 +14,4 @@ if [ -L target ]; then
 fi
 
 (cd private-web && npm run build)
-cargo build --locked --bin private-server --bin migrate --bin seed
+cargo_build_rig_bins

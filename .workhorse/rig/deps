@@ -7,4 +7,4 @@ cd "$RIG_SOURCE"
 
 # Every crate the servers depend on, compiled once per Cargo.lock. Each build
 # gets a copy of this target and recompiles only the workspace's own crates.
-cargo build --locked --bin private-server --bin migrate --bin seed
+cargo_build_rig_bins
