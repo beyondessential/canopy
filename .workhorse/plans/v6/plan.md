@@ -10,9 +10,9 @@ Token sign-in to Tamanu, the support level and public access are cards of their 
 
 Canopy keeps reading the whole policy file (`TailnetDirectory::refresh_policy`), and `resolve_admins` grows into resolving every level key and every `home`:
 
-- `AdminGrants` becomes per-level grants: for each of `admin` and `pm`, the lowercased logins and whether `autogroup:member` is a source. Same source resolution as today.
-- Each `bes.au/cap/canopy` value carrying a `home` (a string starting with a single `/`) contributes `(home, priority)` to every login its grant's sources resolve to, and to every member where the source is `autogroup:member`. Resolving one login's default picks by priority, then segment count, then alphabetical order. That rule is a pure function, unit-tested on its own.
-- The cache also keeps, per level, the sources that conferred it with their resolved member count, and the time of the last successful read, for the permissions page.
+- `AdminGrants` becomes per-level grants: for each of `admin` and `pm`, the lowercased logins and whether everyone is covered. Same source resolution as today, plus `*`, which covers everyone as `autogroup:member` does (today it's ignored).
+- Each `bes.au/cap/canopy` value on a grant to `tag:server-canopy` carrying a valid `home` contributes `(home, priority)` to every login its grant's sources resolve to, and to everyone where a source covers everyone. A valid `home` starts with a single `/`, isn't `/` alone, and has no `?` or `#`. A `priority` that isn't a JSON number is zero. Resolving one login's default picks by priority, then segment count (empty segments, so a trailing `/`, don't count), then alphabetical order. That rule is a pure function, unit-tested on its own.
+- The cache also keeps, per level, the sources that conferred it, each as written with what it resolves to (a group's member count, one person, everyone, or no one), and the time of the last successful read, for the permissions page. No tailnet API configuration means no read ever happens, which the page reports as such.
 - A failed read keeps the previous grants, homes and time, as `admin` is kept today.
 
 The per-request caller capabilities header (`Tailscale-App-Capabilities`) would replace this once the Kubernetes operator's ingress can forward caps. It isn't used here (see "Explicitly rejected").
@@ -25,11 +25,11 @@ The per-request caller capabilities header (`Tailscale-App-Capabilities`) would 
 
 ### Lists
 
-The `admins` table generalises to one table of list entries keyed by `(level, login)`, with level a Postgres enum (`admin`, `pm`, `all`). A migration (`just migration access_lists`) moves every `admins` row in as `admin` and drops `admins`. `database::admins` becomes `database::access_lists`, every caller updated.
+The `admins` table generalises to one table of list entries keyed by `(level, login)`, with level a Postgres enum (`admin`, `pm`). All has no list. A migration (`just migration access_lists`) moves every `admins` row in as `admin`, lowercased and deduplicated, and drops `admins`. `database::admins` becomes `database::access_lists`, every caller updated. Logins are stored lowercased and looked up lowercased, so the lists compare ignoring case as the policy does (`Admin::check_email` is an exact match today).
 
 Handlers move from `fns/admins.rs` to `fns/access.rs`:
 
-- `list`: read_only, silent. Each level's entries, plus the policy's conferring sources with member counts and the last read time.
+- `list`: read_only, silent. Each level's entries, plus the policy's conferring sources with what each resolves to, and the last read time (none when the policy isn't configured).
 - `add`: `danger(issues)`, audited `AccessListEntryAdded` (level, login).
 - `remove`: `danger(invalidates)`, audited `AccessListEntryRemoved` (level, login).
 
@@ -37,7 +37,7 @@ Today's admin allowlist handlers are audit-silent; these are audited, as the spe
 
 ### Project details
 
-Three nullable text columns on `server_groups`: `project`, `pm_in_charge`, `ground_contact`. Empty strings are stored as null.
+Three nullable text columns on `server_groups`: `project`, `pm_in_charge`, `ground_contact`. Empty strings are stored as null. A `pm_in_charge` without text either side of an `@` is refused as a 400.
 
 - `server_groups::update_project_details`: `TailscalePm`, `write`, `audit(GroupProjectDetailsChanged)`, `audit.unchanged()` when nothing differs. The action records the group, and its detail holds each changed field with `from` and `to`.
 - `get` and the projects listing return the PM in charge with the display name from `tailscale_users` where the login is known there.
@@ -48,20 +48,27 @@ Three nullable text columns on `server_groups`: `project`, `pm_in_charge`, `grou
 `server_groups::projects` (read_only, silent) returns every live group with a live production environment, its details, and its production `tamanu-central` and `tamanu-facility` applications with:
 
 - the application's configured URL as the public address;
-- the machine's bound tailnet name as the tailnet address (none for a cluster-hosted application or a machine without one).
+- the machine's bound tailnet name as the tailnet address (none for a cluster-hosted application or a machine without one), linked as `https://<name>`;
+- the machine's name, so the SPA tells apart facilities sharing a name as the fleet does elsewhere.
 
-The groups are ordered by name. Splitting them into the viewer's and everyone else's, and searching, happen in the SPA, since the whole list is small and searching it needs no round trip.
+The groups are ordered by name, and facilities by name. Splitting them into the viewer's and everyone else's, and searching, happen in the SPA, since the whole list is small and searching it needs no round trip.
 
 ### Homepage
 
 - Table `operator_homepages(login text primary key, path text not null)`, keyed by lowercased login.
-- `homepage::get` returns `{ chosen, default }`: `chosen` from the table, `default` from the policy's resolution for the caller. `homepage::set { path }` and `homepage::clear`: read_only (own preference, per SAFE), silent. `set` refuses a path that isn't a single-`/` path.
+- `homepage::get` returns `{ chosen, default }`: `chosen` from the table, `default` from the policy's resolution for the caller. `homepage::set { path }` and `homepage::clear`: read_only (own preference, per SAFE), silent. `set` refuses a path that isn't a single-`/` path, is `/` alone, or carries a query or fragment.
 - The SPA's `/` route becomes a resolver: `chosen ?? default ?? "/status"`, then `Navigate` with `replace`.
 - The toggle compares the current pathname (no query string) with the effective homepage.
 
 ### Safety modes
 
-`SafetyModeControl` offers write from PM up and danger only to admins. Nothing changes server-side: a raise authorises nothing, and handlers are gated by level.
+`SafetyModeControl` offers write from PM up and danger only to admins, and shows read-only alone to an all-level operator. Nothing changes server-side: a raise authorises nothing, and handlers are gated by level.
+
+SAFE now says "operator surface" where it said "administrative surface"; code comments and test messages using the old phrase follow (`tailnet_directory.rs`, `operator_sessions.rs`, `private-server/src/lib.rs`, `safety.rs`, `tests/it/openapi_spec.rs`, `private-web/src/safety-modes.ts`).
+
+### Fleet query interface
+
+`get_group` returns the three project details (with the PM in charge's display name where known), and `find_groups` matches its term against them as well as name and id.
 
 ### Bestool snippets
 
@@ -86,7 +93,7 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 ### Database
 
 - [ ] Migration: `access_list_entries` with the level enum, `admins` rows moved in, `admins` dropped
-- [ ] `database::access_lists` replacing `database::admins`, every caller moved
+- [ ] `database::access_lists` replacing `database::admins`, every caller moved, logins lowercased
 - [ ] Migration: `server_groups.project`, `pm_in_charge`, `ground_contact`
 - [ ] `ServerGroup::update_project_details` returning what changed
 - [ ] Projects query: live groups with live production Tamanu, with machine tailnet names
@@ -95,19 +102,21 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 
 ### Policy and levels
 
-- [ ] Per-level grant resolution and `home`/`priority` collection in `tailnet_directory`
+- [ ] Per-level grant resolution, `*` as everyone, and `home`/`priority` collection from grants to Canopy's tag, in `tailnet_directory`
 - [ ] Default homepage rule as a pure function, with unit tests
-- [ ] Conferring sources with member counts, and last read time, kept in the cache
+- [ ] Conferring sources with what each resolves to, and last read time (or never configured), kept in the cache
 - [ ] `AccessLevel` resolution and the `TailscalePm` extractor
 - [ ] `commons::current_user_level`, replacing `is_current_user_admin`
 
 ### Handlers
 
 - [ ] `fns/access.rs` replacing `fns/admins.rs`
-- [ ] `server_groups::update_project_details` and the details on `get`
+- [ ] `server_groups::update_project_details`, refusing a PM in charge with no `@`, and the details on `get`
 - [ ] `server_groups::projects`
 - [ ] `fns/homepage.rs`
 - [ ] `bestool::save_snippet` and `delete_snippet` take `TailscaleAdmin`
+- [ ] `canopy-mcp`: project details on `get_group`, searched by `find_groups`
+- [ ] "administrative surface" to "operator surface" in code comments and test messages
 - [ ] `just gen-openapi`
 
 ### SPA
@@ -119,6 +128,7 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 - [ ] Group detail: Project panel and its edit dialog, shown from PM up
 - [ ] Permissions page at `/settings/permissions`, with a redirect from `/settings/admins`
 - [ ] `SafetyModeControl` offers modes by level
+- [ ] Projects view: a production environment with no Tamanu reads as none
 
 ### Tests
 
