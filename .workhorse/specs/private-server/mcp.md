@@ -70,7 +70,7 @@ When the result is truncated to its bound, the result says so, so the client doe
 **Find machines** takes an optional free-text term (matched against name, reported hostname, or identifier) and optional filters for group, platform, and whether the machine is cloud-hosted, plus a flag to include archived machines.
 It returns a bounded list of matching machines in compact form — identifier, name, reported hostname, platform, owning group, how many applications run on it, when each was last seen, and its current health — and says so when truncated, as the application search does.
 
-**Find groups** takes an optional free-text term and returns the matching groups, each with its live member count, its effective version, the highest rank among its members, its backup configuration state, and when it last backed up.
+**Find groups** takes an optional free-text term, matched against each group's name, identifier and project details, and returns the matching groups, each with its live member count, its effective version, the highest rank among its members, its backup configuration state, and when it last backed up.
 
 ### Detail
 
@@ -81,7 +81,7 @@ Its per-check health is its own checks as the operator UI presents them (see [CH
 
 Backup capability and history are the machine's rather than any application's, so a box hosting two workloads reports one set (see [BAK](../public-server/backup.md)).
 
-**Get group** takes a group identifier and returns the full record for one group: its own fields, its members in compact form with each member's version and health, its backup configuration, per-type schedules, and its machines' schedule overrides, its repository statistics, its recent backup and maintenance activity, and when its repository was last inspected.
+**Get group** takes a group identifier and returns the full record for one group: its own fields, its project details (see [GRP](../servers/groups.md), "Project details"), its members in compact form with each member's version and health, its backup configuration, per-type schedules, and its machines' schedule overrides, its repository statistics, its recent backup and maintenance activity, and when its repository was last inspected.
 
 ### Versions
 
