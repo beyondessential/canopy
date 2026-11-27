@@ -16,4 +16,4 @@ That splits today's single admin gate into two grades: every write handler is pl
 
 ## Reach Canopy from the public internet
 
-People not on the tailnet, PMs first, reach Canopy over the internet by signing in with Google. This is a second front door beside the tailnet's identity headers, so everything behind it decides what someone from outside the tailnet may see. The "all" level's email list on the permissions page is who may come in this way.
+People not on the tailnet, PMs first, reach Canopy over the internet by signing in with Google. This is a second front door beside the tailnet's identity headers, so everything behind it decides what someone from outside the tailnet may see. It gives the "all" level an email list on the permissions page, naming who may come in this way.

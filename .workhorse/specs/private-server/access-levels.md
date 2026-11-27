@@ -10,25 +10,28 @@ This concerns human operators of the operator surface and is distinct from the d
 
 ## The levels
 
-The levels are admin, PM, and all.
+The levels are admin, PM (project manager), and all.
 They are a ladder: each includes everything the levels below it may do, and a caller's level is the highest any source gives them.
 
-- All reads the operator surface.
+- All reads the operator surface, apart from the reads other specs keep to an administrator, such as the [audit log](../platform/audit-log.md), [secret Ansible variable values](ansible/variables.md) and the [fleet query interface's access tokens](mcp.md).
 - PM also edits any group's project details (see [GRP](../servers/groups.md), "Project details").
 - Admin does everything on the operator surface, Canopy's own settings included.
 
 Every caller reaching the operator surface with a tailnet user identity holds all.
-Wherever this spec set says a thing is done by an administrator, it is done by a caller at the admin level.
+Wherever this spec set says a thing is done by an administrator, it is done by a caller at the admin level, and where it says any operator or any tailnet user, at the all level.
 
 ## How a level is held
 
-A caller holds a level when either:
+A caller holds admin or PM when either:
 
 - their login is on that level's list, or
 - the tailnet policy grants them that level.
 
 The two sources are independent, and either alone suffices.
-Each level has a list of its own, which an administrator edits in Canopy; the policy-granted set is authored in the tailnet policy and not editable through Canopy.
+Admin and PM each have a list of their own, which an administrator edits in Canopy; the policy-granted set is authored in the tailnet policy and not editable through Canopy.
+All has neither, since every tailnet user holds it.
+
+Logins are compared ignoring case, on the lists and in the policy alike.
 
 ## The Canopy grant
 
@@ -50,6 +53,7 @@ Each source of a level-conferring grant is resolved, against the same policy, to
 - A group resolves to its listed member logins.
 - A bare user login resolves to itself.
 - `autogroup:member` covers any caller bearing a tailnet user identity.
+- `*` covers every caller, as `autogroup:member` and `autogroup:tagged` do together.
 - `autogroup:tagged` covers any caller identified only by a device tag.
 - Any other autogroup is not resolved and covers no caller.
 
@@ -61,6 +65,7 @@ The operator surface admits only callers bearing a tailnet user identity, so a s
 A level derived from the policy reflects the policy as of the most recent successful read, refreshed periodically.
 Reading the policy requires read access to the tailnet policy file.
 When the policy cannot be read, the lists remain authoritative, so a control-plane outage never withdraws a level held through a list.
+Where Canopy is not configured to read the policy, the lists alone confer levels.
 
 A caller's level is resolved afresh for each request, so taking a level from someone takes effect at once rather than when their current session ends.
 
@@ -68,15 +73,22 @@ A caller's level is resolved afresh for each request, so taking a level from som
 
 The operator interface presents the levels on a permissions page under the settings' access section, one row per level, highest first, each saying what the level may do.
 Only an administrator sees the page, and only an administrator reads the lists or what the policy grants each level.
-Beside each level are its two sources:
+Beside admin and PM are their two sources:
 
-- its tailnet grant, naming the capability key that confers it and the sources the policy currently grants it to, each with how many people it resolves to;
-- its list, with the logins on it.
+- the tailnet grant, naming the capability key that confers the level and the sources the policy currently grants it to;
+- the list, with the logins on it.
 
-All has no key: its tailnet side is who the tailnet policy lets reach Canopy at all.
+Each source is shown as the policy writes it, with what it resolves to:
+
+- a group, with how many members it lists;
+- a bare login, as that one person;
+- `autogroup:member` and `*`, as everyone on the tailnet;
+- any other source, including a group the policy does not define, as covering no one.
+
+All has no key and no list: beside it the page says that everyone on the tailnet who can reach Canopy holds it.
 
 The page explains how to grant a level on the tailnet: the capability's name, the destination tag, that a grant's sources receive every level whose key is true, and how a grant sets a default homepage.
-It says when the policy was last read.
+It says when the policy was last read, or that Canopy is not configured to read it.
 
 Only an administrator adds a login to a list or removes one.
 Adding a login issues access and removing one invalidates it, so both are graded accordingly (see [SAFE](safety-modes.md)).
@@ -87,7 +99,7 @@ Both are audited actions, naming the level and the login (see [AUD](../platform/
 A caller can ask for its own level without holding any particular one, so that a client can decide which controls to offer before attempting anything.
 The answer is the caller's level, and all for a caller holding nothing higher.
 A caller bearing no tailnet identity at all holds no level and is told so.
-A failure that is not an authorization outcome, such as a list being unreadable, is reported as an error rather than as a lower level, because a caller cannot tell a wrongly-low answer from a real one.
+A failure that is not an authorisation outcome, such as a list being unreadable, is reported as an error rather than as a lower level, because a caller cannot tell a wrongly-low answer from a real one.
 
 ## Presenting controls by level
 
