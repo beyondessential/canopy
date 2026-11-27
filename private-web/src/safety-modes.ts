@@ -137,6 +137,7 @@ export const SAFETY_MODES = {
 	"fleet/groups/search": "read-only",
 	"fleet/groups/server_counts": "read-only",
 	"fleet/groups/update": "write",
+	"fleet/groups/update_project_details": "write",
 	"fleet/machines/archive": "danger",
 	"fleet/machines/attach_tailscale_device": "danger",
 	"fleet/machines/create": "write",

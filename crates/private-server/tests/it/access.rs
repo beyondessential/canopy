@@ -16,13 +16,18 @@ use crate::access_levels::{level_of, run_with_policy, trust_headers};
 const ADMIN: &str = "boss@example.com";
 const SESSION_HEADER: &str = "x-canopy-session";
 
-async fn post(private: &TestServer, path: &str, login: Option<&str>, body: Value) -> Value {
+pub(crate) async fn post(
+	private: &TestServer,
+	path: &str,
+	login: Option<&str>,
+	body: Value,
+) -> Value {
 	post_in(private, path, login, None, body).await
 }
 
 /// Post as a login, in a session where one is given, returning the status and
 /// body as one value so a refusal can be checked by both.
-async fn post_in(
+pub(crate) async fn post_in(
 	private: &TestServer,
 	path: &str,
 	login: Option<&str>,
@@ -46,7 +51,7 @@ async fn post_in(
 }
 
 /// A session for the login, raised to the mode.
-async fn raised(private: &TestServer, login: &str, mode: &str) -> String {
+pub(crate) async fn raised(private: &TestServer, login: &str, mode: &str) -> String {
 	let raised = post(
 		private,
 		"/api/safety/raise",
@@ -61,11 +66,11 @@ async fn raised(private: &TestServer, login: &str, mode: &str) -> String {
 		.to_owned()
 }
 
-fn problem(response: &Value) -> &str {
+pub(crate) fn problem(response: &Value) -> &str {
 	response["body"]["type"].as_str().unwrap_or_default()
 }
 
-async fn log(conn: &mut AsyncPgConnection, action: &str) -> Vec<Entry> {
+pub(crate) async fn log(conn: &mut AsyncPgConnection, action: &str) -> Vec<Entry> {
 	audit::find(
 		conn,
 		&Filter {

@@ -2,14 +2,22 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
-use commons_servers::{audit::Audit, backup_jobs::BillingLabels, tailscale_auth::TailscaleAdmin};
+use commons_servers::{
+	audit::Audit,
+	backup_jobs::BillingLabels,
+	tailscale_auth::{TailscaleAdmin, TailscalePm},
+};
 use commons_types::{
 	Uuid,
 	server::{TagMap, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 };
+use database::audit::{Action, Record};
 use database::notes_log::{self, Author, NotesRecord, NotesRevision, Via};
-use database::server_groups::{NewServerGroup, PartialServerGroup, ServerGroup};
+use database::server_groups::{
+	NamedProjectDetails, NewServerGroup, PartialServerGroup, ProjectDetails, ServerGroup,
+};
+use database::tailscale_users::TailscaleUser as KnownUser;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -24,6 +32,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only, silent: get))
 		.routes(routes!(write, audit_optional(NotesChanged): create))
 		.routes(routes!(write, audit_optional(NotesChanged): update))
+		.routes(routes!(write, audit(GroupProjectDetailsChanged): update_project_details))
 		.routes(routes!(read_only, silent: notes_history))
 		.routes(routes!(write, silent: delete))
 		.routes(routes!(write, silent: restore))
@@ -155,6 +164,10 @@ pub(crate) async fn group_billing_labels(
 pub struct GroupDetail {
 	/// The group itself.
 	pub group: ServerGroup,
+	/// The group's project details, the PM in charge with the display name
+	/// Canopy knows for them.
+	// spec: GRP#project-details
+	pub project_details: NamedProjectDetails,
 	/// The group's member applications, sorted by name, with current status and
 	/// display host included.
 	pub applications: Vec<super::applications::ServerInfo>,
@@ -294,9 +307,14 @@ pub async fn get(
 		)
 		.await?
 		.is_none();
+	let project_details = named_project_details(&mut conn, &[&group])
+		.await?
+		.remove(&group.id)
+		.unwrap_or_default();
 
 	Ok(Json(GroupDetail {
 		group,
+		project_details,
 		applications,
 		machines,
 		maintained,
@@ -490,6 +508,83 @@ pub async fn update(
 	.await?;
 	audit_notes_change(&mut conn, record, Via::Operator, before).await?;
 	Ok(Json(group))
+}
+
+/// The project details of `groups`, by group id, each PM in charge with the
+/// display name Canopy knows for their login.
+// spec: GRP#project-details
+pub(crate) async fn named_project_details(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	groups: &[&ServerGroup],
+) -> Result<std::collections::HashMap<Uuid, NamedProjectDetails>> {
+	let logins: Vec<&str> = groups
+		.iter()
+		.filter_map(|group| group.pm_in_charge.as_deref())
+		.collect();
+	let names = KnownUser::names_ignoring_case(conn, &logins).await?;
+	Ok(groups
+		.iter()
+		.map(|group| (group.id, group.project_details().named(&names)))
+		.collect())
+}
+
+/// Request to set a group's project details.
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateProjectDetailsArgs {
+	/// Identifier of the group.
+	pub server_group_id: Uuid,
+	/// The group's project details. Each replaces what is held; an absent or
+	/// empty one clears it.
+	pub details: ProjectDetails,
+}
+
+/// Set a group's project details.
+///
+/// Replaces the group's project, PM in charge and contact on the ground,
+/// from the PM level up, on any group. An empty detail is cleared. Responds
+/// 400 when the PM in charge doesn't have text either side of an `@`, and 404
+/// when the group does not exist. A save that leaves the details as they were
+/// records nothing.
+// spec: GRP#project-details
+#[utoipa::path(
+	post,
+	path = "/update_project_details",
+	operation_id = "server_groups_update_project_details",
+	tag = "server_groups",
+	security(("tailscale-pm" = [])),
+	request_body = UpdateProjectDetailsArgs,
+	responses(
+		(status = 200, body = NamedProjectDetails),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn update_project_details(
+	audit: Audit,
+	_pm: TailscalePm,
+	Json(args): Json<UpdateProjectDetailsArgs>,
+) -> Result<Json<NamedProjectDetails>> {
+	let mut conn = audit.begin().await?;
+	let change =
+		ServerGroup::update_project_details(&mut conn, args.server_group_id, args.details).await?;
+	if change.is_empty() {
+		audit.unchanged();
+	} else {
+		let group = Record::group(&mut conn, args.server_group_id).await?;
+		conn.record(Action::GroupProjectDetailsChanged {
+			group,
+			project: change.project,
+			pm_in_charge: change.pm_in_charge,
+			ground_contact: change.ground_contact,
+		})
+		.await?;
+	}
+	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
+	let details = named_project_details(&mut conn, &[&group])
+		.await?
+		.remove(&group.id)
+		.unwrap_or_default();
+	Ok(Json(details))
 }
 
 /// A group's notes revision log.

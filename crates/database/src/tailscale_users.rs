@@ -72,4 +72,32 @@ impl TailscaleUser {
 			.map_err(AppError::from)?;
 		Ok(rows.into_iter().map(|u| (u.login.clone(), u)).collect())
 	}
+
+	/// The display name Canopy knows for each of `logins`, compared ignoring
+	/// case, keyed by the lowercased login. A login Canopy knows none for is
+	/// absent. Where several stored logins differ only in case, the most
+	/// recently updated one's name is taken.
+	// spec: GRP#project-details
+	pub async fn names_ignoring_case(
+		db: &mut AsyncPgConnection,
+		logins: &[&str],
+	) -> Result<HashMap<String, String>> {
+		use crate::schema::tailscale_users::dsl;
+
+		diesel::define_sql_function!(fn lower(value: diesel::sql_types::Text) -> diesel::sql_types::Text);
+
+		if logins.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let wanted: Vec<String> = logins.iter().map(|login| login.to_lowercase()).collect();
+		let rows: Vec<(String, String)> = dsl::tailscale_users
+			.select((lower(dsl::login), dsl::name))
+			.filter(lower(dsl::login).eq_any(&wanted))
+			.order(dsl::updated_at.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		// Later rows are newer, so each overwrites an older spelling's.
+		Ok(rows.into_iter().collect())
+	}
 }

@@ -974,6 +974,19 @@ actions! {
 		detail { level: crate::access_lists::ListLevel, login: String }
 	}
 
+	/// A group's project details were changed. The detail holds each detail
+	/// changed, with its value before and after, and nothing for one left as
+	/// it was.
+	// spec: GRP#project-details
+	GroupProjectDetailsChanged = "group_project_details_changed", "Change project details" {
+		records { group: Record }
+		detail {
+			project: Option<crate::server_groups::DetailChange>,
+			pm_in_charge: Option<crate::server_groups::DetailChange>,
+			ground_contact: Option<crate::server_groups::DetailChange>,
+		}
+	}
+
 	/// An artifact was registered against a version.
 	ArtifactRegistered = "artifact_registered", "Register artifact" {
 		records { artifact: Record, version: Option<Record>, group: Option<Record>, device: Record }

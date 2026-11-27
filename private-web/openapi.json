@@ -4606,10 +4606,15 @@
           "maintenance_settling": {
             "description": "Whether the suspension is only the settle period: the window has\nended and watching resumes when it elapses.",
             "type": "boolean"
+          },
+          "project_details": {
+            "$ref": "#/components/schemas/NamedProjectDetails",
+            "description": "The group's project details, the PM in charge with the display name\nCanopy knows for them."
           }
         },
         "required": [
           "group",
+          "project_details",
           "applications",
           "machines",
           "billing_labels",
@@ -9164,6 +9169,40 @@
         ],
         "type": "object"
       },
+      "NamedProjectDetails": {
+        "description": "A group's project details as they are read, the PM in charge with the\ndisplay name Canopy knows for them.",
+        "properties": {
+          "ground_contact": {
+            "description": "The contact on the ground, as free text. Absent when not filled in.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pm_in_charge": {
+            "description": "The PM in charge, by their login or address as entered. Absent when\nnot filled in.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pm_in_charge_name": {
+            "description": "The display name Canopy knows for the PM in charge's login, compared\nignoring case. Absent where it knows none, in which case the PM in\ncharge is named as entered.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project": {
+            "description": "The project the group serves, as free text. Absent when not filled in.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "NamespaceRef": {
         "description": "A namespace on the wire, as the pair of fields it is stored as.\n\nThe private API names a check by source, namespace and name, so this is\nwhat a request carries and what a listing returns alongside the\npresentational qualified form. It mirrors the storage columns rather than\ninventing a third encoding, so a row read out of a listing goes straight\nback into a mutation.",
         "properties": {
@@ -10607,6 +10646,33 @@
           "title",
           "status"
         ],
+        "type": "object"
+      },
+      "ProjectDetails": {
+        "description": "A group's three project details, each absent when not filled in.",
+        "properties": {
+          "ground_contact": {
+            "description": "The contact on the ground, as free text.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pm_in_charge": {
+            "description": "The PM in charge, by their tailnet login or an email address: text\neither side of an `@`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project": {
+            "description": "The project the group serves, as free text.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "ProvisionArgs": {
@@ -13216,6 +13282,13 @@
               }
             ]
           },
+          "ground_contact": {
+            "description": "The group's contact on the ground, as free text. Absent when not filled\nin.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
             "description": "Unique identifier for this group.",
             "format": "uuid",
@@ -13228,6 +13301,20 @@
           "notes": {
             "description": "Free-form operator notes about this group.",
             "type": "string"
+          },
+          "pm_in_charge": {
+            "description": "The PM in charge of the group's project, by their tailnet login or an\nemail address. Absent when not filled in.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project": {
+            "description": "The project the group serves, as free text. Absent when not filled in.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "slack_close_delay": {
             "description": "How long, in seconds, an incident lingers after its last failure\nrecovers before it closes and the resolved notification is sent. A\nfailure returning within this window continues the same incident\ninstead of opening (and notifying about) a new one — the close-side\nmirror of `slack_open_delay`, for a red check that briefly blips\ngreen.",
@@ -15564,6 +15651,25 @@
         },
         "required": [
           "key_id"
+        ],
+        "type": "object"
+      },
+      "UpdateProjectDetailsArgs": {
+        "description": "Request to set a group's project details.",
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/ProjectDetails",
+            "description": "The group's project details. Each replaces what is held; an absent or\nempty one clears it."
+          },
+          "server_group_id": {
+            "description": "Identifier of the group.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_group_id",
+          "details"
         ],
         "type": "object"
       },
@@ -23931,6 +24037,67 @@
           "notes_changed"
         ],
         "x-canopy-audit-optional": true,
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/fleet/groups/update_project_details": {
+      "post": {
+        "description": "Replaces the group's project, PM in charge and contact on the ground,\nfrom the PM level up, on any group. An empty detail is cleared. Responds\n400 when the PM in charge doesn't have text either side of an `@`, and 404\nwhen the group does not exist. A save that leaves the details as they were\nrecords nothing.",
+        "operationId": "server_groups_update_project_details",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProjectDetailsArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamedProjectDetails"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-pm": []
+          }
+        ],
+        "summary": "Set a group's project details.",
+        "tags": [
+          "server_groups"
+        ],
+        "x-canopy-audit": [
+          "group_project_details_changed"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },

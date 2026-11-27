@@ -46,6 +46,7 @@ mod notes;
 mod openapi_spec;
 mod operator_presence;
 mod private_statuses;
+mod project_details;
 mod provision_credential;
 mod reporting_schemas;
 mod restore_replicas;

@@ -120,6 +120,134 @@ pub struct ServerGroup {
 	/// green.
 	#[schema(value_type = i64, format = "int64")]
 	pub slack_close_delay: PgDuration,
+	/// The project the group serves, as free text. Absent when not filled in.
+	// spec: GRP#project-details
+	pub project: Option<String>,
+	/// The PM in charge of the group's project, by their tailnet login or an
+	/// email address. Absent when not filled in.
+	// spec: GRP#project-details
+	pub pm_in_charge: Option<String>,
+	/// The group's contact on the ground, as free text. Absent when not filled
+	/// in.
+	// spec: GRP#project-details
+	pub ground_contact: Option<String>,
+}
+
+/// A group's three project details, each absent when not filled in.
+// spec: GRP#project-details
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ProjectDetails {
+	/// The project the group serves, as free text.
+	#[serde(default)]
+	pub project: Option<String>,
+	/// The PM in charge, by their tailnet login or an email address: text
+	/// either side of an `@`.
+	#[serde(default)]
+	pub pm_in_charge: Option<String>,
+	/// The contact on the ground, as free text.
+	#[serde(default)]
+	pub ground_contact: Option<String>,
+}
+
+impl ProjectDetails {
+	/// The details as stored: each trimmed, and an empty one absent.
+	fn normalised(self) -> Self {
+		fn one(value: Option<String>) -> Option<String> {
+			value
+				.map(|value| value.trim().to_owned())
+				.filter(|value| !value.is_empty())
+		}
+		Self {
+			project: one(self.project),
+			pm_in_charge: one(self.pm_in_charge),
+			ground_contact: one(self.ground_contact),
+		}
+	}
+
+	/// Refuse a PM in charge that doesn't name a person by a login or an
+	/// address, with text either side of an `@`.
+	fn validate(&self) -> Result<()> {
+		let Some(pm) = &self.pm_in_charge else {
+			return Ok(());
+		};
+		match pm.split_once('@') {
+			Some((local, domain)) if !local.is_empty() && !domain.is_empty() => Ok(()),
+			_ => Err(AppError::BadRequest(format!(
+				"the PM in charge must be a tailnet login or an email address, \
+				 with text either side of an @; got {pm:?}"
+			))),
+		}
+	}
+
+	/// The details with the display name Canopy knows for the PM in charge,
+	/// from `names` as [`crate::tailscale_users::TailscaleUser::names_ignoring_case`]
+	/// returns them.
+	pub fn named(self, names: &std::collections::HashMap<String, String>) -> NamedProjectDetails {
+		let pm_in_charge_name = self
+			.pm_in_charge
+			.as_deref()
+			.and_then(|login| names.get(&login.to_lowercase()))
+			.cloned();
+		NamedProjectDetails {
+			project: self.project,
+			pm_in_charge: self.pm_in_charge,
+			pm_in_charge_name,
+			ground_contact: self.ground_contact,
+		}
+	}
+}
+
+/// A group's project details as they are read, the PM in charge with the
+/// display name Canopy knows for them.
+// spec: GRP#project-details
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct NamedProjectDetails {
+	/// The project the group serves, as free text. Absent when not filled in.
+	pub project: Option<String>,
+	/// The PM in charge, by their login or address as entered. Absent when
+	/// not filled in.
+	pub pm_in_charge: Option<String>,
+	/// The display name Canopy knows for the PM in charge's login, compared
+	/// ignoring case. Absent where it knows none, in which case the PM in
+	/// charge is named as entered.
+	pub pm_in_charge_name: Option<String>,
+	/// The contact on the ground, as free text. Absent when not filled in.
+	pub ground_contact: Option<String>,
+}
+
+/// One project detail's value before and after a change.
+// spec: GRP#project-details
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DetailChange {
+	pub from: Option<String>,
+	pub to: Option<String>,
+}
+
+impl DetailChange {
+	fn between(from: &Option<String>, to: &Option<String>) -> Option<Self> {
+		(from != to).then(|| Self {
+			from: from.clone(),
+			to: to.clone(),
+		})
+	}
+}
+
+/// What a change to a group's project details changed: each detail that
+/// differs, with its value before and after, and nothing for one left as it
+/// was.
+// spec: GRP#project-details
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProjectDetailsChange {
+	pub project: Option<DetailChange>,
+	pub pm_in_charge: Option<DetailChange>,
+	pub ground_contact: Option<DetailChange>,
+}
+
+impl ProjectDetailsChange {
+	/// Whether the change left every detail as it was.
+	pub fn is_empty(&self) -> bool {
+		self.project.is_none() && self.pm_in_charge.is_none() && self.ground_contact.is_none()
+	}
 }
 
 /// Fields required to create a new server group.
@@ -177,6 +305,65 @@ pub struct PartialServerGroup {
 }
 
 impl ServerGroup {
+	/// The group's project details as stored.
+	// spec: GRP#project-details
+	pub fn project_details(&self) -> ProjectDetails {
+		ProjectDetails {
+			project: self.project.clone(),
+			pm_in_charge: self.pm_in_charge.clone(),
+			ground_contact: self.ground_contact.clone(),
+		}
+	}
+
+	/// Set a group's project details, returning what changed. Each is trimmed
+	/// and an empty one stored as absent; a PM in charge without text either
+	/// side of an `@` is refused. A save leaving them as they were writes
+	/// nothing.
+	// spec: GRP#project-details
+	pub async fn update_project_details(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		details: ProjectDetails,
+	) -> Result<ProjectDetailsChange> {
+		use crate::schema::server_groups::dsl;
+		use diesel_async::AsyncConnection;
+
+		let details = details.normalised();
+		details.validate()?;
+		db.transaction::<_, AppError, _>(async |conn| {
+			let (project, pm_in_charge, ground_contact): (
+				Option<String>,
+				Option<String>,
+				Option<String>,
+			) = dsl::server_groups
+				.select((dsl::project, dsl::pm_in_charge, dsl::ground_contact))
+				.filter(dsl::id.eq(group_id))
+				.for_update()
+				.first(conn)
+				.await
+				.map_err(AppError::from)?;
+			let change = ProjectDetailsChange {
+				project: DetailChange::between(&project, &details.project),
+				pm_in_charge: DetailChange::between(&pm_in_charge, &details.pm_in_charge),
+				ground_contact: DetailChange::between(&ground_contact, &details.ground_contact),
+			};
+			if change.is_empty() {
+				return Ok(change);
+			}
+			diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
+				.set((
+					dsl::project.eq(&details.project),
+					dsl::pm_in_charge.eq(&details.pm_in_charge),
+					dsl::ground_contact.eq(&details.ground_contact),
+				))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+			Ok(change)
+		})
+		.await
+	}
+
 	pub async fn create(db: &mut AsyncPgConnection, new: NewServerGroup) -> Result<Self> {
 		Self::create_by(db, new, None).await
 	}

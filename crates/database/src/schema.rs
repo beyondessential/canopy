@@ -1147,6 +1147,9 @@ diesel::table! {
 		effective_version -> Nullable<Text>,
 		deleted_at -> Nullable<Timestamptz>,
 		slack_close_delay -> Interval,
+		project -> Nullable<Text>,
+		pm_in_charge -> Nullable<Text>,
+		ground_contact -> Nullable<Text>,
 	}
 }
 

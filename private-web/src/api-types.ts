@@ -2914,6 +2914,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fleet/groups/update_project_details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a group's project details.
+         * @description Replaces the group's project, PM in charge and contact on the ground,
+         *     from the PM level up, on any group. An empty detail is cleared. Responds
+         *     400 when the PM in charge doesn't have text either side of an `@`, and 404
+         *     when the group does not exist. A save that leaves the details as they were
+         *     records nothing.
+         */
+        post: operations["server_groups_update_project_details"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet/machines/archive": {
         parameters: {
             query?: never;
@@ -8865,6 +8889,11 @@ export interface components {
              *     ended and watching resumes when it elapses.
              */
             maintenance_settling: boolean;
+            /**
+             * @description The group's project details, the PM in charge with the display name
+             *     Canopy knows for them.
+             */
+            project_details: components["schemas"]["NamedProjectDetails"];
         };
         /** @description Identifies the server group whose status details to fetch. */
         GroupDetailsArgs: {
@@ -11526,6 +11555,27 @@ export interface components {
             zone?: string | null;
         };
         /**
+         * @description A group's project details as they are read, the PM in charge with the
+         *     display name Canopy knows for them.
+         */
+        NamedProjectDetails: {
+            /** @description The contact on the ground, as free text. Absent when not filled in. */
+            ground_contact?: string | null;
+            /**
+             * @description The PM in charge, by their login or address as entered. Absent when
+             *     not filled in.
+             */
+            pm_in_charge?: string | null;
+            /**
+             * @description The display name Canopy knows for the PM in charge's login, compared
+             *     ignoring case. Absent where it knows none, in which case the PM in
+             *     charge is named as entered.
+             */
+            pm_in_charge_name?: string | null;
+            /** @description The project the group serves, as free text. Absent when not filled in. */
+            project?: string | null;
+        };
+        /**
          * @description A namespace on the wire, as the pair of fields it is stored as.
          *
          *     The private API names a check by source, namespace and name, so this is
@@ -12261,6 +12311,18 @@ export interface components {
              * @example /errors/resource-not-found
              */
             type: string;
+        };
+        /** @description A group's three project details, each absent when not filled in. */
+        ProjectDetails: {
+            /** @description The contact on the ground, as free text. */
+            ground_contact?: string | null;
+            /**
+             * @description The PM in charge, by their tailnet login or an email address: text
+             *     either side of an `@`.
+             */
+            pm_in_charge?: string | null;
+            /** @description The project the group serves, as free text. */
+            project?: string | null;
         };
         /** @description Request to mint a new device credential. */
         ProvisionArgs: {
@@ -13853,6 +13915,11 @@ export interface components {
             deleted_at?: string | null;
             effective_version?: null | components["schemas"]["VersionStr"];
             /**
+             * @description The group's contact on the ground, as free text. Absent when not filled
+             *     in.
+             */
+            ground_contact?: string | null;
+            /**
              * Format: uuid
              * @description Unique identifier for this group.
              */
@@ -13861,6 +13928,13 @@ export interface components {
             name: string;
             /** @description Free-form operator notes about this group. */
             notes?: string;
+            /**
+             * @description The PM in charge of the group's project, by their tailnet login or an
+             *     email address. Absent when not filled in.
+             */
+            pm_in_charge?: string | null;
+            /** @description The project the group serves, as free text. Absent when not filled in. */
+            project?: string | null;
             /**
              * Format: int64
              * @description How long, in seconds, an incident lingers after its last failure
@@ -15241,6 +15315,19 @@ export interface components {
             key_id: string;
             /** @description New display name for the key, or null to clear it. */
             name?: string | null;
+        };
+        /** @description Request to set a group's project details. */
+        UpdateProjectDetailsArgs: {
+            /**
+             * @description The group's project details. Each replaces what is held; an absent or
+             *     empty one clears it.
+             */
+            details: components["schemas"]["ProjectDetails"];
+            /**
+             * Format: uuid
+             * @description Identifier of the group.
+             */
+            server_group_id: string;
         };
         /** @description Request body for replacing a check's conditional rules. */
         UpdateRulesArgs: {
@@ -20300,6 +20387,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerGroup"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    server_groups_update_project_details: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProjectDetailsArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NamedProjectDetails"];
                 };
             };
             400: {
