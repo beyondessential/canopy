@@ -10415,6 +10415,31 @@
         ],
         "type": "object"
       },
+      "PmCandidate": {
+        "description": "Someone the project details form suggests for the PM in charge.",
+        "properties": {
+          "login": {
+            "description": "Their login, which the PM in charge is set to.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Their display name.",
+            "type": "string"
+          },
+          "profile_pic": {
+            "description": "Their profile picture's address, where one is known.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "login",
+          "name"
+        ],
+        "type": "object"
+      },
       "PolicyStatus": {
         "description": "Whether and when Canopy read the tailnet policy.",
         "properties": {
@@ -23939,6 +23964,46 @@
           }
         ],
         "summary": "A group's notes revision log.",
+        "tags": [
+          "server_groups"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/fleet/groups/pm_candidates": {
+      "post": {
+        "description": "The tailnet's members other than suspended ones, and everyone who has used\nCanopy, each once by login ignoring case, in order of display name. Where\nboth know someone, the tailnet's name and picture are taken. Without a\ntailnet API configured, or before its users have been read, the list is the\npeople who have used Canopy alone. The request body is ignored; send an\nempty JSON object.",
+        "operationId": "server_groups_pm_candidates",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PmCandidate"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-pm": []
+          }
+        ],
+        "summary": "List the people to suggest for a group's PM in charge.",
         "tags": [
           "server_groups"
         ],

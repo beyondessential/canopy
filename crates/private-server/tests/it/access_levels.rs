@@ -37,8 +37,22 @@ where
 	F: FnOnce(AsyncPgConnection, TestServer, Option<TailnetDirectory>) -> Fut,
 	Fut: Future<Output = ()>,
 {
+	run_with_directory(
+		policy.map(|policy| TailnetDirectory::for_test_with_policy([], policy)),
+		test,
+	)
+	.await
+}
+
+/// Run a test against a private server reading the given tailnet directory, or
+/// against one with no tailnet API configured where there is none. The
+/// directory is handed to the test so it can make a later read fail.
+pub async fn run_with_directory<F, Fut>(directory: Option<TailnetDirectory>, test: F)
+where
+	F: FnOnce(AsyncPgConnection, TestServer, Option<TailnetDirectory>) -> Fut,
+	Fut: Future<Output = ()>,
+{
 	TestDb::run(async |conn, url| {
-		let directory = policy.map(|policy| TailnetDirectory::for_test_with_policy([], policy));
 		let private = router(
 			private_server::routes(private_server::state::AppState {
 				tailnet_directory: directory.clone(),

@@ -2826,6 +2826,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fleet/groups/pm_candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the people to suggest for a group's PM in charge.
+         * @description The tailnet's members other than suspended ones, and everyone who has used
+         *     Canopy, each once by login ignoring case, in order of display name. Where
+         *     both know someone, the tailnet's name and picture are taken. Without a
+         *     tailnet API configured, or before its users have been read, the list is the
+         *     people who have used Canopy alone. The request body is ignored; send an
+         *     empty JSON object.
+         */
+        post: operations["server_groups_pm_candidates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet/groups/projects": {
         parameters: {
             query?: never;
@@ -12181,6 +12206,15 @@ export interface components {
              */
             group_id: string;
         };
+        /** @description Someone the project details form suggests for the PM in charge. */
+        PmCandidate: {
+            /** @description Their login, which the PM in charge is set to. */
+            login: string;
+            /** @description Their display name. */
+            name: string;
+            /** @description Their profile picture's address, where one is known. */
+            profile_pic?: string | null;
+        };
         /** @description Whether and when Canopy read the tailnet policy. */
         PolicyStatus: {
             /** @description The capability whose values confer levels. */
@@ -20381,6 +20415,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    server_groups_pm_candidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PmCandidate"][];
                 };
             };
         };

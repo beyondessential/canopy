@@ -724,15 +724,18 @@ impl TailnetDirectory {
 		directory
 	}
 
-	/// This test directory, with its tailnet's members already read
-	/// successfully. Its API is unreachable, so [`Self::refresh_users`] fails
-	/// as a control-plane outage would.
-	pub fn with_users(self, users: impl IntoIterator<Item = TailnetUser>) -> Self {
+	/// This test directory, with its tailnet's users already read
+	/// successfully as the control plane's users response `users`. Its API is
+	/// unreachable, so [`Self::refresh_users`] fails as a control-plane outage
+	/// would.
+	pub fn with_users(self, users: serde_json::Value) -> Self {
+		let users: UsersResponse =
+			serde_json::from_value(users).expect("test users parse as a users response");
 		self.inner
 			.cache
 			.try_write()
 			.expect("a fresh directory is not locked")
-			.users = users.into_iter().collect();
+			.users = users.members();
 		self
 	}
 }
@@ -882,18 +885,17 @@ mod tests {
 	// spec: GRP#project-details
 	#[tokio::test]
 	async fn a_failed_users_read_keeps_the_last_good_list() {
-		let pat = TailnetUser {
-			login: "pat@bes.au".into(),
-			name: "Pat Lee".into(),
-			profile_pic: None,
-		};
-		let dir = TailnetDirectory::for_test([]).with_users([pat.clone()]);
+		let dir = TailnetDirectory::for_test([]).with_users(serde_json::json!({
+			"users": [{ "loginName": "pat@bes.au", "displayName": "Pat Lee", "status": "active" }],
+		}));
+		let before = dir.users().await;
+		assert_eq!(before.len(), 1);
 
 		dir.refresh_users()
 			.await
 			.expect_err("the test directory's API is unreachable");
 
-		assert_eq!(dir.users().await, vec![pat]);
+		assert_eq!(dir.users().await, before);
 	}
 
 	#[test]

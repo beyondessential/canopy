@@ -12,6 +12,7 @@ use commons_types::{
 	server::{TagMap, app_type::ApplicationType, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 };
+use database::access_lists::normalise_login;
 use database::audit::{Action, Record};
 use database::notes_log::{self, Author, NotesRecord, NotesRevision, Via};
 use database::server_groups::{
@@ -33,6 +34,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(write, audit_optional(NotesChanged): create))
 		.routes(routes!(write, audit_optional(NotesChanged): update))
 		.routes(routes!(write, audit(GroupProjectDetailsChanged): update_project_details))
+		.routes(routes!(read_only, silent: pm_candidates))
 		.routes(routes!(read_only, silent: projects))
 		.routes(routes!(read_only, silent: notes_history))
 		.routes(routes!(write, silent: delete))
@@ -586,6 +588,87 @@ pub async fn update_project_details(
 		.remove(&group.id)
 		.unwrap_or_default();
 	Ok(Json(details))
+}
+
+/// Someone the project details form suggests for the PM in charge.
+// spec: GRP#project-details
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PmCandidate {
+	/// Their login, which the PM in charge is set to.
+	pub login: String,
+	/// Their display name.
+	pub name: String,
+	/// Their profile picture's address, where one is known.
+	pub profile_pic: Option<String>,
+}
+
+/// List the people to suggest for a group's PM in charge.
+///
+/// The tailnet's members other than suspended ones, and everyone who has used
+/// Canopy, each once by login ignoring case, in order of display name. Where
+/// both know someone, the tailnet's name and picture are taken. Without a
+/// tailnet API configured, or before its users have been read, the list is the
+/// people who have used Canopy alone. The request body is ignored; send an
+/// empty JSON object.
+// spec: GRP#project-details
+#[utoipa::path(
+	post,
+	path = "/pm_candidates",
+	operation_id = "server_groups_pm_candidates",
+	tag = "server_groups",
+	security(("tailscale-pm" = [])),
+	responses(
+		(status = 200, body = Vec<PmCandidate>),
+	),
+)]
+pub async fn pm_candidates(
+	State(state): State<AppState>,
+	_pm: TailscalePm,
+	_body: Json<serde_json::Value>,
+) -> Result<Json<Vec<PmCandidate>>> {
+	let mut conn = state.db.get().await?;
+	let mut by_login: std::collections::HashMap<String, PmCandidate> =
+		std::collections::HashMap::new();
+	// Least recently updated first, so a newer spelling of a login wins.
+	for known in KnownUser::all(&mut conn).await? {
+		by_login.insert(
+			normalise_login(&known.login),
+			PmCandidate {
+				login: known.login,
+				name: known.name,
+				profile_pic: known.profile_pic,
+			},
+		);
+	}
+	if let Some(directory) = &state.tailnet_directory {
+		for member in directory.users().await {
+			let key = normalise_login(&member.login);
+			let (known_name, known_pic) = by_login
+				.remove(&key)
+				.map(|known| (Some(known.name), known.profile_pic))
+				.unwrap_or_default();
+			let name = match known_name {
+				Some(known_name) if member.name.trim().is_empty() => known_name,
+				_ => member.name,
+			};
+			by_login.insert(
+				key,
+				PmCandidate {
+					login: member.login,
+					name,
+					profile_pic: member.profile_pic.or(known_pic),
+				},
+			);
+		}
+	}
+	let mut candidates: Vec<PmCandidate> = by_login.into_values().collect();
+	candidates.sort_by_cached_key(|candidate| {
+		(
+			candidate.name.to_lowercase(),
+			candidate.login.to_lowercase(),
+		)
+	});
+	Ok(Json(candidates))
 }
 
 /// A group the projects view lists: a live group with a live production

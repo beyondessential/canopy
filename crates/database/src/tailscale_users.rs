@@ -73,6 +73,20 @@ impl TailscaleUser {
 		Ok(rows.into_iter().map(|u| (u.login.clone(), u)).collect())
 	}
 
+	/// Every person Canopy knows display info for, least recently updated
+	/// first.
+	// spec: GRP#project-details
+	pub async fn all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::tailscale_users::dsl;
+
+		dsl::tailscale_users
+			.select(Self::as_select())
+			.order(dsl::updated_at.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// The display name Canopy knows for each of `logins`, compared ignoring
 	/// case, keyed by the lowercased login. A login Canopy knows none for is
 	/// absent. Where several stored logins differ only in case, the most

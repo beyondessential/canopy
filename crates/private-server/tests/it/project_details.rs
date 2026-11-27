@@ -3,6 +3,7 @@
 //!
 //! Spec: `.workhorse/specs/servers/groups.md` (id `GRP`), "Project details".
 
+use commons_servers::tailnet_directory::TailnetDirectory;
 use commons_tests::{axum_test::TestServer, diesel_async::SimpleAsyncConnection};
 use database::{
 	access_lists::{AccessListEntry, ListLevel},
@@ -13,7 +14,7 @@ use database::{
 use serde_json::{Value, json};
 
 use crate::access::{log, post_in, problem, raised};
-use crate::access_levels::{run_with_policy, trust_headers};
+use crate::access_levels::{run_with_directory, run_with_policy, trust_headers};
 
 const PM: &str = "pat@example.com";
 const OTHER_PM: &str = "lee@example.com";
@@ -362,6 +363,78 @@ async fn the_groups_own_edit_does_not_carry_the_project_details() {
 				"pm_in_charge_name": null,
 				"ground_contact": null,
 			}),
+		);
+	})
+	.await;
+}
+
+/// The people the form suggests for the PM in charge, read by the debug admin,
+/// leaving out the debug admin, whom the request itself makes known to Canopy.
+async fn pm_candidates(private: &TestServer) -> Vec<Value> {
+	let response = private
+		.post("/api/fleet/groups/pm_candidates")
+		.json(&json!({}))
+		.await;
+	response.assert_status_ok();
+	let mut candidates: Vec<Value> = response.json();
+	candidates.retain(|candidate| candidate["login"] != "admin@localhost");
+	candidates
+}
+
+// spec: GRP#project-details
+#[tokio::test(flavor = "multi_thread")]
+async fn the_pm_in_charge_is_suggested_from_the_tailnet_and_those_who_used_canopy_each_once() {
+	let directory = TailnetDirectory::for_test([]).with_users(json!({
+		"users": [
+			{ "loginName": "pat@example.com", "displayName": "Pat Smith", "status": "active" },
+			{
+				"loginName": "amy@example.com",
+				"displayName": "amy Tailnet",
+				"profilePicUrl": "https://pic/amy",
+				"status": "idle",
+			},
+			{ "loginName": "gone@example.com", "displayName": "Gone Away", "status": "suspended" },
+		],
+	}));
+	run_with_directory(Some(directory), async |mut conn, private, _| {
+		TailscaleUser::upsert(
+			&mut conn,
+			"Pat@Example.com",
+			"Pat (old)",
+			Some("https://pic/old"),
+		)
+		.await
+		.unwrap();
+		TailscaleUser::upsert(&mut conn, "zed@example.com", "Zed Used Canopy", None)
+			.await
+			.unwrap();
+
+		assert_eq!(
+			json!(pm_candidates(&private).await),
+			json!([
+				{ "login": "amy@example.com", "name": "amy Tailnet", "profile_pic": "https://pic/amy" },
+				{ "login": "pat@example.com", "name": "Pat Smith", "profile_pic": "https://pic/old" },
+				{ "login": "zed@example.com", "name": "Zed Used Canopy", "profile_pic": null },
+			]),
+			"each person once by login ignoring case, suspended members left out, the \
+			 tailnet's name taken and its missing picture filled from Canopy's, in order \
+			 of name ignoring case"
+		);
+	})
+	.await;
+}
+
+// spec: GRP#project-details
+#[tokio::test(flavor = "multi_thread")]
+async fn without_a_tailnet_api_the_pm_in_charge_is_suggested_from_those_who_used_canopy() {
+	run_with_directory(None, async |mut conn, private, _| {
+		TailscaleUser::upsert(&mut conn, "pat@example.com", "Pat Smith", None)
+			.await
+			.unwrap();
+
+		assert_eq!(
+			json!(pm_candidates(&private).await),
+			json!([{ "login": "pat@example.com", "name": "Pat Smith", "profile_pic": null }]),
 		);
 	})
 	.await;
