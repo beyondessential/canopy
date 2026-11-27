@@ -9,7 +9,7 @@ Give Workhorse's loops a Canopy they can build and drive (`.workhorse/rig/`), an
 - The device API is reached through the private-server's `/public` mount. The seed step gives the first seeded device a real certificate so a tester can authenticate as it.
 - `deps` compiles every dependency once per lockfile pair and each build clones that `target/`, so a build recompiles only workspace crates.
 - Each build compiles into its own `target/`. A `build.build-dir` shared across builds is not safe: Cargo takes another checkout's workspace crates as fresh while that checkout's source is still on disk.
-- The Rust tooling is the person's (`env.fromPerson`, `env.personHome`): their cargo config, toolchains and sccache cache, defaulted from their home where they set no variable. A rig must never hide the machine's build setup or start an sccache server caching anywhere but the person's cache.
+- The Rust tooling is the person's (`env.fromPerson`, `env.personHome`): their cargo config, toolchains, sccache cache and jobserver (`MAKEFLAGS`, so steve's pool covers rig builds), defaulted from their home where they set no variable. An sccache server the rig needs starts in its own systemd scope, never in a step's cgroup. `lib.sh` and `rust-toolchain.toml` are in the deps hash, since they decide the paths a dependency build is fingerprinted by.
 
 ## Checklist
 
