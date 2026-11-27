@@ -76,11 +76,16 @@ export_fake_deps() {
     # Trimmed as the fixture trims it, so a trailing space or a CRLF ending
     # cannot leave the rig with a value the fixture never sees.
     line=$(printf '%s' "$line" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-    case "$line" in
-      '' | '#'*) continue ;;
-      [A-Za-z_]*=*) export "$line" ;;
-      *) echo "serve: $file: not NAME=value: $line" >&2; exit 1 ;;
+    case "$line" in '' | '#'*) continue ;; esac
+    # The name is held to what the fixture's reader holds it to, so neither
+    # reader takes a line the other refuses.
+    case "${line%%=*}" in
+      "$line" | '' | [0-9]* | *[!A-Za-z0-9_]*)
+        echo "serve: $file: not NAME=value: $line" >&2
+        exit 1
+        ;;
     esac
+    export "$line"
   done < "$file"
 }
 

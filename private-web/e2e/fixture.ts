@@ -37,10 +37,14 @@ export const FAKE_DEPS: Record<string, string> = Object.fromEntries(
 		.split("\n")
 		.map((line) => line.trim())
 		.filter((line) => line !== "" && !line.startsWith("#"))
-		.map((line) => [
-			line.slice(0, line.indexOf("=")),
-			line.slice(line.indexOf("=") + 1),
-		]),
+		.map((line) => {
+			// Refused as the rig's reader refuses it: a line the two would read
+			// differently is the one thing this file exists to prevent.
+			if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(line)) {
+				throw new Error(`scripts/fake-deps.env: not NAME=value: ${line}`);
+			}
+			return [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)];
+		}),
 );
 
 export interface StackHandle {
