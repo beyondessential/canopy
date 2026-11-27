@@ -32,10 +32,13 @@ test.describe("homepage", () => {
 		await expect(page).toHaveURL(/\/status$/);
 	});
 
-	test("the root opens the default the policy gives", async ({ page }) => {
+	test("a grant with home /fleet/pm makes the root open the projects view", async ({
+		page,
+	}) => {
 		await withDefault(page, "/fleet/pm");
 		await page.goto("/");
 		await expect(page).toHaveURL(/\/fleet\/pm$/);
+		await expect(page.getByRole("textbox", { name: "Search projects" })).toBeVisible();
 	});
 
 	test("a chosen homepage naming no page opens as a missing page, and the toggle there clears it", async ({

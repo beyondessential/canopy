@@ -208,6 +208,10 @@ export async function seedServerGroup(
 		slackOpenDelaySeconds?: number;
 		/** Incident linger window in seconds. Omit to keep the migration default. */
 		slackCloseDelaySeconds?: number;
+		/** The project details, each unset when omitted. */
+		project?: string;
+		pmInCharge?: string;
+		groundContact?: string;
 	} = {},
 ): Promise<SeededServerGroup> {
 	const id = randomUUID();
@@ -230,6 +234,16 @@ export async function seedServerGroup(
 		values.push(opts.slackCloseDelaySeconds);
 		exprs.push(`make_interval(secs => $${values.length})`);
 	}
+	for (const [column, value] of [
+		["project", opts.project],
+		["pm_in_charge", opts.pmInCharge],
+		["ground_contact", opts.groundContact],
+	] as const) {
+		if (value === undefined) continue;
+		columns.push(column);
+		values.push(value);
+		exprs.push(`$${values.length}`);
+	}
 	await sql.query(
 		`INSERT INTO server_groups (${columns.join(", ")})
 		 VALUES (${exprs.join(", ")})`,
@@ -250,7 +264,7 @@ export interface SeededServer {
 	/** `null` when the application was seeded unnamed, which is how one Canopy
 	 * learned about from a report arrives: a name is the operator's to set. */
 	name: string | null;
-	host: string;
+	host: string | null;
 	type: ApplicationType;
 	rank: ServerRank | null;
 	/** The box this workload runs on. */
@@ -343,7 +357,8 @@ export async function seedServer(
 	opts: {
 		/** Pass `null` for an application nobody has named. */
 		name?: string | null;
-		host?: string;
+		/** Its configured URL. Pass `null` for one configured with none. */
+		host?: string | null;
 		/** What the application is. Defaults to a Tamanu central. */
 		type?: ApplicationType;
 		/** Defaults to the rank of the box it goes on, or production for a box
@@ -380,7 +395,10 @@ export async function seedServer(
 	const machineId = opts.machineId ?? randomUUID();
 	const id = opts.sharesMachineId ? machineId : randomUUID();
 	const name = opts.name === null ? null : (opts.name ?? randomLabel("srv"));
-	const host = opts.host ?? `https://${randomLabel("host")}.e2e.invalid`;
+	const host =
+		opts.host === null
+			? null
+			: (opts.host ?? `https://${randomLabel("host")}.e2e.invalid`);
 	const type = opts.type ?? "tamanu-central";
 	let rank: ServerRank | null;
 	if (opts.rank !== undefined) {
