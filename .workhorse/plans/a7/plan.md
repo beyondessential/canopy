@@ -9,6 +9,8 @@ Give Workhorse's loops a Canopy they can build and drive (`.workhorse/rig/`), an
 - The device API is reached through the private-server's `/public` mount. The seed step gives the first seeded device a real certificate so a tester can authenticate as it.
 - `deps` compiles every dependency once per lockfile pair and each build clones that `target/`, so a build recompiles only workspace crates.
 - The toolchain comes from rustup inside the rig's own home (minimal profile), since recipe steps never see the person's home.
+- Each build compiles into its own `target/`. A `build.build-dir` shared across builds is not safe: Cargo takes another checkout's workspace crates as fresh while that checkout's source is still on disk.
+- sccache is used only when `SCCACHE_DIR` reaches the rig; otherwise the wrapper is off, so a rig never starts an sccache server the person's own builds would then use. That the rig hides the person's toolchain and cache setup at all is Workhorse's to fix, recorded as needing a card.
 
 ## Checklist
 
