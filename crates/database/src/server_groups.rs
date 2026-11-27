@@ -250,6 +250,24 @@ impl ProjectDetailsChange {
 	}
 }
 
+/// A production Tamanu central or facility, as the projects view lists it.
+// spec: PRJ#what-each-group-shows
+#[derive(Debug, Clone)]
+pub struct ProductionTamanu {
+	pub group_id: Uuid,
+	pub application_id: Uuid,
+	pub r#type: ApplicationType,
+	/// The application's own name, where an operator gave it one.
+	pub name: Option<String>,
+	/// The application's configured URL.
+	pub url: Option<crate::url_field::UrlField>,
+	/// The machine it runs on: none for an application hosted on a cluster.
+	pub machine_id: Option<Uuid>,
+	pub machine_name: Option<String>,
+	/// The tailnet name of the device bound to its machine, where there is one.
+	pub tailnet_name: Option<String>,
+}
+
 /// Fields required to create a new server group.
 #[derive(Debug, Clone, Deserialize, Insertable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::server_groups)]
@@ -362,6 +380,109 @@ impl ServerGroup {
 			Ok(change)
 		})
 		.await
+	}
+
+	/// Every live group with a live production environment, in order of name:
+	/// a production application in it, or a production machine, which is in
+	/// its environment whether or not anything on it has reported.
+	// spec: PRJ#which-groups-it-lists
+	// spec: GRP#environments
+	pub async fn with_production_environment(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::{applications, machines, server_groups::dsl};
+		use diesel::dsl::exists;
+
+		let production_application = applications::table
+			.filter(applications::group_id.eq(dsl::id.nullable()))
+			.filter(applications::deleted_at.is_null())
+			.filter(applications::rank.eq(ServerRank::Production));
+		let production_machine = machines::table
+			.filter(machines::group_id.eq(dsl::id.nullable()))
+			.filter(machines::deleted_at.is_null())
+			.filter(machines::rank.eq(ServerRank::Production));
+		dsl::server_groups
+			.select(Self::as_select())
+			.filter(dsl::deleted_at.is_null())
+			.filter(exists(production_application).or(exists(production_machine)))
+			.order((dsl::name.asc(), dsl::id.asc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// The live production Tamanu centrals and facilities of `group_ids`, with
+	/// the machine each runs on and the tailnet name of the device bound to
+	/// it. A pending application, or one at another rank, is in no production
+	/// environment and is left out.
+	// spec: PRJ#what-each-group-shows
+	pub async fn production_tamanu(
+		db: &mut AsyncPgConnection,
+		group_ids: &[Uuid],
+	) -> Result<Vec<ProductionTamanu>> {
+		use crate::schema::{applications, devices, machines};
+
+		if group_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		let types = [
+			ApplicationType::TamanuCentral.to_string(),
+			ApplicationType::TamanuFacility.to_string(),
+		];
+		#[allow(clippy::type_complexity)]
+		let rows: Vec<(
+			Uuid,
+			Uuid,
+			String,
+			Option<String>,
+			Option<crate::url_field::UrlField>,
+			Option<Uuid>,
+			Option<String>,
+			Option<String>,
+		)> = applications::table
+			.left_join(machines::table.left_join(devices::table))
+			.select((
+				applications::id,
+				applications::group_id.assume_not_null(),
+				applications::type_,
+				applications::name,
+				applications::host,
+				applications::machine_id,
+				machines::name.nullable(),
+				devices::tailscale_node_name.nullable(),
+			))
+			.filter(applications::group_id.eq_any(group_ids))
+			.filter(applications::deleted_at.is_null())
+			.filter(applications::rank.eq(ServerRank::Production))
+			.filter(applications::type_.eq_any(&types))
+			.filter(machines::deleted_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows
+			.into_iter()
+			.filter_map(
+				|(
+					application_id,
+					group_id,
+					r#type,
+					name,
+					url,
+					machine_id,
+					machine_name,
+					tailnet,
+				)| {
+					Some(ProductionTamanu {
+						group_id,
+						application_id,
+						r#type: r#type.parse().ok()?,
+						name,
+						url,
+						machine_id,
+						machine_name,
+						tailnet_name: tailnet,
+					})
+				},
+			)
+			.collect())
 	}
 
 	pub async fn create(db: &mut AsyncPgConnection, new: NewServerGroup) -> Result<Self> {

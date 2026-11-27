@@ -10675,6 +10675,93 @@
         },
         "type": "object"
       },
+      "ProjectGroup": {
+        "description": "A group the projects view lists: a live group with a live production\nenvironment.",
+        "properties": {
+          "id": {
+            "description": "Identifier of the group.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "description": "The group's name.",
+            "type": "string"
+          },
+          "project_details": {
+            "$ref": "#/components/schemas/NamedProjectDetails",
+            "description": "The group's project details, the PM in charge with the display name\nCanopy knows for them."
+          },
+          "tamanu": {
+            "description": "The Tamanu in the group's production environment: its central first,\nthen each facility in order of name. Empty where the production\nenvironment holds neither.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectTamanu"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "project_details",
+          "tamanu"
+        ],
+        "type": "object"
+      },
+      "ProjectTamanu": {
+        "description": "A production Tamanu central or facility, with the addresses it is reached\nat.",
+        "properties": {
+          "application_id": {
+            "description": "Identifier of the application.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "machine_id": {
+            "description": "The machine it runs on, which tells apart facilities sharing a name.\nAbsent for an application hosted on a cluster.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "machine_name": {
+            "description": "The name of the machine it runs on. Absent for an application hosted\non a cluster.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The application's own name, where an operator gave it one. Without\none it presents as its type.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tailnet_name": {
+            "description": "Its tailnet address: the tailnet name of the device bound to its\nmachine, to link over HTTPS at that MagicDNS name. Absent for an\napplication hosted on a cluster, or a machine with no bound device.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "Whether it is a central or a facility."
+          },
+          "url": {
+            "description": "Its public address: the application's configured URL, where it has\none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "application_id",
+          "type"
+        ],
+        "type": "object"
+      },
       "ProvisionArgs": {
         "description": "Request to mint a new device credential.",
         "properties": {
@@ -23847,6 +23934,46 @@
           }
         ],
         "summary": "A group's notes revision log.",
+        "tags": [
+          "server_groups"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/fleet/groups/projects": {
+      "post": {
+        "description": "Every live group with a live production environment, in order of name,\neach with its project details and its production Tamanu central and\nfacilities. The request body is ignored; send an empty JSON object.",
+        "operationId": "server_groups_projects",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectGroup"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "List the fleet's projects.",
         "tags": [
           "server_groups"
         ],

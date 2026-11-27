@@ -133,6 +133,7 @@ export const SAFETY_MODES = {
 	"fleet/groups/list": "read-only",
 	"fleet/groups/list_archived": "read-only",
 	"fleet/groups/notes_history": "read-only",
+	"fleet/groups/projects": "read-only",
 	"fleet/groups/restore": "write",
 	"fleet/groups/search": "read-only",
 	"fleet/groups/server_counts": "read-only",

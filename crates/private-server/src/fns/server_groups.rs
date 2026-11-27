@@ -9,7 +9,7 @@ use commons_servers::{
 };
 use commons_types::{
 	Uuid,
-	server::{TagMap, rank::ServerRank},
+	server::{TagMap, app_type::ApplicationType, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 };
 use database::audit::{Action, Record};
@@ -33,6 +33,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(write, audit_optional(NotesChanged): create))
 		.routes(routes!(write, audit_optional(NotesChanged): update))
 		.routes(routes!(write, audit(GroupProjectDetailsChanged): update_project_details))
+		.routes(routes!(read_only, silent: projects))
 		.routes(routes!(read_only, silent: notes_history))
 		.routes(routes!(write, silent: delete))
 		.routes(routes!(write, silent: restore))
@@ -585,6 +586,118 @@ pub async fn update_project_details(
 		.remove(&group.id)
 		.unwrap_or_default();
 	Ok(Json(details))
+}
+
+/// A group the projects view lists: a live group with a live production
+/// environment.
+// spec: PRJ#what-each-group-shows
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProjectGroup {
+	/// Identifier of the group.
+	pub id: Uuid,
+	/// The group's name.
+	pub name: String,
+	/// The group's project details, the PM in charge with the display name
+	/// Canopy knows for them.
+	pub project_details: NamedProjectDetails,
+	/// The Tamanu in the group's production environment: its central first,
+	/// then each facility in order of name. Empty where the production
+	/// environment holds neither.
+	pub tamanu: Vec<ProjectTamanu>,
+}
+
+/// A production Tamanu central or facility, with the addresses it is reached
+/// at.
+// spec: PRJ#what-each-group-shows
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProjectTamanu {
+	/// Identifier of the application.
+	pub application_id: Uuid,
+	/// Whether it is a central or a facility.
+	pub r#type: ApplicationType,
+	/// The application's own name, where an operator gave it one. Without
+	/// one it presents as its type.
+	pub name: Option<String>,
+	/// The machine it runs on, which tells apart facilities sharing a name.
+	/// Absent for an application hosted on a cluster.
+	pub machine_id: Option<Uuid>,
+	/// The name of the machine it runs on. Absent for an application hosted
+	/// on a cluster.
+	pub machine_name: Option<String>,
+	/// Its public address: the application's configured URL, where it has
+	/// one.
+	pub url: Option<String>,
+	/// Its tailnet address: the tailnet name of the device bound to its
+	/// machine, to link over HTTPS at that MagicDNS name. Absent for an
+	/// application hosted on a cluster, or a machine with no bound device.
+	// spec: SVC
+	pub tailnet_name: Option<String>,
+}
+
+/// List the fleet's projects.
+///
+/// Every live group with a live production environment, in order of name,
+/// each with its project details and its production Tamanu central and
+/// facilities. The request body is ignored; send an empty JSON object.
+// spec: PRJ
+#[utoipa::path(
+	post,
+	path = "/projects",
+	operation_id = "server_groups_projects",
+	tag = "server_groups",
+	security(("tailscale-user" = [])),
+	responses(
+		(status = 200, body = Vec<ProjectGroup>),
+	),
+)]
+pub async fn projects(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	_body: Json<serde_json::Value>,
+) -> Result<Json<Vec<ProjectGroup>>> {
+	let mut conn = state.db.get().await?;
+	let groups = ServerGroup::with_production_environment(&mut conn).await?;
+	let ids: Vec<Uuid> = groups.iter().map(|group| group.id).collect();
+	let mut details = named_project_details(&mut conn, &groups.iter().collect::<Vec<_>>()).await?;
+	let mut tamanu: std::collections::HashMap<Uuid, Vec<ProjectTamanu>> =
+		std::collections::HashMap::new();
+	let mut found = ServerGroup::production_tamanu(&mut conn, &ids).await?;
+	// Central first, then facilities by the name each presents, the machine
+	// telling apart two sharing one.
+	// spec: PRJ#what-each-group-shows
+	found.sort_by_cached_key(|app| {
+		(
+			app.r#type != ApplicationType::TamanuCentral,
+			app.name
+				.clone()
+				.unwrap_or_else(|| app.r#type.to_string().replace('-', " "))
+				.to_lowercase(),
+			app.machine_name.clone().unwrap_or_default().to_lowercase(),
+			app.application_id,
+		)
+	});
+	for app in found {
+		tamanu.entry(app.group_id).or_default().push(ProjectTamanu {
+			application_id: app.application_id,
+			r#type: app.r#type,
+			name: app.name,
+			machine_id: app.machine_id,
+			machine_name: app.machine_name,
+			url: app.url.map(|url| url.0.to_string()),
+			tailnet_name: app.tailnet_name,
+		});
+	}
+	Ok(Json(
+		groups
+			.into_iter()
+			.map(|group| ProjectGroup {
+				project_details: details.remove(&group.id).unwrap_or_default(),
+				tamanu: tamanu.remove(&group.id).unwrap_or_default(),
+				id: group.id,
+				name: group.name,
+			})
+			.collect(),
+	))
 }
 
 /// A group's notes revision log.

@@ -2826,6 +2826,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fleet/groups/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the fleet's projects.
+         * @description Every live group with a live production environment, in order of name,
+         *     each with its project details and its production Tamanu central and
+         *     facilities. The request body is ignored; send an empty JSON object.
+         */
+        post: operations["server_groups_projects"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet/groups/restore": {
         parameters: {
             query?: never;
@@ -12324,6 +12346,70 @@ export interface components {
             /** @description The project the group serves, as free text. */
             project?: string | null;
         };
+        /**
+         * @description A group the projects view lists: a live group with a live production
+         *     environment.
+         */
+        ProjectGroup: {
+            /**
+             * Format: uuid
+             * @description Identifier of the group.
+             */
+            id: string;
+            /** @description The group's name. */
+            name: string;
+            /**
+             * @description The group's project details, the PM in charge with the display name
+             *     Canopy knows for them.
+             */
+            project_details: components["schemas"]["NamedProjectDetails"];
+            /**
+             * @description The Tamanu in the group's production environment: its central first,
+             *     then each facility in order of name. Empty where the production
+             *     environment holds neither.
+             */
+            tamanu: components["schemas"]["ProjectTamanu"][];
+        };
+        /**
+         * @description A production Tamanu central or facility, with the addresses it is reached
+         *     at.
+         */
+        ProjectTamanu: {
+            /**
+             * Format: uuid
+             * @description Identifier of the application.
+             */
+            application_id: string;
+            /**
+             * Format: uuid
+             * @description The machine it runs on, which tells apart facilities sharing a name.
+             *     Absent for an application hosted on a cluster.
+             */
+            machine_id?: string | null;
+            /**
+             * @description The name of the machine it runs on. Absent for an application hosted
+             *     on a cluster.
+             */
+            machine_name?: string | null;
+            /**
+             * @description The application's own name, where an operator gave it one. Without
+             *     one it presents as its type.
+             */
+            name?: string | null;
+            /**
+             * @description Its tailnet address: the tailnet name of the device bound to its
+             *     machine, to link over HTTPS at that MagicDNS name. Absent for an
+             *     application hosted on a cluster, or a machine with no bound device.
+             */
+            tailnet_name?: string | null;
+            /** @description Whether it is a central or a facility. */
+            type: components["schemas"]["ApplicationType"];
+            /**
+             * @description Its public address: the application's configured URL, where it has
+             *     one.
+             */
+            url?: string | null;
+        };
         /** @description Request to mint a new device credential. */
         ProvisionArgs: {
             /**
@@ -20289,6 +20375,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    server_groups_projects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectGroup"][];
                 };
             };
         };
