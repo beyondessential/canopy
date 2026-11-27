@@ -94,12 +94,12 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 
 - [x] Migration: `access_list_entries` with the level enum, `admins` rows moved in, `admins` dropped
 - [x] `database::access_lists` replacing `database::admins`, every caller moved, logins lowercased
-- [ ] Migration: `server_groups.project`, `pm_in_charge`, `ground_contact`
-- [ ] `ServerGroup::update_project_details` returning what changed
-- [ ] Projects query: live groups with live production Tamanu, with machine tailnet names
+- [x] Migration: `server_groups.project`, `pm_in_charge`, `ground_contact`
+- [x] `ServerGroup::update_project_details` returning what changed
+- [x] Projects query: live groups with live production Tamanu, with machine tailnet names
 - [x] Migration and model: `operator_homepages`
 - [x] Audit actions `AccessListEntryAdded`, `AccessListEntryRemoved`
-- [ ] Audit action `GroupProjectDetailsChanged`
+- [x] Audit action `GroupProjectDetailsChanged`
 
 ### Policy and levels
 
@@ -112,11 +112,11 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 ### Handlers
 
 - [x] `fns/access.rs` replacing `fns/admins.rs`
-- [ ] `server_groups::update_project_details`, refusing a PM in charge with no `@`, and the details on `get`
-- [ ] `server_groups::projects`
+- [x] `server_groups::update_project_details`, refusing a PM in charge with no `@`, and the details on `get`
+- [x] `server_groups::projects`
 - [x] `fns/homepage.rs`
 - [x] `bestool::save_snippet` and `delete_snippet` take `TailscaleAdmin`
-- [ ] `canopy-mcp`: project details on `get_group`, searched by `find_groups`
+- [x] `canopy-mcp`: project details on `get_group`, searched by `find_groups`
 - [x] "administrative surface" to "operator surface" in code comments and test messages
 - [x] `just gen-openapi`
 
@@ -133,5 +133,5 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 
 ### Tests
 
-- [ ] Rust endpoint tests per the test cases
+- [x] Rust endpoint tests per the test cases
 - [ ] Playwright coverage per the test cases, with seed helpers for project details, list entries and homepages

@@ -10,7 +10,7 @@
 - [x] A grant with `*` as a source gives its level to every tailnet user (verifies spec: ADM)
 - [x] With no tailnet API configured, a listed PM holds PM and nothing else confers a level (verifies spec: ADM)
 - [x] With the policy unreadable after a good read, a policy-granted PM keeps PM and a listed PM keeps PM (verifies spec: ADM)
-- [ ] Removing someone from the PM list refuses their next project details edit (verifies spec: ADM)
+- [x] Removing someone from the PM list refuses their next project details edit (verifies spec: ADM)
 - [ ] The level endpoint answers all for a plain tailnet user, and the client shows no PM or admin controls to them (verifies spec: ADM)
 - [x] Existing admins are still admins after the migration (verifies spec: ADM)
 
@@ -27,26 +27,26 @@
 ## Project details
 
 - [ ] A PM in write mode edits a group's project, PM in charge and contact from its page (verifies spec: GRP)
-- [ ] A PM edits a group whose PM in charge is someone else, and one with none (verifies spec: GRP)
+- [x] A PM edits a group whose PM in charge is someone else, and one with none (verifies spec: GRP)
 - [ ] A PM in read-only mode sees the edit control blocked, and raising from it opens the form (verifies spec: GRP, SAFE)
 - [ ] A PM sees no Add machine, Edit or Archive on the group page, and the server refuses a PM's group update (verifies spec: GRP)
 - [ ] An all-level caller gets no edit control, and the server refuses their edit (verifies spec: GRP)
-- [ ] A PM in charge with no `@`, or nothing either side of it, is refused (verifies spec: GRP)
-- [ ] An edit leaves an audit entry holding each changed field before and after; saving unchanged details leaves none (verifies spec: GRP)
+- [x] A PM in charge with no `@`, or nothing either side of it, is refused (verifies spec: GRP)
+- [x] An edit leaves an audit entry holding each changed field before and after; saving unchanged details leaves none (verifies spec: GRP)
 - [ ] The PM in charge shows by display name for a login Canopy knows, and as entered otherwise (verifies spec: GRP)
 - [ ] Empty details read as none (verifies spec: GRP)
 
 ## Projects view
 
-- [ ] Lists groups with a live production environment, and leaves out a group with only test and demo (verifies spec: PRJ)
-- [ ] Leaves out an archived group (verifies spec: PRJ)
+- [x] Lists groups with a live production environment, and leaves out a group with only test and demo (verifies spec: PRJ)
+- [x] Leaves out an archived group (verifies spec: PRJ)
 - [ ] The viewer's groups come first in their own highlighted section, matched on login ignoring case (verifies spec: PRJ)
 - [ ] A viewer in charge of nothing sees one section without an empty "yours" heading (verifies spec: PRJ)
 - [ ] Each group shows its production central, then facilities by name, with public and tailnet links opening in a new tab, the tailnet link over HTTPS (verifies spec: PRJ, SVC)
 - [ ] Two facilities sharing a name are told apart by their machine (verifies spec: PRJ, FLT)
 - [ ] A group whose production environment holds no Tamanu shows its details and reads as having no Tamanu (verifies spec: PRJ)
 - [ ] A facility with no URL shows no public address; a machine with no tailnet name, or a cluster-hosted application, shows no tailnet address (verifies spec: PRJ)
-- [ ] Test and pending Tamanu in the same group are not listed (verifies spec: PRJ)
+- [x] Test and pending Tamanu in the same group are not listed (verifies spec: PRJ)
 - [ ] Search narrows by group name, project, contact, and PM by display name or login, ignoring case (verifies spec: PRJ)
 - [ ] "Projects" sits under Fleet in the sidebar and opens `/fleet/pm` (verifies spec: PRJ, FLT)
 
@@ -76,4 +76,4 @@
 
 ## Fleet query interface
 
-- [ ] Get group returns the project details; Find groups matches a term in the project, PM in charge or contact (verifies spec: MCP)
+- [x] Get group returns the project details; Find groups matches a term in the project, PM in charge or contact (verifies spec: MCP)
