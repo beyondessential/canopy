@@ -169,6 +169,7 @@ export type ServerGroupCard = Solidify<Schemas["ServerGroupCard"]>;
 export type ServerGroup = Solidify<Schemas["ServerGroup"]>;
 export type GroupDetail = Solidify<Schemas["GroupDetail"]>;
 export type NamedProjectDetails = Solidify<Schemas["NamedProjectDetails"]>;
+export type PmCandidate = Solidify<Schemas["PmCandidate"]>;
 export type ProjectGroup = Solidify<Schemas["ProjectGroup"]>;
 export type ProjectTamanu = Solidify<Schemas["ProjectTamanu"]>;
 export type AnsibleVariable = Solidify<Schemas["AnsibleVariable"]>;

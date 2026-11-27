@@ -44,7 +44,8 @@ test.describe("project details, in write mode", () => {
 		await editProject(page).click();
 		const dialog = page.getByRole("dialog", { name: "Edit project" });
 		// The form holds only the three details.
-		await expect(dialog.getByRole("textbox")).toHaveCount(3);
+		await expect(dialog.getByRole("textbox")).toHaveCount(2);
+		await expect(dialog.getByRole("combobox")).toHaveCount(1);
 		await dialog.getByLabel("Project").fill("District rollout, phase 2");
 		await dialog.getByLabel("PM in charge").fill("Sam@Example.org");
 		await dialog.getByLabel("Contact on the ground").fill("Ana, IT lead");
@@ -55,6 +56,51 @@ test.describe("project details, in write mode", () => {
 		// A login Canopy knows reads by its display name, whatever its case.
 		await expect(detail(page, "PM in charge")).toContainText("Sam Lee");
 		await expect(detail(page, "Contact on the ground")).toHaveText("Ana, IT lead");
+	});
+
+	test("a PM in charge is picked from the people suggested, by name and login", async ({
+		page,
+		sql,
+	}) => {
+		await seedTailscaleUser(sql, { login: "sam@example.org", name: "Sam Lee" });
+		await seedTailscaleUser(sql, { login: "jo@example.org", name: "Jo Park" });
+		const group = await seedServerGroup(sql, { name: "Picker Point" });
+		await asLevel(page, "pm");
+		await page.goto(`/fleet/groups/${group.id}`);
+		await raiseTo(page, "write");
+
+		await editProject(page).click();
+		const dialog = page.getByRole("dialog", { name: "Edit project" });
+		await dialog.getByLabel("PM in charge").fill("sam");
+		const suggestion = page.getByRole("option", { name: /Sam Lee/ });
+		await expect(suggestion).toContainText("sam@example.org");
+		await expect(page.getByRole("option", { name: /Jo Park/ })).toHaveCount(0);
+		await suggestion.click();
+		await expect(dialog.getByLabel("PM in charge")).toHaveValue("sam@example.org");
+		await dialog.getByRole("button", { name: "Save" }).click();
+		await expect(dialog).toHaveCount(0);
+
+		await expect(detail(page, "PM in charge")).toContainText("Sam Lee");
+	});
+
+	test("an email address no one is suggested for is saved as typed", async ({
+		page,
+		sql,
+	}) => {
+		await seedTailscaleUser(sql, { login: "sam@example.org", name: "Sam Lee" });
+		const group = await seedServerGroup(sql, { name: "Typed Town" });
+		await asLevel(page, "pm");
+		await page.goto(`/fleet/groups/${group.id}`);
+		await raiseTo(page, "write");
+
+		await editProject(page).click();
+		const dialog = page.getByRole("dialog", { name: "Edit project" });
+		await dialog.getByLabel("PM in charge").fill("new.pm@partner.example");
+		await expect(page.getByRole("option")).toHaveCount(0);
+		await dialog.getByRole("button", { name: "Save" }).click();
+		await expect(dialog).toHaveCount(0);
+
+		await expect(detail(page, "PM in charge")).toContainText("new.pm@partner.example");
 	});
 
 	test("the server's refusal of a PM in charge with no @ is shown in the form", async ({

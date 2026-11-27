@@ -1,5 +1,6 @@
 import {
 	Alert,
+	Autocomplete,
 	Avatar,
 	Box,
 	Button,
@@ -19,9 +20,9 @@ import {
 } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
 import { useState } from "react";
-import { useApiAction } from "../api";
+import { useApi, useApiAction } from "../api";
 import { useAccessLevel } from "../hooks/useIsAdmin";
-import type { NamedProjectDetails } from "../types";
+import type { NamedProjectDetails, PmCandidate } from "../types";
 import { GradedAction } from "./GradedAction";
 
 /// How a project detail not filled in reads.
@@ -175,12 +176,7 @@ function EditProjectDetailsDialog({
 						onChange={(e) => setProject(e.target.value)}
 						autoFocus
 					/>
-					<TextField
-						label="PM in charge"
-						value={pmInCharge}
-						onChange={(e) => setPmInCharge(e.target.value)}
-						helperText="A tailnet login or an email address."
-					/>
+					<PmInChargeField value={pmInCharge} onChange={setPmInCharge} />
 					<TextField
 						label="Contact on the ground"
 						value={groundContact}
@@ -203,5 +199,64 @@ function EditProjectDetailsDialog({
 				</GradedAction>
 			</DialogActions>
 		</Dialog>
+	);
+}
+
+/// The PM in charge, suggested from the tailnet's members and the people who
+/// have used Canopy, taking any login or email address typed in as well.
+/// spec: GRP#project-details
+function PmInChargeField({
+	value,
+	onChange,
+}: {
+	value: string;
+	onChange: (value: string) => void;
+}) {
+	const candidates = useApi("fleet/groups", "pm_candidates");
+	const options: PmCandidate[] = candidates.status === "ok" ? candidates.data : [];
+	return (
+		<Autocomplete
+			freeSolo
+			options={options}
+			inputValue={value}
+			onInputChange={(_, next, reason) => {
+				if (reason !== "reset") onChange(next);
+			}}
+			onChange={(_, picked) => {
+				if (picked && typeof picked !== "string") onChange(picked.login);
+			}}
+			getOptionLabel={(option) => (typeof option === "string" ? option : option.login)}
+			filterOptions={(all, { inputValue }) => {
+				const term = inputValue.trim().toLowerCase();
+				if (!term) return all;
+				return all.filter(
+					(option) =>
+						option.name.toLowerCase().includes(term) ||
+						option.login.toLowerCase().includes(term),
+				);
+			}}
+			renderOption={({ key, ...props }, option) => (
+				<Box component="li" key={key} {...props} sx={{ gap: 1 }}>
+					<Avatar
+						src={option.profile_pic ?? undefined}
+						sx={{ width: 24, height: 24, fontSize: 11 }}
+						aria-hidden
+					>
+						{initials(option.name)}
+					</Avatar>
+					{option.name}
+					<Typography component="span" variant="body2" color="text.secondary">
+						{option.login}
+					</Typography>
+				</Box>
+			)}
+			renderInput={(params) => (
+				<TextField
+					{...params}
+					label="PM in charge"
+					helperText="A tailnet login or an email address."
+				/>
+			)}
+		/>
 	);
 }
