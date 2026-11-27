@@ -160,6 +160,17 @@ impl AccessListEntry {
 		if login.is_empty() {
 			return Err(AppError::BadRequest("a login is required".into()));
 		}
+		// A login no identity could carry would sit on the list conferring
+		// nothing, and read as though someone held the level.
+		match login.split_once('@') {
+			Some((local, domain)) if !local.is_empty() && !domain.is_empty() => {}
+			_ => {
+				return Err(AppError::BadRequest(format!(
+					"a login must be a tailnet login or an email address, \
+					 with text either side of an @; got {login:?}"
+				)));
+			}
+		}
 		diesel::insert_into(dsl::access_list_entries)
 			.values((dsl::level.eq(level), dsl::login.eq(login)))
 			.on_conflict_do_nothing()

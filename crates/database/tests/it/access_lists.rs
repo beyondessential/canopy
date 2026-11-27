@@ -59,6 +59,20 @@ async fn a_blank_login_is_refused() {
 	.await
 }
 
+/// A login no identity could carry confers nothing, so it never goes on a list.
+// spec: ADM#the-permissions-page
+#[tokio::test(flavor = "multi_thread")]
+async fn a_login_that_could_never_match_anyone_is_refused() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		for bad in ["pm-team", "pat bes.au", "@example.com", "pat@"] {
+			AccessListEntry::add(&mut conn, ListLevel::Pm, bad)
+				.await
+				.expect_err(bad);
+		}
+	})
+	.await
+}
+
 // spec: ADM#the-levels
 #[tokio::test(flavor = "multi_thread")]
 async fn the_highest_list_a_login_is_on_wins_and_removal_is_per_list() {
