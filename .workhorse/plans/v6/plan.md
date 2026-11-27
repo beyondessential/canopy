@@ -92,36 +92,37 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 
 ### Database
 
-- [ ] Migration: `access_list_entries` with the level enum, `admins` rows moved in, `admins` dropped
-- [ ] `database::access_lists` replacing `database::admins`, every caller moved, logins lowercased
+- [x] Migration: `access_list_entries` with the level enum, `admins` rows moved in, `admins` dropped
+- [x] `database::access_lists` replacing `database::admins`, every caller moved, logins lowercased
 - [ ] Migration: `server_groups.project`, `pm_in_charge`, `ground_contact`
 - [ ] `ServerGroup::update_project_details` returning what changed
 - [ ] Projects query: live groups with live production Tamanu, with machine tailnet names
-- [ ] Migration and model: `operator_homepages`
-- [ ] Audit actions `GroupProjectDetailsChanged`, `AccessListEntryAdded`, `AccessListEntryRemoved`
+- [x] Migration and model: `operator_homepages`
+- [x] Audit actions `AccessListEntryAdded`, `AccessListEntryRemoved`
+- [ ] Audit action `GroupProjectDetailsChanged`
 
 ### Policy and levels
 
-- [ ] Per-level grant resolution, `*` as everyone, and `home`/`priority` collection from grants to Canopy's tag, in `tailnet_directory`
-- [ ] Default homepage rule as a pure function, with unit tests
-- [ ] Conferring sources with what each resolves to, and last read time (or never configured), kept in the cache
-- [ ] `AccessLevel` resolution and the `TailscalePm` extractor
-- [ ] `commons::current_user_level`, replacing `is_current_user_admin`
+- [x] Per-level grant resolution, `*` as everyone, and `home`/`priority` collection from grants to Canopy's tag, in `tailnet_directory`
+- [x] Default homepage rule as a pure function, with unit tests
+- [x] Conferring sources with what each resolves to, and last read time (or never configured), kept in the cache
+- [x] `AccessLevel` resolution and the `TailscalePm` extractor
+- [x] `commons::current_user_level`, replacing `is_current_user_admin`
 
 ### Handlers
 
-- [ ] `fns/access.rs` replacing `fns/admins.rs`
+- [x] `fns/access.rs` replacing `fns/admins.rs`
 - [ ] `server_groups::update_project_details`, refusing a PM in charge with no `@`, and the details on `get`
 - [ ] `server_groups::projects`
-- [ ] `fns/homepage.rs`
-- [ ] `bestool::save_snippet` and `delete_snippet` take `TailscaleAdmin`
+- [x] `fns/homepage.rs`
+- [x] `bestool::save_snippet` and `delete_snippet` take `TailscaleAdmin`
 - [ ] `canopy-mcp`: project details on `get_group`, searched by `find_groups`
-- [ ] "administrative surface" to "operator surface" in code comments and test messages
-- [ ] `just gen-openapi`
+- [x] "administrative surface" to "operator surface" in code comments and test messages
+- [x] `just gen-openapi`
 
 ### SPA
 
-- [ ] `useAccessLevel`, with `useIsAdmin` derived from it
+- [x] `useAccessLevel`, with `useIsAdmin` derived from it
 - [ ] Sidebar: home toggle in the brand row; "Projects" under Fleet
 - [ ] `/` resolves the homepage
 - [ ] Projects view at `/fleet/pm`: sections, highlight, search, address links

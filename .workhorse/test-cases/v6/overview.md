@@ -2,17 +2,17 @@
 
 ## Access levels
 
-- [ ] A login on the PM list holds PM; one on the admin list holds admin; one on neither holds all (verifies spec: ADM)
-- [ ] A grant whose value carries `pm: true` on `tag:server-canopy` gives its group's members PM; the same value on another tag gives nothing (verifies spec: ADM)
-- [ ] A value carrying both `admin` and `pm` gives admin; a value carrying neither gives no level (verifies spec: ADM)
-- [ ] A login on the PM list and granted admin by the policy holds admin (verifies spec: ADM)
-- [ ] A login on a list matches whatever its case, as does one named in the policy (verifies spec: ADM)
-- [ ] A grant with `*` as a source gives its level to every tailnet user (verifies spec: ADM)
-- [ ] With no tailnet API configured, a listed PM holds PM and nothing else confers a level (verifies spec: ADM)
-- [ ] With the policy unreadable after a good read, a policy-granted PM keeps PM and a listed PM keeps PM (verifies spec: ADM)
+- [x] A login on the PM list holds PM; one on the admin list holds admin; one on neither holds all (verifies spec: ADM)
+- [x] A grant whose value carries `pm: true` on `tag:server-canopy` gives its group's members PM; the same value on another tag gives nothing (verifies spec: ADM)
+- [x] A value carrying both `admin` and `pm` gives admin; a value carrying neither gives no level (verifies spec: ADM)
+- [x] A login on the PM list and granted admin by the policy holds admin (verifies spec: ADM)
+- [x] A login on a list matches whatever its case, as does one named in the policy (verifies spec: ADM)
+- [x] A grant with `*` as a source gives its level to every tailnet user (verifies spec: ADM)
+- [x] With no tailnet API configured, a listed PM holds PM and nothing else confers a level (verifies spec: ADM)
+- [x] With the policy unreadable after a good read, a policy-granted PM keeps PM and a listed PM keeps PM (verifies spec: ADM)
 - [ ] Removing someone from the PM list refuses their next project details edit (verifies spec: ADM)
 - [ ] The level endpoint answers all for a plain tailnet user, and the client shows no PM or admin controls to them (verifies spec: ADM)
-- [ ] Existing admins are still admins after the migration (verifies spec: ADM)
+- [x] Existing admins are still admins after the migration (verifies spec: ADM)
 
 ## Permissions page
 
@@ -20,7 +20,7 @@
 - [ ] Admin and PM each name their key and the sources the policy grants them to: a group with its member count, a login as one person, `autogroup:member` and `*` as everyone, and an undefined group or other autogroup as no one (verifies spec: ADM)
 - [ ] All shows no key and no list, only that everyone on the tailnet who can reach Canopy holds it (verifies spec: ADM)
 - [ ] Shows when the policy was last read, or that Canopy isn't configured to read it (verifies spec: ADM)
-- [ ] An admin adds and removes a login on the PM list, each needing danger mode and each leaving an audit entry naming level and login (verifies spec: ADM)
+- [x] An admin adds and removes a login on the PM list, each needing danger mode and each leaving an audit entry naming level and login (verifies spec: ADM)
 - [ ] `/settings/admins` leads to the permissions page
 - [ ] A PM or all-level caller has no Permissions entry in the sidebar, and the server refuses them the lists and the policy's grants (verifies spec: ADM)
 
@@ -54,10 +54,10 @@
 
 - [ ] With nothing chosen and no `home` grant, `/` opens the status page (verifies spec: HOME)
 - [ ] A grant with `home: "/fleet/pm"` makes `/` open the projects view (verifies spec: HOME)
-- [ ] A `home` that isn't a single-`/` path (`//evil.example`, `https://…`, `fleet`), is `/` alone, or carries `?` or `#` is ignored (verifies spec: HOME)
-- [ ] A `home` on a grant whose destinations leave out `tag:server-canopy` is ignored (verifies spec: HOME)
-- [ ] Two `home`s: higher priority wins; equal priority goes to more segments, a trailing `/` adding none; then alphabetical (verifies spec: HOME)
-- [ ] A `priority` that isn't a number ranks at zero (verifies spec: HOME)
+- [x] A `home` that isn't a single-`/` path (`//evil.example`, `https://…`, `fleet`), is `/` alone, or carries `?` or `#` is ignored (verifies spec: HOME)
+- [x] A `home` on a grant whose destinations leave out `tag:server-canopy` is ignored (verifies spec: HOME)
+- [x] Two `home`s: higher priority wins; equal priority goes to more segments, a trailing `/` adding none; then alphabetical (verifies spec: HOME)
+- [x] A `priority` that isn't a number ranks at zero (verifies spec: HOME)
 - [ ] A chosen homepage naming a path that matches no page opens as a missing page, and the toggle there clears it (verifies spec: HOME)
 - [ ] The toggle on a page that isn't home makes it home, and `/` opens it in a new session (verifies spec: HOME)
 - [ ] The toggle on the chosen homepage clears the choice, and `/` opens the default again (verifies spec: HOME)
@@ -67,8 +67,8 @@
 
 ## Bestool snippets
 
-- [ ] An all-level caller lists and opens snippets but cannot save or delete one; an admin can (verifies spec: ADM)
-- [ ] Deleting a snippet without a tailnet identity is refused (verifies spec: ADM)
+- [x] An all-level caller lists and opens snippets but cannot save or delete one; an admin can (verifies spec: ADM)
+- [x] Deleting a snippet without a tailnet identity is refused (verifies spec: ADM)
 
 ## Safety modes
 
