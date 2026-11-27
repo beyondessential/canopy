@@ -62,7 +62,7 @@ The groups are ordered by name, and facilities by name. Splitting them into the 
 
 ### Safety modes
 
-`SafetyModeControl` offers write from PM up and danger only to admins, and shows read-only alone to an all-level operator. Nothing changes server-side: a raise authorises nothing, and handlers are gated by level.
+Safety modes stay independent of access levels: `SafetyModeControl` offers every mode to every operator, and the server accepts any raise. A raise authorises nothing; handlers are gated by level.
 
 SAFE now says "operator surface" where it said "administrative surface"; code comments and test messages using the old phrase follow (`tailnet_directory.rs`, `operator_sessions.rs`, `private-server/src/lib.rs`, `safety.rs`, `tests/it/openapi_spec.rs`, `private-web/src/safety-modes.ts`).
 
@@ -128,7 +128,7 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 - [x] Projects view at `/fleet/pm`: sections, highlight, search, address links
 - [x] Group detail: Project panel and its edit dialog, shown from PM up
 - [x] Permissions page at `/settings/permissions`, with a redirect from `/settings/admins`
-- [x] `SafetyModeControl` offers modes by level
+- [x] `SafetyModeControl` offers every mode at every level
 - [x] Projects view: a production environment with no Tamanu reads as none
 
 ### Tests

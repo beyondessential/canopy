@@ -72,7 +72,7 @@
 
 ## Safety modes
 
-- [x] The mode control offers write but not danger to a PM, both to an admin, and shows read-only alone to an all-level caller (verifies spec: SAFE)
+- [x] The mode control offers every mode to an admin, a PM and an all-level caller alike (verifies spec: SAFE)
 
 ## Fleet query interface
 

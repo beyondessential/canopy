@@ -619,31 +619,21 @@ test.describe("safety modes", () => {
 		await expect(page.getByText("keyboard@example.invalid")).toBeVisible();
 	});
 
-	for (const [level, offered, withheld] of [
-		["admin", ["read-only", "write", "danger"], []],
-		["pm", ["read-only", "write"], ["danger"]],
-		["all", ["read-only"], ["write", "danger"]],
-	] as const) {
-		test(`the mode control offers ${offered.join(", ")} at ${level}`, async ({
-			page,
-		}) => {
-			await page.route("**/api/commons/current_user_level", (route) =>
-				route.fulfill({ json: level }),
-			);
+	for (const level of ["admin", "pm", "all"] as const) {
+		test(`the mode control offers every mode at ${level}`, async ({ page }) => {
+			let answered = false;
+			await page.route("**/api/commons/current_user_level", (route) => {
+				answered = true;
+				return route.fulfill({ json: level });
+			});
 			await page.goto("/versions");
+			await expect.poll(() => answered).toBe(true);
 			await modeControl(page).click();
-			const items = page.getByRole("menuitem");
-			// The level answers after the page draws; wait for its options.
-			await expect(items).toHaveCount(offered.length);
-			for (const mode of offered) {
+			await expect(page.getByRole("menuitem")).toHaveCount(3);
+			for (const mode of ["read-only", "write", "danger"]) {
 				await expect(
 					page.getByRole("menuitem", { name: new RegExp(mode, "i") }),
 				).toBeVisible();
-			}
-			for (const mode of withheld) {
-				await expect(
-					page.getByRole("menuitem", { name: new RegExp(mode, "i") }),
-				).toHaveCount(0);
 			}
 		});
 	}

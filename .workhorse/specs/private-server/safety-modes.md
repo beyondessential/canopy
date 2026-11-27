@@ -27,9 +27,10 @@ From the mode control, raising to write takes effect without confirmation, and r
 
 An operator lowers their mode from the mode control at any time, without waiting for the remaining time to run out.
 
-The mode control offers only the modes the operator's access level has a use for: write from the PM level up, and danger at the admin level.
-An operator at the all level is offered neither, and their mode control shows read-only alone.
-The server accepts a raise to any mode from any operator, since a raise authorises nothing: each handler admits callers by their level on its own.
+The mode control offers every mode to every operator, and the server accepts a raise to any mode from any operator, whatever their access level.
+
+> [!NOTE]
+> A raise authorises nothing: each handler admits callers by their level on its own, so a mode guards against mistakes within what the operator's level already allows.
 
 ## Raising from a blocked control
 

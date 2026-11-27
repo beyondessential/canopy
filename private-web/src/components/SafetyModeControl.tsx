@@ -12,9 +12,7 @@ import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { type RefObject, useRef, useState } from "react";
 import type { Theme } from "@mui/material/styles";
-import { useAccessLevel } from "../hooks/useIsAdmin";
 import { useRemainingMs, useSafetyMode } from "../hooks/useSafetyMode";
-import type { AccessLevel } from "../types";
 import { LADDER, type SafetyMode, modeLabel } from "../safety";
 import {
 	modePalette,
@@ -78,21 +76,6 @@ function optionHint(option: SafetyMode, current: SafetyMode): string {
 			return "Ten minutes";
 		case "danger":
 			return "Ten minutes, confirms first";
-	}
-}
-
-/**
- * Whether an operator at `level` has a use for `option`: write from PM up,
- * danger at admin. Until the level is known nothing beyond reading is offered.
- */
-function offered(option: SafetyMode, level: AccessLevel | null | undefined) {
-	switch (option) {
-		case "read-only":
-			return true;
-		case "write":
-			return level === "pm" || level === "admin";
-		case "danger":
-			return level === "admin";
 	}
 }
 
@@ -160,13 +143,7 @@ function useModeOptions(
 	inset?: number,
 ) {
 	const { mode, raise, lower, requestRaise } = useSafetyMode();
-	const level = useAccessLevel();
-	// The current mode stays listed even past the level's reach, so the
-	// operator can always see it and lower from it.
-	const options = LADDER.filter(
-		(option) => option === mode || offered(option, level),
-	);
-	return options.map((option) => (
+	return LADDER.map((option) => (
 		<MenuItem
 			key={option}
 			selected={option === mode}
