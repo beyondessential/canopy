@@ -24,7 +24,7 @@ Against a group Canopy holds:
 - the domains it claims, and the DNS name grants that work from them (see [DOM](domains.md));
 - one billing identity, which every member's effective labels derive from (see [APP](application-types.md), "Billing attribution");
 - the Ansible variables set on the group and on each of its environments (see [ANSVAR](../private-server/ansible/variables.md));
-- free-form notes, for what an operator working on the group needs to know, such as where a key is kept or which network to join, with the history of their changes (see [FLT](overview.md), "Notes").
+- free-form notes, for what an operator working on the group needs to know, such as where a key is kept or which network to join, with the history of their changes (see [FLT](overview.md), "Notes");
 - its project details: the project it serves, its PM in charge, and its contact on the ground (see "Project details").
 
 A machine belonging to no group carries none of it: its issues reach no incident target and contribute to no incident (see [INC](../monitoring/incidents.md)), and it has no billing attribution (see [APP](application-types.md)).
@@ -44,6 +44,7 @@ A group carries three project details, for the people running the project it ser
 
 Any of them may be empty.
 The PM in charge is what the Projects view matches a person against, so it names a person rather than describing one (see [PRJ](projects.md)).
+A PM in charge not shaped as a login or an email address, with text either side of an `@`, is refused.
 Wherever Canopy shows the PM in charge, it names them by the display name Canopy knows for that login, and by the login or address as entered where it knows none.
 
 The group's page presents its project details in a panel of their own, beside its notes.

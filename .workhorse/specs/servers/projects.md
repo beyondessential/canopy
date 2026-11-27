@@ -10,12 +10,15 @@ Applies to the fleet's projects view: which groups it lists, how a person's own 
 
 The projects view is a listing of the fleet, beside its groups, archived records and figures (see [FLT](overview.md), "Navigating the two grains").
 It is addressed at `/fleet/pm` and named "Projects" in the operator interface's navigation.
-Its address is stable, since a tailnet policy names it as a default homepage (see [HOME](../private-server/homepage.md)).
+Its address is stable, since a tailnet policy can name it as a default homepage (see [HOME](../private-server/homepage.md)).
 Everyone who can read the operator surface can read it (see [ADM](../private-server/access-levels.md)).
 
 ## Which groups it lists
 
 The view lists every live group with a production environment (see [GRP](groups.md), "Environments").
+
+> [!NOTE]
+> The view is for reaching live Tamanu, so a project before go-live is kept on its group's page until the group has a production environment.
 
 The groups whose PM in charge is the person viewing come first, in a section of their own, highlighted, and every other listed group follows in a second section (see [GRP](groups.md), "Project details").
 A person is matched to a PM in charge by their tailnet login, ignoring case.
@@ -27,11 +30,14 @@ Within each section, groups are in order of name.
 Each group shows its name, leading to the group's page, and its project details: its project, its PM in charge and its contact on the ground.
 A detail not filled in reads as none.
 
-Beneath them, each group shows the Tamanu in its production environment: its central first, then each facility, named by its application name (see [FLT](overview.md), "Naming").
+Beneath them, each group shows the Tamanu in its production environment: its central first, then each facility in order of name.
+Each is named as everywhere in the fleet, so facilities sharing a name are told apart by their machine (see [FLT](overview.md), "Naming").
+A production environment with neither a Tamanu central nor a facility reads as having no Tamanu.
+
 Each has two addresses, each a link opening in a new tab:
 
 - its public address, which is the application's configured URL;
-- its tailnet address, which is its machine's tailnet name.
+- its tailnet address, which is the tailnet name of the device bound to its machine, linked over HTTPS at that MagicDNS name as Canopy's other links to a machine are (see [SVC](../private-server/service-links.md)).
 
 Where either address is not known, it reads as none.
 An application hosted on a cluster has no machine, and so no tailnet address.
