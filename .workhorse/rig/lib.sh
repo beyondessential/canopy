@@ -57,6 +57,16 @@ export CARGO_TERM_COLOR=never
 # A rig build is built once, and sccache cannot cache an incremental compile.
 export CARGO_INCREMENTAL=0
 
+# The stand-ins for everything outside a Canopy instance, shared with the e2e
+# fixture so the two cannot drift. rig.json promises a tester there is no AWS,
+# Kubernetes, Tailscale control plane or Slack behind the lease.
+export_fake_deps() {
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in '' | '#'*) continue ;; esac
+    export "$line"
+  done < "$RIG_SOURCE/scripts/fake-deps.env"
+}
+
 # The binaries a lease runs. deps warms the dependency build with exactly the
 # set build compiles, so a binary named in one and not the other costs a
 # recompile of what the shared build was meant to cover.

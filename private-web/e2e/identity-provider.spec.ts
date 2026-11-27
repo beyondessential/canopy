@@ -1,3 +1,4 @@
+import { FAKE_DEPS } from "./fixture";
 import { expect, test } from "./test-fixtures";
 import {
 	resetAuditLog,
@@ -10,6 +11,14 @@ import {
 	seedServer,
 	seedServerGroup,
 } from "./seed";
+
+/// The issuer and key names the server is configured with, taken from the one
+/// place they are set so a change there does not leave this spec asserting a
+/// name the page cannot show.
+const ISSUER = FAKE_DEPS.CANOPY_IDENTITY_ISSUER;
+const [OLD_KEY, NEW_KEY] = FAKE_DEPS.CANOPY_IDENTITY_KEYS.split(",").map((k) =>
+	k.trim(),
+);
 
 const OLD_KID = "oldKeyThumbprint0000000000000000000000000001";
 const NEW_KID = "newKeyThumbprint0000000000000000000000000002";
@@ -29,13 +38,13 @@ test.describe("identity provider settings", () => {
 	}) => {
 		await seedIdentityKey(sql, {
 			kid: OLD_KID,
-			keyRef: "e2e-key-old",
+			keyRef: OLD_KEY,
 			servedMinutesAgo: 60 * 24 * 30,
 			signedMinutesAgo: 60 * 24 * 30,
 		});
 		await seedIdentityKey(sql, {
 			kid: NEW_KID,
-			keyRef: "e2e-key-new",
+			keyRef: NEW_KEY,
 			servedMinutesAgo: 5,
 		});
 		const party = await seedRelyingParty(sql, {
@@ -60,17 +69,17 @@ test.describe("identity provider settings", () => {
 		});
 
 		await page.goto("/settings/identity-provider");
-		await expect(page.getByText("https://identity.e2e.invalid", { exact: true })).toBeVisible();
+		await expect(page.getByText(ISSUER, { exact: true })).toBeVisible();
 		await expect(
-			page.getByText("https://identity.e2e.invalid/.well-known/openid-configuration"),
+			page.getByText(`${ISSUER}/.well-known/openid-configuration`),
 		).toBeVisible();
 
 		const keys = page.getByRole("table").first().getByRole("row");
 		// Newest first: the new key is published while it matures, and the old
 		// one still signs.
-		await expect(keys.nth(1)).toContainText("e2e-key-new");
+		await expect(keys.nth(1)).toContainText(NEW_KEY);
 		await expect(keys.nth(1)).toContainText("published");
-		await expect(keys.nth(2)).toContainText("e2e-key-old");
+		await expect(keys.nth(2)).toContainText(OLD_KEY);
 		await expect(keys.nth(2)).toContainText("signing");
 		await expect(keys.nth(2).getByRole("cell").last()).toHaveText("1");
 

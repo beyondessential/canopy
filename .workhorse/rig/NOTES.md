@@ -27,7 +27,8 @@ Entry points:
 - `seed`: `migrate`, then `seed`, then swaps the seeder's placeholder key on the first device for
   a real certificate's, kept in `.rig-out/`.
 - `serve`: the header-trusting server in the background, then the base URL's in the foreground,
-  with the stand-ins the e2e fixture uses for AWS, Kubernetes and the outside world.
+  with the stand-ins for AWS, Kubernetes and the outside world read from `scripts/fake-deps.env`,
+  the same file the e2e fixture reads.
 
 Needs: `cargo` (through rustup), `node` and `npm`, `psql`, `openssl` and `curl` on the PATH the
 manager runs with; a Postgres whose user in the manager's URL has `CREATEDB`.

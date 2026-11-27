@@ -5,18 +5,9 @@ set -eu
 # The servers refuse PORT and BIND_ADDRESS together, and the rig sets PORT.
 unset PORT
 
-# The e2e fixture's stand-ins for what a real instance reaches outside itself
-# (private-web/e2e/fixture.ts says what each one does).
+# Everything a real instance reaches outside itself, stood in for.
+export_fake_deps
 export RO_DATABASE_URL="$DATABASE_URL"
-export CLIENT_IP_SOURCE=ConnectInfo
-export CANOPY_BACKUP_SECRETS_MEMORY=1
-export CANOPY_BACKUP_PROBER_FAKE=1
-export CANOPY_ARTIFACT_STORE_MEMORY=1
-export CANOPY_FAKE_ACME=1
-export CANOPY_RECOVERY_VAULT_KEYS=age1uy3nqmdxf4lc3sc4p32c2cp9dlqwk868gjh002gysullrgvp0cjsdg03dn
-export CANOPY_DNS_ZONES="tamanu.app=Z1RIG, demo.tamanu.app=Z2RIG"
-export CANOPY_IDENTITY_ISSUER=https://identity.rig.invalid
-export CANOPY_IDENTITY_KEYS="rig-key-old, rig-key-new"
 export SERVER_VERSIONS_SECRET=rig
 export PUBLIC_URL="$RIG_BASE_URL/public"
 export META_LOG="${META_LOG:-private_server=info,warn}"

@@ -19,7 +19,7 @@ import {
 	spawnSync,
 } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import net from "node:net";
 import { dirname, join, resolve } from "node:path";
@@ -28,6 +28,20 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRONTEND_ROOT = resolve(__dirname, "..");
 const WORKSPACE_ROOT = resolve(FRONTEND_ROOT, "..");
+
+// The stand-ins for everything outside a Canopy instance, shared with the rig's
+// serve step (.workhorse/rig/serve) so the two cannot drift apart. One KEY=value
+// a line, the value taken literally to the end of the line.
+export const FAKE_DEPS: Record<string, string> = Object.fromEntries(
+	readFileSync(join(WORKSPACE_ROOT, "scripts/fake-deps.env"), "utf8")
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line !== "" && !line.startsWith("#"))
+		.map((line) => [
+			line.slice(0, line.indexOf("=")),
+			line.slice(line.indexOf("=") + 1),
+		]),
+);
 
 export interface StackHandle {
 	/** HTTP base URL for the Vite dev server (proxies /api at the API). */
@@ -192,45 +206,11 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 				// the read pool must target this stack's per-worker database.
 				RO_DATABASE_URL: databaseUrl,
 				BIND_ADDRESS: `127.0.0.1:${apiPort}`,
-				// No cluster in e2e: use the in-memory backup Secret store so
-				// onboarding (Secret creation) works against the real binary.
-				CANOPY_BACKUP_SECRETS_MEMORY: "1",
-				// No AWS in e2e: fake bucket prober — wizard state is derived from
-				// the bucket name (…existing… → kopia repo, …other… → other content,
-				// …denied… → inaccessible, else empty).
-				CANOPY_BACKUP_PROBER_FAKE: "1",
-				// No bucket in e2e: hold uploaded artifacts in the server's own
-				// process so registering and serving one is exercised end to end.
-				CANOPY_ARTIFACT_STORE_MEMORY: "1",
-				// A throwaway age recipient (bestool-generated) so the recovery vault
-				// ceremony page reports as configured. The matching private key isn't
-				// needed: the e2e exercises status + challenge + wrong-answer, and the
-				// full decrypt round-trip is covered by the Rust endpoint tests.
-				CANOPY_RECOVERY_VAULT_KEYS:
-					"age1uy3nqmdxf4lc3sc4p32c2cp9dlqwk868gjh002gysullrgvp0cjsdg03dn",
-				// Two managed DNS zones so the group-domains UI has something to
-				// claim into; the nested one is there for the longest-apex-wins
-				// case.
-				CANOPY_DNS_ZONES: "tamanu.app=Z1E2E, demo.tamanu.app=Z2E2E",
-				// The in-process fake authority: advertises profiles and accepts
-				// revocations, so the certificate UI is exercisable without a
-				// network. Debug-only in the binary.
-				CANOPY_FAKE_ACME: "1",
-				// An identity provider issuer with two keys, so its settings and the
-				// grant choices on a machine's edit page are offered. Nothing signs
-				// in e2e: the keys' states come from what the specs seed.
-				CANOPY_IDENTITY_ISSUER: "https://identity.e2e.invalid",
-				CANOPY_IDENTITY_KEYS: "e2e-key-old, e2e-key-new",
+				...FAKE_DEPS,
 				// Needed by mint_enrollment to build the ticket's api_url; the
 				// setup-instructions flow auto-mints on an unregistered server.
 				PUBLIC_URL: process.env.PUBLIC_URL ?? "https://api.e2e.invalid",
 				META_LOG: process.env.META_LOG ?? "private_server=info,warn",
-				// The binary defaults to RightmostXForwardedFor for production
-				// (behind the Tailscale K8s Operator's ingress). In e2e there's
-				// no proxy in front, so the axum-client-ip middleware would
-				// reject every request for missing X-Forwarded-For. Fall back
-				// to the raw TCP peer.
-				CLIENT_IP_SOURCE: "ConnectInfo",
 			},
 		});
 		pipeOutput(api, "api", silent);

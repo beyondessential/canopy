@@ -5,16 +5,23 @@ set -eu
 "$RIG_SOURCE/target/debug/migrate"
 "$RIG_SOURCE/target/debug/seed"
 
-# The seeder gives devices placeholder keys. Swap the first one's (the device
-# behind Suva Facility) for a real certificate's, so the device API can be
-# driven as it.
+# The seeder gives every device a placeholder key. Swap the key of the device
+# bound to the box under the Suva Facility application, the one rig.json offers
+# testers, for a real certificate's, so the device API can be driven as it.
+# Named by the application rather than by the placeholder's bytes, which are
+# the seeder's to change.
+app="Suva Facility"
 mkdir -p "$RIG_OUT"
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
   -subj "/CN=canopy-rig-device" -keyout "$RIG_OUT/device.key" -out "$RIG_OUT/device.pem" 2>/dev/null
 spki=$(openssl x509 -in "$RIG_OUT/device.pem" -noout -pubkey | openssl pkey -pubin -outform DER | od -An -v -tx1 | tr -d ' \n')
-device=$(psql "$RIG_DATABASE_URL" -v ON_ERROR_STOP=1 -qtA -c "
+device=$(psql "$RIG_DATABASE_URL" -v ON_ERROR_STOP=1 -qtA -v app="$app" -c "
   UPDATE device_keys SET key_data = decode('$spki', 'hex')
-  WHERE key_data = decode('30593013' || repeat('10', 60), 'hex')
+  WHERE device_id = (
+    SELECT m.device_id FROM machines m
+    JOIN applications a ON a.machine_id = m.id
+    WHERE a.name = :'app'
+  )
   RETURNING device_id")
-[ -n "$device" ] || { echo "seed: the seeder's first device key was not found" >&2; exit 1; }
+[ -n "$device" ] || { echo "seed: no device is bound to the box under $app" >&2; exit 1; }
 printf '%s' "$device" > "$RIG_OUT/device-id"
