@@ -14,6 +14,7 @@ import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import { useEffect, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { useIsAdmin } from "../hooks/useIsAdmin";
+import { HomeToggle } from "./HomeToggle";
 import { SafetyModeBand } from "./SafetyModeControl";
 
 /** Whether `pathname` is `path` or somewhere beneath it. */
@@ -82,9 +83,11 @@ const SECTIONS: NavSection[] = [
 						// Everything the fleet holds is reached from its groups.
 						current: (pathname) =>
 							under("/fleet")(pathname) &&
+							!under("/fleet/pm")(pathname) &&
 							!under("/fleet/archived")(pathname) &&
 							!under("/fleet/figures")(pathname),
 					},
+					page("Projects", "/fleet/pm"),
 					page("Archived", "/fleet/archived"),
 					page("Figures", "/fleet/figures"),
 				],
@@ -348,8 +351,18 @@ export function AppSidebar({
 
 	return (
 		<Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-			<Box sx={{ px: 3, py: 1.5 }}>
+			<Box
+				sx={{
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "space-between",
+					pl: 3,
+					pr: 1,
+					py: 1.5,
+				}}
+			>
 				<Brand />
+				<HomeToggle />
 			</Box>
 			<Box
 				component="nav"

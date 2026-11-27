@@ -25,6 +25,9 @@ import { SafetyModeControl } from "./components/SafetyModeControl";
 import { ApplicationTypesProvider } from "./hooks/useApplicationTypes";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
+import NotFound from "./routes/NotFound";
+import { HomepageProvider } from "./hooks/useHomepage";
+import { HomeRedirect } from "./components/HomeToggle";
 import BackupConfig from "./routes/BackupConfig";
 import BackupDefaults from "./routes/BackupDefaults";
 import RecoveryVault from "./routes/RecoveryVault";
@@ -139,6 +142,7 @@ export default function App() {
 	return (
 		<AdminProvider>
 		<SafetyModeProvider>
+		<HomepageProvider>
 		<ApplicationTypesProvider>
 		<Box sx={{ display: "flex" }}>
 			{wide ? (
@@ -223,7 +227,7 @@ export default function App() {
 			<SelfAlertsBanner reloadTick={reloadTick} />
 			<Container component="main" maxWidth="lg" sx={{ py: 3 }}>
 				<Routes>
-					<Route path="/" element={<Navigate to="/status" replace />} />
+					<Route path="/" element={<HomeRedirect />} />
 					<Route path="/status" element={<Status />} />
 					<Route path="/alerts" element={<SelfAlerts />} />
 					<Route path="/incidents" element={<Incidents />} />
@@ -413,11 +417,13 @@ export default function App() {
 						/>
 					</Route>
 					<Route path="/sql" element={<Sql />} />
+					<Route path="*" element={<NotFound />} />
 				</Routes>
 			</Container>
 			</Box>
 		</Box>
 		</ApplicationTypesProvider>
+		</HomepageProvider>
 		</SafetyModeProvider>
 		</AdminProvider>
 	);
