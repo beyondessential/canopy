@@ -75,6 +75,7 @@ Each person picks what `/` opens. Someone who hasn't picked gets the `home` thei
 - Canopy keeps no per-user preferences today (it caches display names in `tailscale_users`, and sessions hold only safety mode), so this is new storage keyed by login.
 - Any page, since the policy default (F) is a path too.
 - Where it's set: a home toggle in the top-right corner of the sidebar, beside the Canopy mark, on every page. Faint by default, stronger on the page that is your homepage (filled icon), full on hover. One place on every page, so it doesn't shift with each page's own header or action row. Clicking it on any other page makes that page your homepage.
+- Clicking it on the page you chose clears your choice, so `/` goes back to the policy default (F). On a page that is your homepage only by that default it shows on, and clicking it does nothing.
 
 ### F. Who counts as a PM
 
@@ -141,5 +142,5 @@ In `.workhorse/design/mockups/v6/`:
 - [x] F: two grants naming different `home`s: decided (see F).
 - [x] F: keep reading the policy file until the operator's ingress can forward caps.
 - [x] Homepage: any page, set by a home toggle in the sidebar's top-right corner.
+- [x] 14. Clicking the toggle on your chosen homepage clears the choice.
 - [ ] 12. Sidebar label for the PM view ("Projects" in the mockups).
-- [ ] 14. How someone goes back to the policy default once they've picked a homepage.
