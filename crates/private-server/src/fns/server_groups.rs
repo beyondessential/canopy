@@ -608,8 +608,7 @@ pub struct PmCandidate {
 /// Canopy, each once by login ignoring case, in order of display name. Where
 /// both know someone, the tailnet's name and picture are taken. Without a
 /// tailnet API configured, or before its users have been read, the list is the
-/// people who have used Canopy alone. The request body is ignored; send an
-/// empty JSON object.
+/// people who have used Canopy alone.
 // spec: GRP#project-details
 #[utoipa::path(
 	post,
@@ -624,7 +623,6 @@ pub struct PmCandidate {
 pub async fn pm_candidates(
 	State(state): State<AppState>,
 	_pm: TailscalePm,
-	_body: Json<serde_json::Value>,
 ) -> Result<Json<Vec<PmCandidate>>> {
 	let mut conn = state.db.get().await?;
 	let mut by_login: std::collections::HashMap<String, PmCandidate> =
@@ -725,8 +723,7 @@ pub struct ProjectTamanu {
 ///
 /// Every live group with a live production environment, in order of name,
 /// each with its project details, whether the caller is its PM in charge, and
-/// its production Tamanu central and facilities. The request body is ignored;
-/// send an empty JSON object.
+/// its production Tamanu central and facilities.
 // spec: PRJ
 #[utoipa::path(
 	post,
@@ -741,7 +738,6 @@ pub struct ProjectTamanu {
 pub async fn projects(
 	State(state): State<AppState>,
 	user: TailscaleUser,
-	_body: Json<serde_json::Value>,
 ) -> Result<Json<Vec<ProjectGroup>>> {
 	let mut conn = state.db.get().await?;
 	let viewer = user.login.to_lowercase();

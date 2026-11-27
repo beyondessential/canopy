@@ -2841,8 +2841,7 @@ export interface paths {
          *     Canopy, each once by login ignoring case, in order of display name. Where
          *     both know someone, the tailnet's name and picture are taken. Without a
          *     tailnet API configured, or before its users have been read, the list is the
-         *     people who have used Canopy alone. The request body is ignored; send an
-         *     empty JSON object.
+         *     people who have used Canopy alone.
          */
         post: operations["server_groups_pm_candidates"];
         delete?: never;
@@ -2864,8 +2863,7 @@ export interface paths {
          * List the fleet's projects.
          * @description Every live group with a live production environment, in order of name,
          *     each with its project details, whether the caller is its PM in charge, and
-         *     its production Tamanu central and facilities. The request body is ignored;
-         *     send an empty JSON object.
+         *     its production Tamanu central and facilities.
          */
         post: operations["server_groups_projects"];
         delete?: never;
@@ -20426,11 +20424,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": unknown;
-            };
-        };
+        requestBody?: never;
         responses: {
             200: {
                 headers: {
@@ -20449,11 +20443,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": unknown;
-            };
-        };
+        requestBody?: never;
         responses: {
             200: {
                 headers: {

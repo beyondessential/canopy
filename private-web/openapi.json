@@ -23973,16 +23973,8 @@
     },
     "/api/fleet/groups/pm_candidates": {
       "post": {
-        "description": "The tailnet's members other than suspended ones, and everyone who has used\nCanopy, each once by login ignoring case, in order of display name. Where\nboth know someone, the tailnet's name and picture are taken. Without a\ntailnet API configured, or before its users have been read, the list is the\npeople who have used Canopy alone. The request body is ignored; send an\nempty JSON object.",
+        "description": "The tailnet's members other than suspended ones, and everyone who has used\nCanopy, each once by login ignoring case, in order of display name. Where\nboth know someone, the tailnet's name and picture are taken. Without a\ntailnet API configured, or before its users have been read, the list is the\npeople who have used Canopy alone.",
         "operationId": "server_groups_pm_candidates",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {}
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
@@ -24013,16 +24005,8 @@
     },
     "/api/fleet/groups/projects": {
       "post": {
-        "description": "Every live group with a live production environment, in order of name,\neach with its project details, whether the caller is its PM in charge, and\nits production Tamanu central and facilities. The request body is ignored;\nsend an empty JSON object.",
+        "description": "Every live group with a live production environment, in order of name,\neach with its project details, whether the caller is its PM in charge, and\nits production Tamanu central and facilities.",
         "operationId": "server_groups_projects",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {}
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
