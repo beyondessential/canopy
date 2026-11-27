@@ -236,10 +236,13 @@ export default function MachineEnclosure({
 		>
 			<Box
 				component="span"
-				// The pill's accessible name, which is also how a test finds one.
-				// The tooltip would set this itself, but only while its own
-				// defaults hold, and a mark nobody can name is worse than the
-				// duplication.
+				// The pill is a graphic standing for the box and what runs on
+				// it, named here rather than left to the tooltip's own default
+				// of labelling its child. A span is generic, which exposes no
+				// name, so the role is what carries it to a screen reader; the
+				// dots inside are drawn quiet and say nothing of their own, and
+				// the name covers them.
+				role="img"
 				aria-label={title}
 				// What the icon draws, which is the box's own window. A window
 				// reaching it through its environment or its group is marked at
