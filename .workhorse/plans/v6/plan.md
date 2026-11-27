@@ -115,7 +115,7 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 - [x] `fns/access.rs` replacing `fns/admins.rs`
 - [x] `server_groups::update_project_details`, refusing a PM in charge with no `@`, and the details on `get`
 - [x] `server_groups::projects`
-- [ ] Tailnet users in `TailnetDirectory`, and `server_groups::pm_candidates`
+- [x] Tailnet users in `TailnetDirectory`, and `server_groups::pm_candidates`
 - [x] `fns/homepage.rs`
 - [x] `bestool::save_snippet` and `delete_snippet` take `TailscaleAdmin`
 - [x] `canopy-mcp`: project details on `get_group`, searched by `find_groups`
@@ -129,7 +129,7 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 - [x] `/` resolves the homepage
 - [x] Projects view at `/fleet/pm`: sections, highlight, search, address links
 - [x] Group detail: Project panel and its edit dialog, shown from PM up
-- [ ] PM in charge as an autocomplete over the candidates, taking free text too
+- [x] PM in charge as an autocomplete over the candidates, taking free text too
 - [x] Permissions page at `/settings/permissions`, with a redirect from `/settings/admins`
 - [x] `SafetyModeControl` offers every mode at every level
 - [x] Projects view: a production environment with no Tamanu reads as none
