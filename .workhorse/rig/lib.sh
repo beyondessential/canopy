@@ -98,6 +98,17 @@ cargo_build_rig_bins() {
 # What the seed step leaves for the lease: the seeded device's certificate.
 RIG_OUT="$RIG_SOURCE/.rig-out"
 
+# psql, given the connection string in argv, puts any password it carries where
+# every local user can read it for as long as the step runs. The password goes
+# through the environment instead, and the rest of the string is left to libpq
+# to parse, so nothing in it is dropped.
+psql_rig() {
+  url=$(node -e 'const u = new URL(process.argv[1]); u.password = ""; process.stdout.write(u.href)' "$RIG_DATABASE_URL")
+  PGPASSWORD=$(node -e 'const u = new URL(process.argv[1]); process.stdout.write(decodeURIComponent(u.password))' "$RIG_DATABASE_URL")
+  export PGPASSWORD
+  psql "$url" "$@"
+}
+
 # A port nothing is listening on, for the second server.
 free_port() {
   # The manager picks RIG_PORT without holding it, so the OS can hand it out

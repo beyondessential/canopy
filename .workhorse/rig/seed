@@ -17,7 +17,7 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 
 spki=$(openssl x509 -in "$RIG_OUT/device.pem" -noout -pubkey | openssl pkey -pubin -outform DER | od -An -v -tx1 | tr -d ' \n')
 # The box carries more than one key, so one of them is replaced, not all.
 # psql interpolates :'app' in what it reads, but not in a -c string.
-device=$(psql "$RIG_DATABASE_URL" -v ON_ERROR_STOP=1 -qtA -v app="$app" <<SQL
+device=$(psql_rig -v ON_ERROR_STOP=1 -qtA -v app="$app" <<SQL
   UPDATE device_keys SET key_data = decode('$spki', 'hex')
   WHERE id = (
     SELECT k.id FROM device_keys k
