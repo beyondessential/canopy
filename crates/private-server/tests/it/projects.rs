@@ -195,3 +195,29 @@ async fn lists_live_groups_with_production_and_their_production_tamanu() {
 	})
 	.await;
 }
+
+// spec: PRJ#which-groups-it-lists
+#[tokio::test(flavor = "multi_thread")]
+async fn marks_the_groups_the_caller_is_in_charge_of_ignoring_case() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed(&mut conn).await;
+		// The debug identity is admin@localhost.
+		conn.batch_execute(&format!(
+			"UPDATE server_groups SET pm_in_charge = 'Admin@LocalHost' WHERE id = '{BETA}'"
+		))
+		.await
+		.expect("seed");
+		let listed = projects(&private).await;
+
+		let yours: Vec<(&str, bool)> = listed
+			.iter()
+			.map(|g| (g["name"].as_str().unwrap(), g["yours"].as_bool().unwrap()))
+			.collect();
+		assert_eq!(
+			yours,
+			[("Alpha", false), ("Beta", true), ("Epsilon", false)],
+			"only the group naming the caller as PM in charge, whatever its case"
+		);
+	})
+	.await;
+}

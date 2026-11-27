@@ -2838,8 +2838,9 @@ export interface paths {
         /**
          * List the fleet's projects.
          * @description Every live group with a live production environment, in order of name,
-         *     each with its project details and its production Tamanu central and
-         *     facilities. The request body is ignored; send an empty JSON object.
+         *     each with its project details, whether the caller is its PM in charge, and
+         *     its production Tamanu central and facilities. The request body is ignored;
+         *     send an empty JSON object.
          */
         post: operations["server_groups_projects"];
         delete?: never;
@@ -12369,6 +12370,11 @@ export interface components {
              *     environment holds neither.
              */
             tamanu: components["schemas"]["ProjectTamanu"][];
+            /**
+             * @description Whether the caller is the group's PM in charge, matched on their tailnet
+             *     login ignoring case, so the view sets the caller's own groups apart.
+             */
+            yours: boolean;
         };
         /**
          * @description A production Tamanu central or facility, with the addresses it is reached

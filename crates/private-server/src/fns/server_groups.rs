@@ -600,6 +600,10 @@ pub struct ProjectGroup {
 	/// The group's project details, the PM in charge with the display name
 	/// Canopy knows for them.
 	pub project_details: NamedProjectDetails,
+	/// Whether the caller is the group's PM in charge, matched on their tailnet
+	/// login ignoring case, so the view sets the caller's own groups apart.
+	// spec: PRJ#which-groups-it-lists
+	pub yours: bool,
 	/// The Tamanu in the group's production environment: its central first,
 	/// then each facility in order of name. Empty where the production
 	/// environment holds neither.
@@ -637,8 +641,9 @@ pub struct ProjectTamanu {
 /// List the fleet's projects.
 ///
 /// Every live group with a live production environment, in order of name,
-/// each with its project details and its production Tamanu central and
-/// facilities. The request body is ignored; send an empty JSON object.
+/// each with its project details, whether the caller is its PM in charge, and
+/// its production Tamanu central and facilities. The request body is ignored;
+/// send an empty JSON object.
 // spec: PRJ
 #[utoipa::path(
 	post,
@@ -652,10 +657,11 @@ pub struct ProjectTamanu {
 )]
 pub async fn projects(
 	State(state): State<AppState>,
-	_user: TailscaleUser,
+	user: TailscaleUser,
 	_body: Json<serde_json::Value>,
 ) -> Result<Json<Vec<ProjectGroup>>> {
 	let mut conn = state.db.get().await?;
+	let viewer = user.login.to_lowercase();
 	let groups = ServerGroup::with_production_environment(&mut conn).await?;
 	let ids: Vec<Uuid> = groups.iter().map(|group| group.id).collect();
 	let mut details = named_project_details(&mut conn, &groups.iter().collect::<Vec<_>>()).await?;
@@ -691,6 +697,10 @@ pub async fn projects(
 		groups
 			.into_iter()
 			.map(|group| ProjectGroup {
+				yours: group
+					.pm_in_charge
+					.as_deref()
+					.is_some_and(|pm| pm.to_lowercase() == viewer),
 				project_details: details.remove(&group.id).unwrap_or_default(),
 				tamanu: tamanu.remove(&group.id).unwrap_or_default(),
 				id: group.id,

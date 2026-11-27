@@ -10697,12 +10697,17 @@
               "$ref": "#/components/schemas/ProjectTamanu"
             },
             "type": "array"
+          },
+          "yours": {
+            "description": "Whether the caller is the group's PM in charge, matched on their tailnet\nlogin ignoring case, so the view sets the caller's own groups apart.",
+            "type": "boolean"
           }
         },
         "required": [
           "id",
           "name",
           "project_details",
+          "yours",
           "tamanu"
         ],
         "type": "object"
@@ -23943,7 +23948,7 @@
     },
     "/api/fleet/groups/projects": {
       "post": {
-        "description": "Every live group with a live production environment, in order of name,\neach with its project details and its production Tamanu central and\nfacilities. The request body is ignored; send an empty JSON object.",
+        "description": "Every live group with a live production environment, in order of name,\neach with its project details, whether the caller is its PM in charge, and\nits production Tamanu central and facilities. The request body is ignored;\nsend an empty JSON object.",
         "operationId": "server_groups_projects",
         "requestBody": {
           "content": {
