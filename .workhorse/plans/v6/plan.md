@@ -123,12 +123,12 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 ### SPA
 
 - [x] `useAccessLevel`, with `useIsAdmin` derived from it
-- [ ] Sidebar: home toggle in the brand row; "Projects" under Fleet
-- [ ] `/` resolves the homepage
+- [x] Sidebar: home toggle in the brand row; "Projects" under Fleet
+- [x] `/` resolves the homepage
 - [ ] Projects view at `/fleet/pm`: sections, highlight, search, address links
 - [ ] Group detail: Project panel and its edit dialog, shown from PM up
-- [ ] Permissions page at `/settings/permissions`, with a redirect from `/settings/admins`
-- [ ] `SafetyModeControl` offers modes by level
+- [x] Permissions page at `/settings/permissions`, with a redirect from `/settings/admins`
+- [x] `SafetyModeControl` offers modes by level
 - [ ] Projects view: a production environment with no Tamanu reads as none
 
 ### Tests

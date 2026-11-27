@@ -16,13 +16,13 @@
 
 ## Permissions page
 
-- [ ] Shows admin, PM and all, highest first, each with what it may do (verifies spec: ADM)
-- [ ] Admin and PM each name their key and the sources the policy grants them to: a group with its member count, a login as one person, `autogroup:member` and `*` as everyone, and an undefined group or other autogroup as no one (verifies spec: ADM)
-- [ ] All shows no key and no list, only that everyone on the tailnet who can reach Canopy holds it (verifies spec: ADM)
-- [ ] Shows when the policy was last read, or that Canopy isn't configured to read it (verifies spec: ADM)
+- [x] Shows admin, PM and all, highest first, each with what it may do (verifies spec: ADM)
+- [x] Admin and PM each name their key and the sources the policy grants them to: a group with its member count, a login as one person, `autogroup:member` and `*` as everyone, and an undefined group or other autogroup as no one (verifies spec: ADM)
+- [x] All shows no key and no list, only that everyone on the tailnet who can reach Canopy holds it (verifies spec: ADM)
+- [x] Shows when the policy was last read, or that Canopy isn't configured to read it (verifies spec: ADM)
 - [x] An admin adds and removes a login on the PM list, each needing danger mode and each leaving an audit entry naming level and login (verifies spec: ADM)
-- [ ] `/settings/admins` leads to the permissions page
-- [ ] A PM or all-level caller has no Permissions entry in the sidebar, and the server refuses them the lists and the policy's grants (verifies spec: ADM)
+- [x] `/settings/admins` leads to the permissions page
+- [x] A PM or all-level caller has no Permissions entry in the sidebar, and the server refuses them the lists and the policy's grants (verifies spec: ADM)
 
 ## Project details
 
@@ -52,18 +52,18 @@
 
 ## Homepage
 
-- [ ] With nothing chosen and no `home` grant, `/` opens the status page (verifies spec: HOME)
+- [x] With nothing chosen and no `home` grant, `/` opens the status page (verifies spec: HOME)
 - [ ] A grant with `home: "/fleet/pm"` makes `/` open the projects view (verifies spec: HOME)
 - [x] A `home` that isn't a single-`/` path (`//evil.example`, `https://…`, `fleet`), is `/` alone, or carries `?` or `#` is ignored (verifies spec: HOME)
 - [x] A `home` on a grant whose destinations leave out `tag:server-canopy` is ignored (verifies spec: HOME)
 - [x] Two `home`s: higher priority wins; equal priority goes to more segments, a trailing `/` adding none; then alphabetical (verifies spec: HOME)
 - [x] A `priority` that isn't a number ranks at zero (verifies spec: HOME)
-- [ ] A chosen homepage naming a path that matches no page opens as a missing page, and the toggle there clears it (verifies spec: HOME)
-- [ ] The toggle on a page that isn't home makes it home, and `/` opens it in a new session (verifies spec: HOME)
-- [ ] The toggle on the chosen homepage clears the choice, and `/` opens the default again (verifies spec: HOME)
-- [ ] On a page that is home only by default, the toggle shows on and clicking it changes nothing (verifies spec: HOME)
-- [ ] A query string on the page isn't kept in the chosen homepage (verifies spec: HOME)
-- [ ] The toggle works in read-only mode (verifies spec: HOME, SAFE)
+- [x] A chosen homepage naming a path that matches no page opens as a missing page, and the toggle there clears it (verifies spec: HOME)
+- [x] The toggle on a page that isn't home makes it home, and `/` opens it in a new session (verifies spec: HOME)
+- [x] The toggle on the chosen homepage clears the choice, and `/` opens the default again (verifies spec: HOME)
+- [x] On a page that is home only by default, the toggle shows on and clicking it changes nothing (verifies spec: HOME)
+- [x] A query string on the page isn't kept in the chosen homepage (verifies spec: HOME)
+- [x] The toggle works in read-only mode (verifies spec: HOME, SAFE)
 
 ## Bestool snippets
 
@@ -72,7 +72,7 @@
 
 ## Safety modes
 
-- [ ] The mode control offers write but not danger to a PM, both to an admin, and shows read-only alone to an all-level caller (verifies spec: SAFE)
+- [x] The mode control offers write but not danger to a PM, both to an admin, and shows read-only alone to an all-level caller (verifies spec: SAFE)
 
 ## Fleet query interface
 
