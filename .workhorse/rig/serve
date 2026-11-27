@@ -26,7 +26,7 @@ headers_port=$(free_port)
 
 trap 'kill $(jobs -p) 2>/dev/null || true; wait' EXIT
 CANOPY_TRUST_TAILSCALE_HEADERS=1 BIND_ADDRESS="127.0.0.1:$headers_port" "$server" &
-wait_for "http://127.0.0.1:$headers_port/healthz"
+wait_for "the header-trusting server" "http://127.0.0.1:$headers_port/healthz"
 
 cert=$(node -e 'process.stdout.write(encodeURIComponent(require("node:fs").readFileSync(process.argv[1], "utf8")))' "$RIG_OUT/device.pem")
 cat > "$RIG_INFO_FILE" <<JSON

@@ -69,4 +69,11 @@ free_port() {
     });' || free_port
 }
 
-wait_for() { curl -fso /dev/null --max-time 5 --retry 120 --retry-all-errors --retry-delay 1 "$1"; }
+# Both servers have to be up inside the lease's ready window, so a wait is
+# budgeted to a fraction of it. One that outlived the window would be killed
+# mid-retry, with nothing said about which server never came up.
+wait_for() {
+  curl -fso /dev/null --max-time 2 --retry 20 --retry-all-errors --retry-delay 1 "$2" && return
+  echo "serve: $1 did not answer at $2 within a minute" >&2
+  exit 1
+}
