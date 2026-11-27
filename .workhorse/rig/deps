@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+. "$RIG_RECIPE_DIR/lib.sh"
+cd "$RIG_SOURCE"
+
+(cd private-web && npm ci --no-audit --no-fund)
+
+# Every crate the servers depend on, compiled once per Cargo.lock. Each build
+# gets a copy of this target and recompiles only the workspace's own crates.
+cargo build --locked --bin private-server --bin migrate --bin seed

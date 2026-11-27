@@ -1,0 +1,41 @@
+#!/bin/sh
+set -eu
+. "$RIG_RECIPE_DIR/lib.sh"
+
+# The servers refuse PORT and BIND_ADDRESS together, and the rig sets PORT.
+unset PORT
+
+# The e2e fixture's stand-ins for what a real instance reaches outside itself
+# (private-web/e2e/fixture.ts says what each one does).
+export RO_DATABASE_URL="$DATABASE_URL"
+export CLIENT_IP_SOURCE=ConnectInfo
+export CANOPY_BACKUP_SECRETS_MEMORY=1
+export CANOPY_BACKUP_PROBER_FAKE=1
+export CANOPY_ARTIFACT_STORE_MEMORY=1
+export CANOPY_FAKE_ACME=1
+export CANOPY_RECOVERY_VAULT_KEYS=age1uy3nqmdxf4lc3sc4p32c2cp9dlqwk868gjh002gysullrgvp0cjsdg03dn
+export CANOPY_DNS_ZONES="tamanu.app=Z1RIG, demo.tamanu.app=Z2RIG"
+export CANOPY_IDENTITY_ISSUER=https://identity.rig.invalid
+export CANOPY_IDENTITY_KEYS="rig-key-old, rig-key-new"
+export SERVER_VERSIONS_SECRET=rig
+export PUBLIC_URL="$RIG_BASE_URL/public"
+export META_LOG="${META_LOG:-private_server=info,warn}"
+
+server="$(bin private-server)"
+headers_port=$(free_port)
+
+trap 'kill $(jobs -p) 2>/dev/null || true; wait' EXIT
+CANOPY_TRUST_TAILSCALE_HEADERS=1 BIND_ADDRESS="127.0.0.1:$headers_port" "$server" &
+wait_for "http://127.0.0.1:$headers_port/healthz"
+
+cert=$(node -e 'process.stdout.write(encodeURIComponent(require("node:fs").readFileSync(process.argv[1], "utf8")))' "$RIG_OUT/device.pem")
+cat > "$RIG_INFO_FILE" <<JSON
+{
+  "headerAuthUrl": "http://127.0.0.1:$headers_port",
+  "deviceId": "$(cat "$RIG_OUT/device-id")",
+  "deviceCertificateHeader": "mtls-certificate: $cert",
+  "deviceCertificateFile": "$RIG_OUT/device.pem"
+}
+JSON
+
+BIND_ADDRESS="$RIG_HOST:$RIG_PORT" "$server"

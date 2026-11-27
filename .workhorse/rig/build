@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+. "$RIG_RECIPE_DIR/lib.sh"
+cd "$RIG_SOURCE"
+
+(cd private-web && npm run build)
+cargo build --locked --bin private-server --bin migrate --bin seed
+
+# Where the file system cannot clone, target is a link to the one every build
+# shares, and the next build overwrites these.
+if [ -L target ]; then
+  mkdir -p "$RIG_OUT"
+  for b in private-server migrate seed; do cp "target/debug/$b" "$RIG_OUT/"; done
+fi

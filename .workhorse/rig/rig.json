@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "name": "canopy",
+  "deps": {
+    "lockfiles": ["Cargo.lock", "private-web/package-lock.json"],
+    "link": ["private-web/node_modules", "target"],
+    "mode": "clone"
+  },
+  "needs": {
+    "postgres": true,
+    "memoryMb": { "deps": 8192, "build": 8192, "serve": 1024 }
+  },
+  "serve": { "ready": { "path": "/healthz", "timeoutSeconds": 120 } },
+  "provides": {
+    "baseUrl": "http://127.0.0.1:{port}",
+    "accounts": [
+      { "name": "admin", "how": "any request to baseUrl acts as admin@localhost, an administrator holding a danger-mode session; no headers or sign-in" },
+      { "name": "alice.operator", "how": "info.headerAuthUrl with headers Tailscale-User-Login: alice.operator@example.com and Tailscale-User-Name: Alice; on the admin allow-list, so an administrator who starts safety-mode sessions as an operator does (also bob.oncall@ and carol.releases@example.com)" },
+      { "name": "dave.viewer", "how": "info.headerAuthUrl with headers Tailscale-User-Login: dave.viewer@example.com and Tailscale-User-Name: Dave; any login off the allow-list is a signed-in non-administrator" },
+      { "name": "suva-facility-device", "how": "the device API under baseUrl/public, with the header in info.deviceCertificateHeader; it is device info.deviceId, the machine-role device behind the Suva Facility application" }
+    ],
+    "fixtures": [
+      "the dev seeder's data (crates/database/src/bin/seed.rs): groups, machines and applications at each rank, statuses, open and resolved issues and incidents, silences, versions (published, draft and yanked), devices and enrollment tokens",
+      "in-memory backup secrets and artifact store, a fake backup bucket prober (the bucket name decides the result, see private-web/e2e/fixture.ts), a fake ACME authority, a recovery vault recipient, managed DNS zones tamanu.app and demo.tamanu.app, and an identity issuer with two keys",
+      "no AWS, Kubernetes, Tailscale control plane or Slack: what reaches them fails or is absent"
+    ]
+  }
+}
