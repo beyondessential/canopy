@@ -27,6 +27,7 @@ import { ApplicationTypesProvider } from "./hooks/useApplicationTypes";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Permissions from "./routes/Permissions";
 import NotFound from "./routes/NotFound";
+import Projects from "./routes/Projects";
 import { HomepageProvider } from "./hooks/useHomepage";
 import { HomeRedirect } from "./components/HomeToggle";
 import BackupConfig from "./routes/BackupConfig";
@@ -265,6 +266,7 @@ export default function App() {
 					<Route path="/versions/:version" element={<VersionDetail />} />
 					<Route path="/fleet" element={<Servers />}>
 						<Route index element={<GroupsList />} />
+						<Route path="pm" element={<Projects />} />
 						<Route path="archived" element={<ArchivedList />} />
 						<Route path="figures" element={<FleetFigures />} />
 					</Route>
