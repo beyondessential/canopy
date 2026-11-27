@@ -15,13 +15,20 @@ mkdir -p "$RIG_OUT"
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
   -subj "/CN=canopy-rig-device" -keyout "$RIG_OUT/device.key" -out "$RIG_OUT/device.pem" 2>/dev/null
 spki=$(openssl x509 -in "$RIG_OUT/device.pem" -noout -pubkey | openssl pkey -pubin -outform DER | od -An -v -tx1 | tr -d ' \n')
-device=$(psql "$RIG_DATABASE_URL" -v ON_ERROR_STOP=1 -qtA -v app="$app" -c "
+# The box carries more than one key, so one of them is replaced, not all.
+# psql interpolates :'app' in what it reads, but not in a -c string.
+device=$(psql "$RIG_DATABASE_URL" -v ON_ERROR_STOP=1 -qtA -v app="$app" <<SQL
   UPDATE device_keys SET key_data = decode('$spki', 'hex')
-  WHERE device_id = (
-    SELECT m.device_id FROM machines m
+  WHERE id = (
+    SELECT k.id FROM device_keys k
+    JOIN machines m ON m.device_id = k.device_id
     JOIN applications a ON a.machine_id = m.id
-    WHERE a.name = :'app'
+    WHERE a.name = :'app' AND k.is_active
+    ORDER BY k.created_at, k.id
+    LIMIT 1
   )
-  RETURNING device_id")
+  RETURNING device_id
+SQL
+)
 [ -n "$device" ] || { echo "seed: no device is bound to the box under $app" >&2; exit 1; }
 printf '%s' "$device" > "$RIG_OUT/device-id"
