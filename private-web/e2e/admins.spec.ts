@@ -19,19 +19,19 @@ function uniqueEmail(label: string): string {
 test.describe("admins page", () => {
 	test("renders existing admins from the API", async ({ page, request }) => {
 		const seeded = uniqueEmail("seed");
-		await callApi(request, "admins", "add", { email: seeded });
+		await callApi(request, "access", "add", { level: "admin", login: seeded });
 
 		try {
 			await page.goto("/settings/admins");
 			await expect(page.getByText(seeded)).toBeVisible();
 		} finally {
-			await callApi(request, "admins", "delete", { email: seeded });
+			await callApi(request, "access", "remove", { level: "admin", login: seeded });
 		}
 	});
 
 	test("delete button removes the admin", async ({ page, request }) => {
 		const seeded = uniqueEmail("del");
-		await callApi(request, "admins", "add", { email: seeded });
+		await callApi(request, "access", "add", { level: "admin", login: seeded });
 
 		await page.goto("/settings/admins");
 		await expect(page.getByText(seeded)).toBeVisible();
@@ -50,7 +50,7 @@ test.describe("admins page", () => {
 		try {
 			await expect(page.getByText(fresh)).toBeVisible();
 		} finally {
-			await callApi(request, "admins", "delete", { email: fresh });
+			await callApi(request, "access", "remove", { level: "admin", login: fresh });
 		}
 	});
 

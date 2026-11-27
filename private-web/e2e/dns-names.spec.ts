@@ -351,8 +351,8 @@ test.describe("DNS names", () => {
 		const { machineId } = await sharedBox(sql);
 		await seedUndeclaredDnsName(sql, { machineId, name: "lab.fiji.tamanu.app" });
 		await seedDeniedDnsName(sql, { machineId, name: "old.fiji.tamanu.app" });
-		await page.route("**/api/commons/is_current_user_admin", (route) =>
-			route.fulfill({ json: false }),
+		await page.route("**/api/commons/current_user_level", (route) =>
+			route.fulfill({ json: "all" }),
 		);
 
 		await page.goto(`/fleet/machines/${machineId}`);

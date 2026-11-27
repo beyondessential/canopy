@@ -8,9 +8,9 @@ import type { SafetyMode } from "./safety";
 
 /** The mode each endpoint requires, keyed as `module/fn`. */
 export const SAFETY_MODES = {
-	"admins/add": "danger",
-	"admins/delete": "danger",
-	"admins/list": "read-only",
+	"access/add": "danger",
+	"access/list": "read-only",
+	"access/remove": "danger",
 	"ansible_variables/catalogue": "read-only",
 	"ansible_variables/for_group": "read-only",
 	"ansible_variables/history": "read-only",
@@ -80,7 +80,7 @@ export const SAFETY_MODES = {
 	"certificates/revoke": "danger",
 	"certificates/set_profile": "write",
 	"commons/calendar_url": "read-only",
-	"commons/is_current_user_admin": "read-only",
+	"commons/current_user_level": "read-only",
 	"commons/products": "read-only",
 	"commons/public_url": "read-only",
 	"commons/server_versions_url": "read-only",
@@ -293,8 +293,8 @@ export type DangerReason = (typeof DANGER_REASON_ORDER)[number];
 
 /** The reasons each danger endpoint declares, in the order they are listed. */
 export const DANGER_REASONS = {
-	"admins/add": ["issues"],
-	"admins/delete": ["invalidates"],
+	"access/add": ["issues"],
+	"access/remove": ["invalidates"],
 	"backups/clear_retention": ["unprotects"],
 	"backups/delete": ["irreversible", "invalidates"],
 	"backups/disallow_restore": ["unprotects"],

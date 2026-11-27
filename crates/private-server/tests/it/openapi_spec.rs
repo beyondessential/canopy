@@ -38,7 +38,7 @@ fn spec_has_paths_for_every_module() {
 	let spec = build_spec();
 	let paths = &spec["paths"];
 	for p in [
-		"/api/admins/list",
+		"/api/access/list",
 		"/api/bestool/list_snippets",
 		"/api/commons/public_url",
 		"/api/devices/list_trusted",

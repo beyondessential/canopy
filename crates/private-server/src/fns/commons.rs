@@ -1,9 +1,10 @@
 use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
-use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_errors::{ProblemDetailsSchema, Result};
+use commons_servers::tailscale_auth::TailscaleLevel;
 use commons_types::server::app_type::{ApplicationType, Caps};
+use database::access_lists::AccessLevel;
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -14,7 +15,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only, silent: public_url))
 		.routes(routes!(read_only, silent: server_versions_url))
 		.routes(routes!(read_only, silent: calendar_url))
-		.routes(routes!(read_only, silent: is_current_user_admin))
+		.routes(routes!(read_only, silent: current_user_level))
 		.routes(routes!(read_only, silent: products))
 }
 
@@ -141,89 +142,30 @@ pub async fn calendar_url() -> Result<Json<Option<String>>> {
 	Ok(Json(url))
 }
 
-/// Check whether the caller is an admin.
+/// The caller's access level.
 ///
-/// Reports `true` if the caller is authenticated and their identity is on
-/// the admin allow-list, `false` if the caller definitely isn't an admin —
-/// including when the caller is not authenticated at all. This endpoint
-/// intentionally requires no authentication of its own, since it exists so a
-/// client can check whether to show admin-only controls before doing anything
-/// else.
+/// Reports the level the caller holds on the operator surface: `admin`, `pm`,
+/// or `all` for a caller holding nothing higher, and `null` for a caller
+/// bearing no tailnet identity at all. This endpoint intentionally requires no
+/// level of its own, since it exists so a client can decide which controls to
+/// offer before doing anything else.
 ///
-/// A failure that isn't an authorization outcome (a database blip while
-/// reading the allow-list, say) is reported as an error, not as `false`.
+/// A failure that isn't an authorisation outcome (a database blip while
+/// reading the access lists, say) is reported as an error, not as a lower
+/// level, because a caller cannot tell a wrongly-low answer from a real one.
 // No `security` block: the handler intentionally accepts unauthenticated
-// callers and reports `false`. Marking it admin-gated (or even user-gated)
-// would make Swagger UI demand auth before letting you call it, defeating
-// the point of the probe.
+// callers and reports `null`. Marking it user-gated would make Swagger UI
+// demand auth before letting you call it, defeating the point of the probe.
+// spec: ADM#reporting-a-level-to-a-caller
 #[utoipa::path(
 	post,
-	path = "/is_current_user_admin",
+	path = "/current_user_level",
 	tag = "commons",
 	responses(
-		(status = 200, description = "`true` if the caller's Tailscale identity is an administrator (on the admin allow-list, or granted admin by the tailnet policy); `false` otherwise (including when no Tailscale identity is present).", body = bool, content_type = "application/json"),
-		(status = 500, description = "The caller's admin status could not be determined. Distinct from a `false` answer: retry rather than treating the caller as a non-admin.", body = ProblemDetailsSchema),
+		(status = 200, description = "The caller's level, or `null` when no tailnet identity is present.", body = Option<AccessLevel>, content_type = "application/json"),
+		(status = 500, description = "The caller's level could not be determined. Distinct from any answer: retry rather than treating the caller as holding a lower level.", body = ProblemDetailsSchema),
 	),
 )]
-pub async fn is_current_user_admin(
-	admin: std::result::Result<TailscaleAdmin, AppError>,
-) -> Result<Json<bool>> {
-	admin_probe_answer(admin).map(Json)
-}
-
-/// Classify an admin-extractor outcome into the probe's answer.
-///
-/// `TailscaleAdmin` rejects for two very different kinds of reason, and
-/// collapsing them both to `false` is a bug: the UI caches the answer for the
-/// session, so one database hiccup while checking the allow-list used to leave
-/// a real admin looking at a read-only app with no admin controls and no
-/// explanation. Only a definite authorization outcome is an answer; everything
-/// else propagates so the caller knows to retry.
-pub(crate) fn admin_probe_answer(
-	admin: std::result::Result<TailscaleAdmin, AppError>,
-) -> Result<bool> {
-	match admin {
-		Ok(_) => Ok(true),
-		Err(
-			AppError::AuthMissingHeader(_)
-			| AppError::AuthTailnetIdentityMissing
-			| AppError::AuthInsufficientPermissions { .. },
-		) => Ok(false),
-		Err(err) => Err(err),
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use commons_servers::tailscale_auth::TailscaleUser;
-
-	#[test]
-	fn admin_is_true() {
-		let admin = TailscaleAdmin(TailscaleUser::default());
-		assert!(admin_probe_answer(Ok(admin)).unwrap());
-	}
-
-	#[test]
-	fn authorization_outcomes_are_a_definite_no() {
-		for err in [
-			AppError::AuthMissingHeader("Tailscale-User-Login"),
-			AppError::AuthTailnetIdentityMissing,
-			AppError::AuthInsufficientPermissions {
-				required: "admin".into(),
-			},
-		] {
-			assert!(!admin_probe_answer(Err(err)).unwrap());
-		}
-	}
-
-	#[test]
-	fn infrastructure_failures_are_not_an_answer() {
-		for err in [
-			AppError::custom("connection pool timed out"),
-			AppError::Upstream("tailnet control plane".into()),
-		] {
-			assert!(admin_probe_answer(Err(err)).is_err());
-		}
-	}
+pub async fn current_user_level(caller: Option<TailscaleLevel>) -> Json<Option<AccessLevel>> {
+	Json(caller.map(|TailscaleLevel(_, level)| level))
 }

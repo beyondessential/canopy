@@ -310,8 +310,8 @@ test.describe("audit log page", () => {
 
 	test("a non-administrator has no tab and no entries", async ({ page, sql }) => {
 		await seedAuditEntry(sql, { action: "maintenance_declared", minutesAgo: 3 });
-		await page.route("**/api/commons/is_current_user_admin", (route) =>
-			route.fulfill({ json: false }),
+		await page.route("**/api/commons/current_user_level", (route) =>
+			route.fulfill({ json: "all" }),
 		);
 		let asked = false;
 		await page.route("**/api/audit/**", async (route) => {

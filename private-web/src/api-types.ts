@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/api/admins/add": {
+    "/api/access/add": {
         parameters: {
             query?: never;
             header?: never;
@@ -14,18 +14,17 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Add an email address to the admin allow-list.
-         * @description Grants admin access to the given email address. Has no effect if the
-         *     email is already an admin.
+         * Put a login on a level's list.
+         * @description Has no effect where the login is already on it, whatever its case.
          */
-        post: operations["admin_add"];
+        post: operations["access_add"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/admins/delete": {
+    "/api/access/list": {
         parameters: {
             query?: never;
             header?: never;
@@ -35,18 +34,19 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Remove an email address from the admin allow-list.
-         * @description Revokes admin access for the given email address. Has no effect if the
-         *     email was not an admin.
+         * The lists, and what the tailnet policy grants each level.
+         * @description Returns admin then PM, each with the logins on its list and the sources the
+         *     tailnet policy grants it to as the policy writes them, with who each
+         *     covers; and whether and when Canopy last read the policy.
          */
-        post: operations["admin_delete"];
+        post: operations["access_list"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/admins/list": {
+    "/api/access/remove": {
         parameters: {
             query?: never;
             header?: never;
@@ -56,11 +56,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the admin allow-list.
-         * @description Returns the email addresses of every account currently granted admin
-         *     access to this API, in no particular order.
+         * Take a login off a level's list.
+         * @description Has no effect where the login is not on it, whatever its case.
          */
-        post: operations["admin_list"];
+        post: operations["access_remove"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1641,7 +1640,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/commons/is_current_user_admin": {
+    "/api/commons/current_user_level": {
         parameters: {
             query?: never;
             header?: never;
@@ -1651,18 +1650,18 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Check whether the caller is an admin.
-         * @description Reports `true` if the caller is authenticated and their identity is on
-         *     the admin allow-list, `false` if the caller definitely isn't an admin —
-         *     including when the caller is not authenticated at all. This endpoint
-         *     intentionally requires no authentication of its own, since it exists so a
-         *     client can check whether to show admin-only controls before doing anything
-         *     else.
+         * The caller's access level.
+         * @description Reports the level the caller holds on the operator surface: `admin`, `pm`,
+         *     or `all` for a caller holding nothing higher, and `null` for a caller
+         *     bearing no tailnet identity at all. This endpoint intentionally requires no
+         *     level of its own, since it exists so a client can decide which controls to
+         *     offer before doing anything else.
          *
-         *     A failure that isn't an authorization outcome (a database blip while
-         *     reading the allow-list, say) is reported as an error, not as `false`.
+         *     A failure that isn't an authorisation outcome (a database blip while
+         *     reading the access lists, say) is reported as an error, not as a lower
+         *     level, because a caller cannot tell a wrongly-low answer from a real one.
          */
-        post: operations["is_current_user_admin"];
+        post: operations["current_user_level"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6075,6 +6074,19 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description A level on the operator surface. The levels are a ladder: each includes
+         *     everything the levels below it may do, so they order from all up to admin.
+         * @enum {string}
+         */
+        AccessLevel: "all" | "pm" | "admin";
+        /** @description Who holds the levels above all, and how. */
+        AccessOverview: {
+            /** @description Admin then PM, each with its list and what the policy grants it. */
+            levels: components["schemas"]["LevelHolders"][];
+            /** @description The tailnet policy Canopy reads levels from. */
+            policy: components["schemas"]["PolicyStatus"];
+        };
         /** @description Who took an action. */
         Actor: {
             /** @enum {string} */
@@ -6101,11 +6113,6 @@ export interface components {
             job: string;
             /** @enum {string} */
             kind: "canopy";
-        };
-        /** @description Request body for granting admin access to an email address. */
-        AddArgs: {
-            /** @description The email address to add to the admin allow-list. */
-            email: string;
         };
         /** @description Request to register an existing public key on a device. */
         AddKeyArgs: {
@@ -7857,6 +7864,16 @@ export interface components {
              */
             relay_identity_id: string;
         };
+        /**
+         * @description A source of a grant conferring a level, as the policy writes it, with who
+         *     it covers.
+         */
+        ConferringSource: {
+            /** @description Who it resolves to. */
+            covers: components["schemas"]["SourceCoverage"];
+            /** @description The source as written in the grant. */
+            source: string;
+        };
         /** @description Request parameters for listing a device's connection history. */
         ConnectionHistoryArgs: {
             before?: null | components["schemas"]["HistoryCursor"];
@@ -8111,11 +8128,6 @@ export interface components {
             namespace?: components["schemas"]["NamespaceRef"];
             /** @description The source whose check to decommission. */
             source: string;
-        };
-        /** @description Request body for revoking admin access from an email address. */
-        DeleteArgs: {
-            /** @description The email address to remove from the admin allow-list. */
-            email: string;
         };
         /** @description A DNS name an operator has denied to the machine for the section's kind. */
         DeniedView: {
@@ -10086,6 +10098,21 @@ export interface components {
              */
             lease_id: string;
         };
+        /** @description The two sources of one level. */
+        LevelHolders: {
+            /**
+             * @description The sources of the policy's grants conferring the level, as the policy
+             *     writes them, with who each covers. Empty where the policy has not been
+             *     read.
+             */
+            granted_to: components["schemas"]["ConferringSource"][];
+            /** @description The key a Canopy capability value sets true to confer the level. */
+            key: string;
+            /** @description The level. */
+            level: components["schemas"]["ListLevel"];
+            /** @description The logins on the level's list, alphabetically. */
+            list: components["schemas"]["ListedLogin"][];
+        };
         /** @description The window to lift. */
         LiftArgs: {
             /**
@@ -10157,6 +10184,13 @@ export interface components {
              */
             limit?: number | null;
         };
+        /** @description A login on a level's list. */
+        ListEntryArgs: {
+            /** @description The level whose list this is. */
+            level: components["schemas"]["ListLevel"];
+            /** @description The tailnet login, in any case. */
+            login: string;
+        };
         /** @description Filters for listing the issues raised by one device. */
         ListForDeviceArgs: {
             /**
@@ -10189,6 +10223,21 @@ export interface components {
              * @description Identifier of the server group.
              */
             server_group_id: string;
+        };
+        /**
+         * @description A level that has a list, which is every level above all.
+         * @enum {string}
+         */
+        ListLevel: "pm" | "admin";
+        /** @description A login on a list. */
+        ListedLogin: {
+            /**
+             * Format: date-time
+             * @description When it was put on the list.
+             */
+            added_at: string;
+            /** @description The login, lowercased. */
+            login: string;
         };
         /**
          * @description The live state of a run still in flight, from the progress it has reported.
@@ -11985,6 +12034,24 @@ export interface components {
              * @description The group to read.
              */
             group_id: string;
+        };
+        /** @description Whether and when Canopy read the tailnet policy. */
+        PolicyStatus: {
+            /** @description The capability whose values confer levels. */
+            capability: string;
+            /**
+             * @description Whether Canopy is configured to read the policy. Where it is not, the
+             *     lists alone confer levels.
+             */
+            configured: boolean;
+            /**
+             * Format: date-time
+             * @description When the policy was last read successfully; null where it is not
+             *     configured or no read has succeeded yet.
+             */
+            read_at?: string | null;
+            /** @description The tag a grant's destinations must include to confer a level. */
+            service_tag: string;
         };
         /**
          * @description One step of the work an application does after its migrations, such as
@@ -14471,6 +14538,21 @@ export interface components {
              */
             until: string;
         };
+        /** @description Who a grant's source covers, as the permissions page reports it. */
+        SourceCoverage: {
+            /** @enum {string} */
+            kind: "group";
+            members: number;
+        } | {
+            /** @enum {string} */
+            kind: "person";
+        } | {
+            /** @enum {string} */
+            kind: "everyone";
+        } | {
+            /** @enum {string} */
+            kind: "no_one";
+        };
         /**
          * @description One reporting source with its reachability policy and fleet-wide
          *     last-seen.
@@ -16000,7 +16082,7 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    admin_add: {
+    access_add: {
         parameters: {
             query?: never;
             header?: never;
@@ -16009,16 +16091,24 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AddArgs"];
+                "application/json": components["schemas"]["ListEntryArgs"];
             };
         };
         responses: {
-            /** @description Admin added (idempotent). */
+            /** @description On the list. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
             };
             401: {
                 headers: {
@@ -16038,45 +16128,7 @@ export interface operations {
             };
         };
     };
-    admin_delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeleteArgs"];
-            };
-        };
-        responses: {
-            /** @description Admin removed (idempotent). */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    admin_list: {
+    access_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -16085,14 +16137,51 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Admin emails. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": string[];
+                    "application/json": components["schemas"]["AccessOverview"];
                 };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    access_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListEntryArgs"];
+            };
+        };
+        responses: {
+            /** @description Off the list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: {
                 headers: {
@@ -18476,7 +18565,7 @@ export interface operations {
             };
         };
     };
-    is_current_user_admin: {
+    current_user_level: {
         parameters: {
             query?: never;
             header?: never;
@@ -18485,16 +18574,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description `true` if the caller's Tailscale identity is an administrator (on the admin allow-list, or granted admin by the tailnet policy); `false` otherwise (including when no Tailscale identity is present). */
+            /** @description The caller's level, or `null` when no tailnet identity is present. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": boolean;
+                    "application/json": null | components["schemas"]["AccessLevel"];
                 };
             };
-            /** @description The caller's admin status could not be determined. Distinct from a `false` answer: retry rather than treating the caller as a non-admin. */
+            /** @description The caller's level could not be determined. Distinct from any answer: retry rather than treating the caller as holding a lower level. */
             500: {
                 headers: {
                     [name: string]: unknown;

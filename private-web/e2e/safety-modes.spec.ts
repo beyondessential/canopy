@@ -630,8 +630,8 @@ test.describe("safety modes", () => {
 
 		// As someone who is not, it is not there at all, and nothing on the page
 		// is presented as waiting on a mode.
-		await page.route("**/api/commons/is_current_user_admin", (route) =>
-			route.fulfill({ json: false }),
+		await page.route("**/api/commons/current_user_level", (route) =>
+			route.fulfill({ json: "all" }),
 		);
 		await page.reload();
 		await expect(page.getByText("absent-not-blocked").first()).toBeVisible();

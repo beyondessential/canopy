@@ -97,6 +97,8 @@ export type GroupMachine = Solidify<Schemas["GroupMachine"]>;
 export type ServerRank = Solidify<Schemas["ServerRank"]>;
 export type VersionStatus = Solidify<Schemas["VersionStatus"]>;
 export type DeviceRole = Solidify<Schemas["DeviceRole"]>;
+export type AccessLevel = Solidify<Schemas["AccessLevel"]>;
+export type ListLevel = Solidify<Schemas["ListLevel"]>;
 export type ProvisionedCredential = Solidify<Schemas["ProvisionedCredential"]>;
 export type MaintenanceWindow = Solidify<Schemas["MaintenanceWindow"]>;
 /** The grain a window is declared at. An environment is a group with a rank.

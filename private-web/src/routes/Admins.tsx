@@ -17,11 +17,12 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import { type FormEvent, useState } from "react";
 import { ApiError, callApi, useApi } from "../api";
 import { GradedAction } from "../components/GradedAction";
+import type { ApiResponse } from "../types";
 import { usePageTitle } from "../hooks/usePageTitle";
 
 export default function Admins() {
 	usePageTitle("Admins");
-	const list = useApi("admins", "list");
+	const list = useApi("access", "list");
 	const [email, setEmail] = useState("");
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -35,7 +36,7 @@ export default function Admins() {
 		setPending(true);
 		setError(null);
 		try {
-			await callApi("admins", "add", { email: trimmed });
+			await callApi("access", "add", { level: "admin", login: trimmed });
 			setEmail("");
 			setToast("Admin added");
 			list.reload();
@@ -48,7 +49,7 @@ export default function Admins() {
 
 	const onDelete = async (target: string) => {
 		try {
-			await callApi("admins", "delete", { email: target });
+			await callApi("access", "remove", { level: "admin", login: target });
 			list.reload();
 		} catch (err) {
 			setError(formatError(err));
@@ -75,7 +76,7 @@ export default function Admins() {
 							disabled={pending}
 						/>
 						<GradedAction
-							calls="admins/add"
+							calls="access/add"
 							action="Add admin"
 						>
 							<Button
@@ -104,17 +105,17 @@ export default function Admins() {
 					<LinearProgress />
 				) : list.status === "error" ? (
 					<Alert severity="error">{list.error.message}</Alert>
-				) : list.data.length === 0 ? (
+				) : adminLogins(list.data).length === 0 ? (
 					<Alert severity="info">No admins configured.</Alert>
 				) : (
 					<List>
-						{list.data.map((admin) => (
+						{adminLogins(list.data).map((admin) => (
 							<ListItem
 								key={admin}
 								divider
 								secondaryAction={
 									<GradedAction
-										calls="admins/delete"
+										calls="access/remove"
 										action={`Delete admin ${admin}`}
 									>
 										<IconButton
@@ -146,6 +147,14 @@ export default function Admins() {
 				message={toast ?? ""}
 			/>
 		</Stack>
+	);
+}
+
+function adminLogins(overview: ApiResponse<"access", "list">): string[] {
+	return (
+		overview.levels
+			.find((holders) => holders.level === "admin")
+			?.list.map((entry) => entry.login) ?? []
 	);
 }
 

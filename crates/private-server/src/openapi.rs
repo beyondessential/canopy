@@ -10,13 +10,13 @@ use utoipa::{
 	info(
 		title = "canopy private-server",
 		version = "",
-		description = "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; admin-only endpoints additionally check the caller is on the admin list.\n\nRequest bodies may be sent compressed, and this is recommended for large payloads: the server transparently decodes `Content-Encoding: gzip`, `br`, `deflate`, or `zstd`. The accepted encodings are also listed structurally in the `x-request-compression` extension.",
+		description = "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; endpoints needing a level above all additionally check the caller holds it, through the access lists or the tailnet policy.\n\nRequest bodies may be sent compressed, and this is recommended for large payloads: the server transparently decodes `Content-Encoding: gzip`, `br`, `deflate`, or `zstd`. The accepted encodings are also listed structurally in the `x-request-compression` extension.",
 		contact(name = "BES Developers", email = "contact@bes.au"),
 		license(name = "GPL-3.0-or-later"),
 	),
 	modifiers(&SecuritySchemes, &RequestCompression, &DangerReasons),
 	tags(
-		(name = "admins", description = "Admin email allow-list management."),
+		(name = "access", description = "Who holds the access levels above all: the levels' lists, and what the tailnet policy grants each."),
 		(name = "audit", description = "The audit log of administrative actions."),
 		(name = "backups", description = "Group backup-repo onboarding, scheduling, and stats."),
 		(name = "bestool", description = "Bestool SQL snippet library."),
@@ -102,10 +102,17 @@ impl Modify for SecuritySchemes {
 			))),
 		);
 		components.add_security_scheme(
+			"tailscale-pm",
+			SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
+				"Tailscale-User-Login",
+				"Identity header injected by the Tailscale sidecar. The login must additionally hold the PM level or above: on the PM or admin list, or granted either by the tailnet policy.",
+			))),
+		);
+		components.add_security_scheme(
 			"tailscale-admin",
 			SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
 				"Tailscale-User-Login",
-				"Identity header injected by the Tailscale sidecar. The login must additionally be an administrator: either on the admins allow-list, or granted admin by the tailnet policy.",
+				"Identity header injected by the Tailscale sidecar. The login must additionally hold the admin level: on the admin list, or granted admin by the tailnet policy.",
 			))),
 		);
 	}

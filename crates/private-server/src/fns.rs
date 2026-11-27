@@ -1,7 +1,7 @@
 use canopy_utoipa_axum::router::OpenApiRouter;
 use serde::{Deserialize, Serialize};
 
-pub mod admins;
+pub mod access;
 pub mod ansible;
 pub mod ansible_variables;
 pub mod applications;
@@ -162,7 +162,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 	OpenApiRouter::new().nest(
 		"/api",
 		OpenApiRouter::new()
-			.nest("/admins", admins::routes())
+			.nest("/access", access::routes())
 			// The fleet's own records, under one prefix — the same shape the
 			// SPA browses them at. `servers` used to name the box and the
 			// workload at once, and the listings sat beside the records.

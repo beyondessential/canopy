@@ -1,6 +1,36 @@
 {
   "components": {
     "schemas": {
+      "AccessLevel": {
+        "description": "A level on the operator surface. The levels are a ladder: each includes\neverything the levels below it may do, so they order from all up to admin.",
+        "enum": [
+          "all",
+          "pm",
+          "admin"
+        ],
+        "type": "string"
+      },
+      "AccessOverview": {
+        "description": "Who holds the levels above all, and how.",
+        "properties": {
+          "levels": {
+            "description": "Admin then PM, each with its list and what the policy grants it.",
+            "items": {
+              "$ref": "#/components/schemas/LevelHolders"
+            },
+            "type": "array"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/PolicyStatus",
+            "description": "The tailnet policy Canopy reads levels from."
+          }
+        },
+        "required": [
+          "levels",
+          "policy"
+        ],
+        "type": "object"
+      },
       "Actor": {
         "description": "Who took an action.",
         "oneOf": [
@@ -116,19 +146,6 @@
             "type": "object"
           }
         ]
-      },
-      "AddArgs": {
-        "description": "Request body for granting admin access to an email address.",
-        "properties": {
-          "email": {
-            "description": "The email address to add to the admin allow-list.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "email"
-        ],
-        "type": "object"
       },
       "AddKeyArgs": {
         "description": "Request to register an existing public key on a device.",
@@ -3045,6 +3062,24 @@
         ],
         "type": "object"
       },
+      "ConferringSource": {
+        "description": "A source of a grant conferring a level, as the policy writes it, with who\nit covers.",
+        "properties": {
+          "covers": {
+            "$ref": "#/components/schemas/SourceCoverage",
+            "description": "Who it resolves to."
+          },
+          "source": {
+            "description": "The source as written in the grant.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "covers"
+        ],
+        "type": "object"
+      },
       "ConnectionHistoryArgs": {
         "description": "Request parameters for listing a device's connection history.",
         "properties": {
@@ -3409,19 +3444,6 @@
         "required": [
           "source",
           "check_name"
-        ],
-        "type": "object"
-      },
-      "DeleteArgs": {
-        "description": "Request body for revoking admin access from an email address.",
-        "properties": {
-          "email": {
-            "description": "The email address to remove from the admin allow-list.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "email"
         ],
         "type": "object"
       },
@@ -6742,6 +6764,40 @@
         ],
         "type": "object"
       },
+      "LevelHolders": {
+        "description": "The two sources of one level.",
+        "properties": {
+          "granted_to": {
+            "description": "The sources of the policy's grants conferring the level, as the policy\nwrites them, with who each covers. Empty where the policy has not been\nread.",
+            "items": {
+              "$ref": "#/components/schemas/ConferringSource"
+            },
+            "type": "array"
+          },
+          "key": {
+            "description": "The key a Canopy capability value sets true to confer the level.",
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/ListLevel",
+            "description": "The level."
+          },
+          "list": {
+            "description": "The logins on the level's list, alphabetically.",
+            "items": {
+              "$ref": "#/components/schemas/ListedLogin"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "level",
+          "key",
+          "list",
+          "granted_to"
+        ],
+        "type": "object"
+      },
       "LiftArgs": {
         "description": "The window to lift.",
         "properties": {
@@ -6936,6 +6992,24 @@
         },
         "type": "object"
       },
+      "ListEntryArgs": {
+        "description": "A login on a level's list.",
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/ListLevel",
+            "description": "The level whose list this is."
+          },
+          "login": {
+            "description": "The tailnet login, in any case.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "login"
+        ],
+        "type": "object"
+      },
       "ListForDeviceArgs": {
         "description": "Filters for listing the issues raised by one device.",
         "properties": {
@@ -6991,6 +7065,33 @@
         },
         "required": [
           "server_group_id"
+        ],
+        "type": "object"
+      },
+      "ListLevel": {
+        "description": "A level that has a list, which is every level above all.",
+        "enum": [
+          "pm",
+          "admin"
+        ],
+        "type": "string"
+      },
+      "ListedLogin": {
+        "description": "A login on a list.",
+        "properties": {
+          "added_at": {
+            "description": "When it was put on the list.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "login": {
+            "description": "The login, lowercased.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login",
+          "added_at"
         ],
         "type": "object"
       },
@@ -10252,6 +10353,37 @@
         },
         "required": [
           "group_id"
+        ],
+        "type": "object"
+      },
+      "PolicyStatus": {
+        "description": "Whether and when Canopy read the tailnet policy.",
+        "properties": {
+          "capability": {
+            "description": "The capability whose values confer levels.",
+            "type": "string"
+          },
+          "configured": {
+            "description": "Whether Canopy is configured to read the policy. Where it is not, the\nlists alone confer levels.",
+            "type": "boolean"
+          },
+          "read_at": {
+            "description": "When the policy was last read successfully; null where it is not\nconfigured or no read has succeeded yet.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service_tag": {
+            "description": "The tag a grant's destinations must include to confer a level.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "configured",
+          "capability",
+          "service_tag"
         ],
         "type": "object"
       },
@@ -14270,6 +14402,76 @@
         ],
         "type": "object"
       },
+      "SourceCoverage": {
+        "description": "Who a grant's source covers, as the permissions page reports it.",
+        "oneOf": [
+          {
+            "description": "A group the policy defines, listing this many members.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "group"
+                ],
+                "type": "string"
+              },
+              "members": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "members",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The one person the source names.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "person"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Everyone on the tailnet: `autogroup:member` and `*`.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "everyone"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "No one: a group the policy does not define, or a source Canopy does not\nresolve to tailnet users.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "no_one"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "SourceData": {
         "description": "One reporting source with its reachability policy and fleet-wide\nlast-seen.",
         "properties": {
@@ -17266,7 +17468,13 @@
     },
     "securitySchemes": {
       "tailscale-admin": {
-        "description": "Identity header injected by the Tailscale sidecar. The login must additionally be an administrator: either on the admins allow-list, or granted admin by the tailnet policy.",
+        "description": "Identity header injected by the Tailscale sidecar. The login must additionally hold the admin level: on the admin list, or granted admin by the tailnet policy.",
+        "in": "header",
+        "name": "Tailscale-User-Login",
+        "type": "apiKey"
+      },
+      "tailscale-pm": {
+        "description": "Identity header injected by the Tailscale sidecar. The login must additionally hold the PM level or above: on the PM or admin list, or granted either by the tailnet policy.",
         "in": "header",
         "name": "Tailscale-User-Login",
         "type": "apiKey"
@@ -17284,7 +17492,7 @@
       "email": "contact@bes.au",
       "name": "BES Developers"
     },
-    "description": "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; admin-only endpoints additionally check the caller is on the admin list.\n\nRequest bodies may be sent compressed, and this is recommended for large payloads: the server transparently decodes `Content-Encoding: gzip`, `br`, `deflate`, or `zstd`. The accepted encodings are also listed structurally in the `x-request-compression` extension.",
+    "description": "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; endpoints needing a level above all additionally check the caller holds it, through the access lists or the tailnet policy.\n\nRequest bodies may be sent compressed, and this is recommended for large payloads: the server transparently decodes `Content-Encoding: gzip`, `br`, `deflate`, or `zstd`. The accepted encodings are also listed structurally in the `x-request-compression` extension.",
     "license": {
       "name": "GPL-3.0-or-later"
     },
@@ -17293,15 +17501,15 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/admins/add": {
+    "/api/access/add": {
       "post": {
-        "description": "Grants admin access to the given email address. Has no effect if the\nemail is already an admin.",
-        "operationId": "admin_add",
+        "description": "Has no effect where the login is already on it, whatever its case.",
+        "operationId": "access_add",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AddArgs"
+                "$ref": "#/components/schemas/ListEntryArgs"
               }
             }
           },
@@ -17309,7 +17517,17 @@
         },
         "responses": {
           "200": {
-            "description": "Admin added (idempotent)."
+            "description": "On the list."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
           },
           "401": {
             "content": {
@@ -17337,26 +17555,77 @@
             "tailscale-admin": []
           }
         ],
-        "summary": "Add an email address to the admin allow-list.",
+        "summary": "Put a login on a level's list.",
         "tags": [
-          "admins"
+          "access"
         ],
-        "x-canopy-audit": [],
+        "x-canopy-audit": [
+          "access_list_entry_added"
+        ],
         "x-canopy-danger-reasons": [
           "issues"
         ],
         "x-canopy-safety-mode": "danger"
       }
     },
-    "/api/admins/delete": {
+    "/api/access/list": {
       "post": {
-        "description": "Revokes admin access for the given email address. Has no effect if the\nemail was not an admin.",
-        "operationId": "admin_delete",
+        "description": "Returns admin then PM, each with the logins on its list and the sources the\ntailnet policy grants it to as the policy writes them, with who each\ncovers; and whether and when Canopy last read the policy.",
+        "operationId": "access_list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessOverview"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "The lists, and what the tailnet policy grants each level.",
+        "tags": [
+          "access"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/access/remove": {
+      "post": {
+        "description": "Has no effect where the login is not on it, whatever its case.",
+        "operationId": "access_remove",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DeleteArgs"
+                "$ref": "#/components/schemas/ListEntryArgs"
               }
             }
           },
@@ -17364,7 +17633,7 @@
         },
         "responses": {
           "200": {
-            "description": "Admin removed (idempotent)."
+            "description": "Off the list."
           },
           "401": {
             "content": {
@@ -17392,67 +17661,17 @@
             "tailscale-admin": []
           }
         ],
-        "summary": "Remove an email address from the admin allow-list.",
+        "summary": "Take a login off a level's list.",
         "tags": [
-          "admins"
+          "access"
         ],
-        "x-canopy-audit": [],
+        "x-canopy-audit": [
+          "access_list_entry_removed"
+        ],
         "x-canopy-danger-reasons": [
           "invalidates"
         ],
         "x-canopy-safety-mode": "danger"
-      }
-    },
-    "/api/admins/list": {
-      "post": {
-        "description": "Returns the email addresses of every account currently granted admin\naccess to this API, in no particular order.",
-        "operationId": "admin_list",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Admin emails."
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": ""
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ],
-        "summary": "List the admin allow-list.",
-        "tags": [
-          "admins"
-        ],
-        "x-canopy-audit": [],
-        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/ansible/extend_lease": {
@@ -21050,20 +21269,27 @@
         "x-canopy-safety-mode": "read-only"
       }
     },
-    "/api/commons/is_current_user_admin": {
+    "/api/commons/current_user_level": {
       "post": {
-        "description": "Reports `true` if the caller is authenticated and their identity is on\nthe admin allow-list, `false` if the caller definitely isn't an admin —\nincluding when the caller is not authenticated at all. This endpoint\nintentionally requires no authentication of its own, since it exists so a\nclient can check whether to show admin-only controls before doing anything\nelse.\n\nA failure that isn't an authorization outcome (a database blip while\nreading the allow-list, say) is reported as an error, not as `false`.",
-        "operationId": "is_current_user_admin",
+        "description": "Reports the level the caller holds on the operator surface: `admin`, `pm`,\nor `all` for a caller holding nothing higher, and `null` for a caller\nbearing no tailnet identity at all. This endpoint intentionally requires no\nlevel of its own, since it exists so a client can decide which controls to\noffer before doing anything else.\n\nA failure that isn't an authorisation outcome (a database blip while\nreading the access lists, say) is reported as an error, not as a lower\nlevel, because a caller cannot tell a wrongly-low answer from a real one.",
+        "operationId": "current_user_level",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "boolean"
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccessLevel"
+                    }
+                  ]
                 }
               }
             },
-            "description": "`true` if the caller's Tailscale identity is an administrator (on the admin allow-list, or granted admin by the tailnet policy); `false` otherwise (including when no Tailscale identity is present)."
+            "description": "The caller's level, or `null` when no tailnet identity is present."
           },
           "500": {
             "content": {
@@ -21073,10 +21299,10 @@
                 }
               }
             },
-            "description": "The caller's admin status could not be determined. Distinct from a `false` answer: retry rather than treating the caller as a non-admin."
+            "description": "The caller's level could not be determined. Distinct from any answer: retry rather than treating the caller as holding a lower level."
           }
         },
-        "summary": "Check whether the caller is an admin.",
+        "summary": "The caller's access level.",
         "tags": [
           "commons"
         ],
@@ -30783,8 +31009,8 @@
   },
   "tags": [
     {
-      "description": "Admin email allow-list management.",
-      "name": "admins"
+      "description": "Who holds the access levels above all: the levels' lists, and what the tailnet policy grants each.",
+      "name": "access"
     },
     {
       "description": "The audit log of administrative actions.",

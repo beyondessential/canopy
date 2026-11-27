@@ -7,7 +7,7 @@
 //! session. Every test here opts out of it with `CANOPY_TRUST_TAILSCALE_HEADERS`
 //! so the boundary is decided rather than skipped.
 
-use database::admins::Admin;
+use database::access_lists::{AccessListEntry, ListLevel};
 use serde_json::json;
 
 const TRUST_HEADERS: &str = "CANOPY_TRUST_TAILSCALE_HEADERS";
@@ -38,7 +38,9 @@ async fn a_read_only_session_is_refused_a_higher_graded_request() {
 	trust_headers();
 
 	commons_tests::server::run(async |mut conn, _public, private| {
-		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, OPERATOR)
+			.await
+			.expect("add admin");
 
 		// A fresh session begins read-only.
 		let session = private
@@ -54,7 +56,7 @@ async fn a_read_only_session_is_refused_a_higher_graded_request() {
 
 		// A read-only-graded request is answered from it.
 		private
-			.post("/api/admins/list")
+			.post("/api/access/list")
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
 			.add_header(SESSION_HEADER, &id)
@@ -97,7 +99,9 @@ async fn the_ladder_holds_downwards_and_lowering_ends_a_raise() {
 	trust_headers();
 
 	commons_tests::server::run(async |mut conn, _public, private| {
-		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, OPERATOR)
+			.await
+			.expect("add admin");
 
 		let id = new_session(&private, OPERATOR).await;
 
@@ -176,7 +180,9 @@ async fn any_administrator_may_raise_to_danger() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		// A plain allow-list entry: being an administrator is all it takes.
-		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, OPERATOR)
+			.await
+			.expect("add admin");
 
 		let id = new_session(&private, OPERATOR).await;
 		private
@@ -206,7 +212,9 @@ async fn a_session_is_usable_only_by_the_login_it_belongs_to() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		for login in [OPERATOR, OTHER] {
-			Admin::add(&mut conn, login).await.expect("add admin");
+			AccessListEntry::add(&mut conn, ListLevel::Admin, login)
+				.await
+				.expect("add admin");
 		}
 
 		let id = new_session(&private, OPERATOR).await;
@@ -256,14 +264,16 @@ async fn an_unknown_session_reads_as_read_only_rather_than_being_refused() {
 	trust_headers();
 
 	commons_tests::server::run(async |mut conn, _public, private| {
-		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, OPERATOR)
+			.await
+			.expect("add admin");
 
 		let unknown = uuid::Uuid::new_v4().to_string();
 
 		// A read-only-graded request is answered: an unknown identifier is not
 		// itself a refusal, and a client can read before it has a session.
 		private
-			.post("/api/admins/list")
+			.post("/api/access/list")
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
 			.add_header(SESSION_HEADER, &unknown)
@@ -273,7 +283,7 @@ async fn an_unknown_session_reads_as_read_only_rather_than_being_refused() {
 
 		// With no session header at all, likewise.
 		private
-			.post("/api/admins/list")
+			.post("/api/access/list")
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
 			.json(&json!({}))
@@ -302,7 +312,9 @@ async fn a_raise_survives_a_restart_because_it_is_a_row() {
 	trust_headers();
 
 	commons_tests::server::run(async |mut conn, _public, private| {
-		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, OPERATOR)
+			.await
+			.expect("add admin");
 
 		let id = new_session(&private, OPERATOR).await;
 		private
@@ -352,7 +364,9 @@ async fn a_raise_lasts_ten_minutes_and_activity_does_not_extend_it() {
 	trust_headers();
 
 	commons_tests::server::run(async |mut conn, _public, private| {
-		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, OPERATOR)
+			.await
+			.expect("add admin");
 
 		let id = new_session(&private, OPERATOR).await;
 		let raised = private
@@ -382,7 +396,7 @@ async fn a_raise_lasts_ten_minutes_and_activity_does_not_extend_it() {
 		// time at the raised grade: the raise runs from when it was made.
 		for _ in 0..3 {
 			private
-				.post("/api/admins/list")
+				.post("/api/access/list")
 				.add_header("Tailscale-User-Login", OPERATOR)
 				.add_header("Tailscale-User-Name", "Operator")
 				.add_header(SESSION_HEADER, &id)
@@ -414,7 +428,9 @@ async fn the_grade_is_honoured_for_a_minute_after_the_raise_lapses() {
 	trust_headers();
 
 	commons_tests::server::run(async |mut conn, _public, private| {
-		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, OPERATOR)
+			.await
+			.expect("add admin");
 
 		let id = new_session(&private, OPERATOR).await;
 		private
@@ -471,7 +487,9 @@ async fn a_route_the_boundary_cannot_grade_is_refused_but_the_redirects_are_not(
 	trust_headers();
 
 	commons_tests::server::run(async |mut conn, _public, private| {
-		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, OPERATOR)
+			.await
+			.expect("add admin");
 
 		// The compatibility redirects reach no handler and change nothing, so
 		// they answer without a grade. Everything else the boundary cannot
@@ -559,7 +577,9 @@ async fn a_session_is_kept_alive_only_by_the_login_it_belongs_to() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		for login in [OPERATOR, OTHER] {
-			Admin::add(&mut conn, login).await.expect("add admin");
+			AccessListEntry::add(&mut conn, ListLevel::Admin, login)
+				.await
+				.expect("add admin");
 		}
 		let id = new_session(&private, OPERATOR).await;
 
@@ -586,7 +606,7 @@ async fn a_session_is_kept_alive_only_by_the_login_it_belongs_to() {
 		// Another login reading while holding that identifier does not refresh
 		// it: an identifier is not something a caller can keep alive by holding.
 		private
-			.post("/api/admins/list")
+			.post("/api/access/list")
 			.add_header("Tailscale-User-Login", OTHER)
 			.add_header("Tailscale-User-Name", "Other")
 			.add_header(SESSION_HEADER, &id)
@@ -601,7 +621,7 @@ async fn a_session_is_kept_alive_only_by_the_login_it_belongs_to() {
 
 		// A caller with no identity at all likewise leaves it alone.
 		private
-			.post("/api/commons/is_current_user_admin")
+			.post("/api/commons/current_user_level")
 			.add_header(SESSION_HEADER, &id)
 			.json(&json!({}))
 			.await
@@ -614,7 +634,7 @@ async fn a_session_is_kept_alive_only_by_the_login_it_belongs_to() {
 
 		// Its own login does.
 		private
-			.post("/api/admins/list")
+			.post("/api/access/list")
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
 			.add_header(SESSION_HEADER, &id)
@@ -691,14 +711,16 @@ async fn a_path_served_by_another_method_is_the_routers_to_refuse() {
 	trust_headers();
 
 	commons_tests::server::run(async |mut conn, _public, private| {
-		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, OPERATOR)
+			.await
+			.expect("add admin");
 
 		// The boundary grades a method and a path together, so a path it serves
 		// under another method has no grade here. That is the router's to answer
 		// with the method it allows, not the boundary's to report as a route it
 		// does not recognise.
 		let wrong_method = private
-			.get("/api/admins/list")
+			.get("/api/access/list")
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
 			.await;
@@ -719,7 +741,9 @@ async fn backup_schedules_are_write_and_clearing_retention_is_danger() {
 	trust_headers();
 
 	commons_tests::server::run(async |mut conn, _public, private| {
-		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, OPERATOR)
+			.await
+			.expect("add admin");
 		let id = new_session(&private, OPERATOR).await;
 		private
 			.post("/api/safety/raise")
@@ -796,7 +820,9 @@ async fn a_command_that_names_itself_is_not_gated() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		seed(&mut conn).await;
-		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, OPERATOR)
+			.await
+			.expect("add admin");
 		let take = json!({ "server_group_id": GROUP, "intent": "configure" });
 
 		// The same request from a session that has not been raised is refused.

@@ -247,7 +247,10 @@ async fn only_administrators_are_shown_deleted_notes() {
 	unsafe { std::env::set_var("CANOPY_TRUST_TAILSCALE_HEADERS", "1") };
 
 	commons_tests::server::run(async |mut conn, _public, private| {
-		database::admins::Admin::add(&mut conn, "boss@example.com")
+		database::access_lists::AccessListEntry::add(
+			&mut conn,
+			database::access_lists::ListLevel::Admin,
+			"boss@example.com")
 			.await
 			.unwrap();
 		let server_id = Uuid::new_v4();

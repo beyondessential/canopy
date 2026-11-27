@@ -9,7 +9,7 @@ use diesel_async::{
 use jiff::SignedDuration;
 use tokio::time::{Instant, timeout};
 
-pub mod admins;
+pub mod access_lists;
 pub mod ansible_catalogue;
 pub mod ansible_leases;
 pub mod ansible_variables;

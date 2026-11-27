@@ -2,13 +2,21 @@
 
 pub mod sql_types {
 	#[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+	#[diesel(postgres_type(name = "access_level"))]
+	pub struct AccessLevel;
+
+	#[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
 	#[diesel(postgres_type(name = "tsvector", schema = "pg_catalog"))]
 	pub struct Tsvector;
 }
 
 diesel::table! {
-	admins (email) {
-		email -> Text,
+	use diesel::sql_types::*;
+	use super::sql_types::AccessLevel;
+
+	access_list_entries (level, login) {
+		level -> AccessLevel,
+		login -> Text,
 		created_at -> Timestamptz,
 	}
 }
@@ -1496,7 +1504,7 @@ diesel::joinable!(vulnerability_lapses -> vulnerability_decisions (decision_id))
 diesel::joinable!(vulnerability_matches -> vulnerabilities (vulnerability_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
-	admins,
+	access_list_entries,
 	ansible_catalogue,
 	ansible_leases,
 	ansible_secret_values_held,

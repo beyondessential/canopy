@@ -4,9 +4,10 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{
 	audit::Audit,
-	tailscale_auth::{TailscaleAdmin, TailscaleUser},
+	tailscale_auth::{TailscaleAdmin, TailscaleLevel, TailscaleUser},
 };
 use commons_types::{Uuid, issue::ResolvedReason, server::rank::ServerRank};
+use database::access_lists::AccessLevel;
 use database::audit::{Action, Record};
 use database::issues::{Incident, IncidentIssue, IncidentStats};
 use database::notes::{AuthorKind, IncidentNote};
@@ -593,11 +594,11 @@ pub struct IncidentListNotesArgs {
 )]
 pub async fn list_notes(
 	State(state): State<AppState>,
-	_user: TailscaleUser,
-	admin: std::result::Result<TailscaleAdmin, AppError>,
+	caller: TailscaleLevel,
 	Json(args): Json<IncidentListNotesArgs>,
 ) -> Result<Json<Vec<IncidentNoteData>>> {
-	let include_deleted = args.include_deleted && crate::fns::commons::admin_probe_answer(admin)?;
+	let TailscaleLevel(_, level) = caller;
+	let include_deleted = args.include_deleted && level == AccessLevel::Admin;
 	let mut conn = state.db_read.get().await?;
 	let notes = IncidentNote::list_for_incident(
 		&mut conn,

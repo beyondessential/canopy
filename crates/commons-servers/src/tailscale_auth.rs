@@ -1,6 +1,10 @@
 use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use commons_errors::AppError;
-use database::{Db, admins::Admin, tailscale_users::TailscaleUser as CachedTailscaleUser};
+use database::{
+	Db,
+	access_lists::{AccessLevel, AccessListEntry},
+	tailscale_users::TailscaleUser as CachedTailscaleUser,
+};
 use diesel_async::AsyncPgConnection;
 use http::request::Parts;
 
@@ -13,7 +17,7 @@ const TAILSCALE_USER_PROFILE_PIC: &str = "Tailscale-User-Profile-Pic";
 /// Debug-only opt-in that makes the extractors authenticate from the real
 /// `Tailscale-User-*` request headers instead of substituting a fixed
 /// development identity. Setting it lets a test choose its own login per
-/// request and resolve administrative status through the real allow-list and
+/// request and resolve their access level through the real access lists and
 /// tailnet policy path.
 ///
 /// The `cfg!(debug_assertions)` guard around every use is compiled out of
@@ -45,8 +49,9 @@ fn trust_real_headers() -> bool {
 }
 
 /// The fixed identity substituted in debug builds when real headers aren't
-/// trusted. Its login is on no allow-list; the extractors grant it admin by
-/// skipping the check, so a dev build is an administrator without any seeding.
+/// trusted. Its login is on no access list; the extractors give it the admin
+/// level by skipping the check, so a dev build is an administrator without any
+/// seeding.
 fn dev_identity() -> TailscaleUser {
 	TailscaleUser {
 		login: "admin@localhost".into(),
@@ -63,24 +68,26 @@ pub struct TailscaleUser {
 }
 
 impl TailscaleUser {
-	/// Admin if the login is on the recorded allowlist, or the tailnet policy
-	/// grants it admin (see [`crate::tailnet_directory`]). The allowlist is
-	/// checked first, so an unreachable control plane can't lock out an
-	/// allowlisted admin.
-	pub async fn is_admin(
+	/// The caller's access level: the highest their login's place on the access
+	/// lists or the tailnet policy gives them (see
+	/// [`crate::tailnet_directory`]), and all where neither gives one. The lists
+	/// are read whatever the policy says, so an unreachable control plane
+	/// never withdraws a listed level.
+	// spec: ADM#how-a-level-is-held
+	pub async fn level(
 		&self,
 		db: &mut AsyncPgConnection,
 		directory: Option<&TailnetDirectory>,
-	) -> Result<bool, AppError> {
-		if Admin::check_email(db, &self.login).await? {
-			return Ok(true);
-		}
-		if let Some(directory) = directory
-			&& directory.is_admin_by_policy(&self.login).await
-		{
-			return Ok(true);
-		}
-		Ok(false)
+	) -> Result<AccessLevel, AppError> {
+		let listed = AccessListEntry::highest_for(db, &self.login).await?;
+		let granted = match directory {
+			Some(directory) => directory.level_by_policy(&self.login).await,
+			None => None,
+		};
+		Ok(listed
+			.max(granted)
+			.map(AccessLevel::from)
+			.unwrap_or(AccessLevel::All))
 	}
 }
 
@@ -167,6 +174,114 @@ where
 	}
 }
 
+/// Authenticate the caller and resolve their level, refusing one below
+/// `required`. The development identity is an administrator.
+///
+/// The caller's name and picture are cached, so endpoints that record human
+/// actions (issue/incident resolve, notes) and views naming people can render
+/// them without round-tripping to Tailscale. Centralised here so every gated
+/// handler gets it for free.
+async fn authorise<S>(
+	parts: &mut Parts,
+	state: &S,
+	required: AccessLevel,
+) -> Result<(TailscaleUser, AccessLevel), AppError>
+where
+	Db: FromRef<S>,
+	Option<TailnetDirectory>: FromRef<S>,
+	S: Send + Sync,
+{
+	let (user, level, mut db) = if use_dev_identity() {
+		let db = Db::from_ref(state).get().await?;
+		(dev_identity(), AccessLevel::Admin, db)
+	} else {
+		let user = <TailscaleUser as FromRequestParts<S>>::from_request_parts(parts, state).await?;
+		let mut db = Db::from_ref(state).get().await?;
+		let directory = Option::<TailnetDirectory>::from_ref(state);
+		let level = user.level(&mut db, directory.as_ref()).await?;
+		if level < required {
+			return Err(AppError::AuthInsufficientPermissions {
+				required: match required {
+					AccessLevel::Admin => "admin",
+					AccessLevel::Pm => "pm",
+					AccessLevel::All => "all",
+				}
+				.into(),
+			});
+		}
+		(user, level, db)
+	};
+
+	CachedTailscaleUser::upsert(
+		&mut db,
+		&user.login,
+		&user.name,
+		user.profile_pic.as_deref(),
+	)
+	.await?;
+
+	Ok((user, level))
+}
+
+/// A caller with a tailnet user identity, and the level they hold.
+#[derive(Debug, Clone)]
+pub struct TailscaleLevel(pub TailscaleUser, pub AccessLevel);
+
+impl<S> FromRequestParts<S> for TailscaleLevel
+where
+	Db: FromRef<S>,
+	Option<TailnetDirectory>: FromRef<S>,
+	S: Send + Sync,
+{
+	type Rejection = AppError;
+
+	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+		let (user, level) = authorise(parts, state, AccessLevel::All).await?;
+		Ok(Self(user, level))
+	}
+}
+
+impl<S> OptionalFromRequestParts<S> for TailscaleLevel
+where
+	Db: FromRef<S>,
+	Option<TailnetDirectory>: FromRef<S>,
+	S: Send + Sync,
+{
+	type Rejection = AppError;
+
+	/// `None` for a caller bearing no tailnet user identity; any other
+	/// failure is an error, never a lower level.
+	async fn from_request_parts(
+		parts: &mut Parts,
+		state: &S,
+	) -> Result<Option<Self>, Self::Rejection> {
+		match <Self as FromRequestParts<S>>::from_request_parts(parts, state).await {
+			Ok(caller) => Ok(Some(caller)),
+			Err(AppError::AuthMissingHeader(_)) => Ok(None),
+			Err(err) => Err(err),
+		}
+	}
+}
+
+/// A caller at the PM level or above.
+#[derive(Debug, Clone)]
+pub struct TailscalePm(pub TailscaleUser);
+
+impl<S> FromRequestParts<S> for TailscalePm
+where
+	Db: FromRef<S>,
+	Option<TailnetDirectory>: FromRef<S>,
+	S: Send + Sync,
+{
+	type Rejection = AppError;
+
+	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+		let (user, _) = authorise(parts, state, AccessLevel::Pm).await?;
+		Ok(Self(user))
+	}
+}
+
+/// A caller at the admin level.
 #[derive(Debug, Clone)]
 pub struct TailscaleAdmin(pub TailscaleUser);
 
@@ -179,35 +294,8 @@ where
 	type Rejection = AppError;
 
 	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-		let user = if use_dev_identity() {
-			dev_identity()
-		} else {
-			let user =
-				<TailscaleUser as FromRequestParts<S>>::from_request_parts(parts, state).await?;
-			let mut db = Db::from_ref(state).get().await?;
-			let directory = Option::<TailnetDirectory>::from_ref(state);
-			if !user.is_admin(&mut db, directory.as_ref()).await? {
-				return Err(AppError::AuthInsufficientPermissions {
-					required: "admin".into(),
-				});
-			}
-			user
-		};
-
-		// Cache the user's name + pic so endpoints that record human actions
-		// (issue/incident resolve, notes) can render avatars without
-		// round-tripping to Tailscale. Centralised here so every admin
-		// handler gets it for free.
-		let mut db = Db::from_ref(state).get().await?;
-		CachedTailscaleUser::upsert(
-			&mut db,
-			&user.login,
-			&user.name,
-			user.profile_pic.as_deref(),
-		)
-		.await?;
-
-		Ok(TailscaleAdmin(user))
+		let (user, _) = authorise(parts, state, AccessLevel::Admin).await?;
+		Ok(Self(user))
 	}
 }
 

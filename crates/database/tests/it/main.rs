@@ -4,7 +4,7 @@
 // Nextest still runs every #[tokio::test] in parallel as usual.
 
 mod abandoned_grain_migration;
-mod admins;
+mod access_lists;
 mod ansible_catalogue;
 mod ansible_enums;
 mod ansible_leases;

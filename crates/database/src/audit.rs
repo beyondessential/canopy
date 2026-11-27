@@ -960,6 +960,20 @@ actions! {
 		detail { audience: String, grants_revoked: usize }
 	}
 
+	/// A login was put on a level's list.
+	// spec: ADM#the-permissions-page
+	AccessListEntryAdded = "access_list_entry_added", "Add to access list", retention = Year {
+		records { }
+		detail { level: crate::access_lists::ListLevel, login: String }
+	}
+
+	/// A login was taken off a level's list.
+	// spec: ADM#the-permissions-page
+	AccessListEntryRemoved = "access_list_entry_removed", "Remove from access list", retention = Year {
+		records { }
+		detail { level: crate::access_lists::ListLevel, login: String }
+	}
+
 	/// An artifact was registered against a version.
 	ArtifactRegistered = "artifact_registered", "Register artifact" {
 		records { artifact: Record, version: Option<Record>, group: Option<Record>, device: Record }

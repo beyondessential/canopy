@@ -13,7 +13,7 @@ use commons_servers::audit::{ActorSource, Audit, AuditMap, AuditState, enforce};
 use commons_tests::{axum_test::TestServer, db::TestDb};
 use database::{
 	Db,
-	admins::Admin,
+	access_lists::{AccessListEntry, ListLevel},
 	audit::{self, Action, Actor, Filter, Record, RecordKind, Status},
 };
 use uuid::Uuid;
@@ -39,7 +39,7 @@ async fn silent() -> Result<Json<()>> {
 #[utoipa::path(post, path = "/records", responses((status = 200)))]
 async fn records(audit: Audit) -> Result<Json<()>> {
 	let mut tx = audit.begin().await?;
-	Admin::add(&mut tx, "kept@example.com").await?;
+	AccessListEntry::add(&mut tx, ListLevel::Admin, "kept@example.com").await?;
 	tx.record(lifted("one")).await?;
 	Ok(Json(()))
 }
@@ -56,14 +56,14 @@ async fn bulk(audit: Audit) -> Result<Json<()>> {
 #[utoipa::path(post, path = "/forgets", responses((status = 200)))]
 async fn forgets(audit: Audit) -> Result<Json<()>> {
 	let mut tx = audit.begin().await?;
-	Admin::add(&mut tx, "forgotten@example.com").await?;
+	AccessListEntry::add(&mut tx, ListLevel::Admin, "forgotten@example.com").await?;
 	Ok(Json(()))
 }
 
 #[utoipa::path(post, path = "/undeclared", responses((status = 200)))]
 async fn undeclared(audit: Audit) -> Result<Json<()>> {
 	let mut tx = audit.begin().await?;
-	Admin::add(&mut tx, "undeclared@example.com").await?;
+	AccessListEntry::add(&mut tx, ListLevel::Admin, "undeclared@example.com").await?;
 	tx.record(Action::MaintenanceDeclared {
 		window: record("w"),
 		target: vec![Record::new(RecordKind::Machine, Uuid::new_v4(), "box")],
@@ -80,7 +80,7 @@ async fn undeclared(audit: Audit) -> Result<Json<()>> {
 #[utoipa::path(post, path = "/errors", responses((status = 200)))]
 async fn errors(audit: Audit) -> Result<Json<()>> {
 	let mut tx = audit.begin().await?;
-	Admin::add(&mut tx, "errored@example.com").await?;
+	AccessListEntry::add(&mut tx, ListLevel::Admin, "errored@example.com").await?;
 	tx.record(lifted("errored")).await?;
 	Err(AppError::BadRequest("no".into()))
 }
@@ -91,7 +91,7 @@ async fn errors(audit: Audit) -> Result<Json<()>> {
 async fn ahead_then_errors(audit: Audit) -> Result<Json<()>> {
 	let _pending = audit.commit_ahead(lifted("ahead")).await?;
 	let mut tx = audit.begin().await?;
-	Admin::add(&mut tx, "ahead@example.com").await?;
+	AccessListEntry::add(&mut tx, ListLevel::Admin, "ahead@example.com").await?;
 	Err(AppError::BadRequest("no".into()))
 }
 
@@ -118,7 +118,7 @@ async fn ahead_undeclared(audit: Audit) -> Result<Json<()>> {
 async fn ahead_then_done(audit: Audit) -> Result<Json<()>> {
 	let pending = audit.commit_ahead(lifted("effect")).await?;
 	let mut tx = audit.begin().await?;
-	Admin::add(&mut tx, "effect@example.com").await?;
+	AccessListEntry::add(&mut tx, ListLevel::Admin, "effect@example.com").await?;
 	tx.settle_done(&pending, Some(serde_json::json!({ "access_key": "AKIA" })))
 		.await?;
 	Ok(Json(()))
@@ -130,7 +130,7 @@ async fn ahead_then_done(audit: Audit) -> Result<Json<()>> {
 async fn ahead_then_failed(audit: Audit) -> Result<Json<()>> {
 	let pending = audit.commit_ahead(lifted("refused")).await?;
 	let mut tx = audit.begin().await?;
-	Admin::add(&mut tx, "refused@example.com").await?;
+	AccessListEntry::add(&mut tx, ListLevel::Admin, "refused@example.com").await?;
 	audit.settle_failed(&pending, None).await?;
 	Err(AppError::BadRequest("refused".into()))
 }
@@ -166,7 +166,7 @@ async fn device(audit: Audit) -> Result<Json<()>> {
 #[utoipa::path(post, path = "/optional_none", responses((status = 200)))]
 async fn optional_none(audit: Audit) -> Result<Json<()>> {
 	let mut tx = audit.begin().await?;
-	Admin::add(&mut tx, "optional@example.com").await?;
+	AccessListEntry::add(&mut tx, ListLevel::Admin, "optional@example.com").await?;
 	Ok(Json(()))
 }
 
@@ -174,7 +174,7 @@ async fn optional_none(audit: Audit) -> Result<Json<()>> {
 #[utoipa::path(post, path = "/optional_undeclared", responses((status = 200)))]
 async fn optional_undeclared(audit: Audit) -> Result<Json<()>> {
 	let mut tx = audit.begin().await?;
-	Admin::add(&mut tx, "optional-undeclared@example.com").await?;
+	AccessListEntry::add(&mut tx, ListLevel::Admin, "optional-undeclared@example.com").await?;
 	tx.record(lifted("undeclared")).await?;
 	Ok(Json(()))
 }
@@ -252,11 +252,7 @@ async fn an_audited_route_commits_its_change_with_its_entry_naming_the_operator(
 		let server = app(database::init_to(&url), ActorSource::Operator);
 		server.post("/records").await.assert_status_ok();
 
-		assert!(
-			Admin::check_email(&mut conn, "kept@example.com")
-				.await
-				.unwrap()
-		);
+		assert!(is_admin(&mut conn, "kept@example.com").await);
 		let log = entries(&mut conn).await;
 		assert_eq!(log.len(), 1);
 		assert_eq!(log[0].action, "maintenance_lifted");
@@ -288,11 +284,7 @@ async fn an_audited_handler_that_records_nothing_fails_and_changes_nothing() {
 			.post("/forgets")
 			.await
 			.assert_status(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
-		assert!(
-			!Admin::check_email(&mut conn, "forgotten@example.com")
-				.await
-				.unwrap()
-		);
+		assert!(!is_admin(&mut conn, "forgotten@example.com").await);
 		assert!(entries(&mut conn).await.is_empty());
 	})
 	.await
@@ -306,11 +298,7 @@ async fn recording_an_action_the_route_does_not_declare_fails_and_changes_nothin
 			.post("/undeclared")
 			.await
 			.assert_status(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
-		assert!(
-			!Admin::check_email(&mut conn, "undeclared@example.com")
-				.await
-				.unwrap()
-		);
+		assert!(!is_admin(&mut conn, "undeclared@example.com").await);
 		assert!(entries(&mut conn).await.is_empty());
 	})
 	.await
@@ -345,11 +333,7 @@ async fn an_audited_action_that_errors_leaves_no_entry_and_no_change() {
 			.post("/errors")
 			.await
 			.assert_status(axum::http::StatusCode::BAD_REQUEST);
-		assert!(
-			!Admin::check_email(&mut conn, "errored@example.com")
-				.await
-				.unwrap()
-		);
+		assert!(!is_admin(&mut conn, "errored@example.com").await);
 		assert!(entries(&mut conn).await.is_empty());
 	})
 	.await
@@ -365,9 +349,7 @@ async fn an_entry_committed_ahead_stands_when_the_handler_errors_and_is_hidden_u
 			.assert_status(axum::http::StatusCode::BAD_REQUEST);
 
 		assert!(
-			!Admin::check_email(&mut conn, "ahead@example.com")
-				.await
-				.unwrap(),
+			!is_admin(&mut conn, "ahead@example.com").await,
 			"the handler's own change rolled back"
 		);
 		assert!(
@@ -408,11 +390,7 @@ async fn settling_done_commits_with_the_work_and_adds_what_the_action_learned() 
 		let server = app(database::init_to(&url), ActorSource::Operator);
 		server.post("/ahead_then_done").await.assert_status_ok();
 
-		assert!(
-			Admin::check_email(&mut conn, "effect@example.com")
-				.await
-				.unwrap()
-		);
+		assert!(is_admin(&mut conn, "effect@example.com").await);
 		let log = entries(&mut conn).await;
 		assert_eq!(log.len(), 1);
 		assert_eq!(log[0].status, Status::Done);
@@ -434,11 +412,7 @@ async fn a_failure_settled_stands_though_the_handler_rolls_back() {
 			.await
 			.assert_status(axum::http::StatusCode::BAD_REQUEST);
 
-		assert!(
-			!Admin::check_email(&mut conn, "refused@example.com")
-				.await
-				.unwrap()
-		);
+		assert!(!is_admin(&mut conn, "refused@example.com").await);
 		let log = entries(&mut conn).await;
 		assert_eq!(log.len(), 1);
 		assert_eq!(log[0].status, Status::Failed);
@@ -518,9 +492,7 @@ async fn an_entry_that_cannot_be_written_refuses_the_action() {
 			.await
 			.assert_status(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
 		assert!(
-			!Admin::check_email(&mut conn, "kept@example.com")
-				.await
-				.unwrap(),
+			!is_admin(&mut conn, "kept@example.com").await,
 			"the change did not stand without its entry"
 		);
 
@@ -547,11 +519,7 @@ async fn a_handler_declared_to_record_only_what_it_creates_may_record_nothing() 
 	TestDb::run(async |mut conn, url| {
 		let server = app(database::init_to(&url), ActorSource::Operator);
 		server.post("/optional_none").await.assert_status_ok();
-		assert!(
-			Admin::check_email(&mut conn, "optional@example.com")
-				.await
-				.unwrap()
-		);
+		assert!(is_admin(&mut conn, "optional@example.com").await);
 		assert!(entries(&mut conn).await.is_empty());
 
 		// It is still held to the actions it declares.
@@ -559,11 +527,7 @@ async fn a_handler_declared_to_record_only_what_it_creates_may_record_nothing() 
 			.post("/optional_undeclared")
 			.await
 			.assert_status(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
-		assert!(
-			!Admin::check_email(&mut conn, "optional-undeclared@example.com")
-				.await
-				.unwrap()
-		);
+		assert!(!is_admin(&mut conn, "optional-undeclared@example.com").await);
 	})
 	.await
 }
@@ -582,4 +546,9 @@ async fn a_handler_can_declare_that_it_changed_nothing_but_not_while_recording()
 		assert!(entries(&mut conn).await.is_empty());
 	})
 	.await
+}
+
+/// Whether a login is on the admin list, which is what the routes here write.
+async fn is_admin(conn: &mut database::diesel_async::AsyncPgConnection, login: &str) -> bool {
+	AccessListEntry::highest_for(conn, login).await.unwrap() == Some(ListLevel::Admin)
 }

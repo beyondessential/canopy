@@ -6,7 +6,7 @@
 use commons_tests::axum_test::TestServer;
 use database::diesel_async::AsyncPgConnection;
 use database::{
-	admins::Admin,
+	access_lists::{AccessListEntry, ListLevel},
 	audit::{self, Actor, Filter},
 	osv::{Counted, Record},
 	packages::{PackagePath, RepositoryPackage, RepositoryRead, Scope},
@@ -157,7 +157,9 @@ async fn an_admin_records_a_split_decision_and_it_is_audited_as_theirs() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		an_item(&mut conn).await;
-		Admin::add(&mut conn, ADMIN).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, ADMIN)
+			.await
+			.expect("add admin");
 		let session = writing(&private).await;
 
 		let decided = admin_post(&private, &session, "/api/vulnerabilities/decide", &split()).await;
@@ -191,7 +193,9 @@ async fn withdrawing_and_editing_are_audited_and_show_in_the_history() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		an_item(&mut conn).await;
-		Admin::add(&mut conn, ADMIN).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, ADMIN)
+			.await
+			.expect("add admin");
 		let session = writing(&private).await;
 		admin_post(&private, &session, "/api/vulnerabilities/decide", &whole()).await;
 
@@ -261,7 +265,9 @@ async fn the_sources_page_shows_what_each_carries_and_an_admin_rescans_one() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		an_item(&mut conn).await;
-		Admin::add(&mut conn, ADMIN).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, ADMIN)
+			.await
+			.expect("add admin");
 
 		let sources = read(&private, "/api/vulnerabilities/sources", &json!({})).await;
 		let sources = sources.as_array().expect("an array of sources");
@@ -376,7 +382,9 @@ async fn a_read_only_session_is_refused_all_three_changes() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		an_item(&mut conn).await;
-		Admin::add(&mut conn, ADMIN).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, ADMIN)
+			.await
+			.expect("add admin");
 
 		let session = private
 			.post("/api/safety/session")
@@ -545,7 +553,9 @@ async fn an_administrator_records_a_decision_through_the_query_interface() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		an_item(&mut conn).await;
-		Admin::add(&mut conn, ADMIN).await.expect("add admin");
+		AccessListEntry::add(&mut conn, ListLevel::Admin, ADMIN)
+			.await
+			.expect("add admin");
 
 		let resp = private
 			.post("/api/mcp")
