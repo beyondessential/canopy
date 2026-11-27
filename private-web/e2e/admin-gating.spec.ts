@@ -60,7 +60,7 @@ test.describe("admin gating", () => {
 		await page.goto("/fleet");
 
 		await expect(
-			page.getByText("Couldn't check your admin status"),
+			page.getByText("Couldn't check your access level"),
 		).toBeVisible();
 		await expect(adminControl(page)).toBeHidden();
 	});
@@ -78,7 +78,7 @@ test.describe("admin gating", () => {
 		});
 
 		await page.goto("/fleet");
-		const banner = page.getByText("Couldn't check your admin status");
+		const banner = page.getByText("Couldn't check your access level");
 		await expect(banner).toBeVisible();
 
 		// The provider retries on its own; the button just skips the wait.
