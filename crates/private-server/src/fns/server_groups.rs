@@ -660,6 +660,13 @@ pub async fn pm_candidates(
 		}
 	}
 	let mut candidates: Vec<PmCandidate> = by_login.into_values().collect();
+	// Neither the control plane nor Canopy's own record always carries a
+	// display name, and a candidate named nothing is a blank row.
+	for candidate in &mut candidates {
+		if candidate.name.trim().is_empty() {
+			candidate.name = candidate.login.clone();
+		}
+	}
 	candidates.sort_by_cached_key(|candidate| {
 		(
 			candidate.name.to_lowercase(),

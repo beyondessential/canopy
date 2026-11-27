@@ -394,6 +394,7 @@ async fn the_pm_in_charge_is_suggested_from_the_tailnet_and_those_who_used_canop
 				"status": "idle",
 			},
 			{ "loginName": "gone@example.com", "displayName": "Gone Away", "status": "suspended" },
+			{ "loginName": "nameless@example.com", "status": "active" },
 		],
 	}));
 	run_with_directory(Some(directory), async |mut conn, private, _| {
@@ -413,12 +414,13 @@ async fn the_pm_in_charge_is_suggested_from_the_tailnet_and_those_who_used_canop
 			json!(pm_candidates(&private).await),
 			json!([
 				{ "login": "amy@example.com", "name": "amy Tailnet", "profile_pic": "https://pic/amy" },
+				{ "login": "nameless@example.com", "name": "nameless@example.com", "profile_pic": null },
 				{ "login": "pat@example.com", "name": "Pat Smith", "profile_pic": "https://pic/old" },
 				{ "login": "zed@example.com", "name": "Zed Used Canopy", "profile_pic": null },
 			]),
 			"each person once by login ignoring case, suspended members left out, the \
-			 tailnet's name taken and its missing picture filled from Canopy's, in order \
-			 of name ignoring case"
+			 tailnet's name taken and its missing picture filled from Canopy's, someone \
+			 nothing names read by their login, in order of name ignoring case"
 		);
 	})
 	.await;
