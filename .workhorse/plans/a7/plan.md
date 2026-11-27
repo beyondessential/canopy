@@ -20,5 +20,5 @@ Give Workhorse's loops a Canopy they can build and drive (`.workhorse/rig/`), an
 - [x] Recipe: `rig.json`, `deps`, `build`, `seed`, `serve`, `lib.sh`, `NOTES.md`
 - [x] Prove the build: `deps` and `build` through the rig manager, the commit's own build reusing the dependency build
 - [x] Prove `seed` and `serve` by hand against a throwaway Postgres: the SPA renders seeded data, the header-trusting server tells admin from non-admin, the device certificate authenticates on `/public`
-- [ ] Prove a full `rig lease` end to end, once the device's shared rig Postgres is running
+- [x] Prove a full `rig lease` end to end: the SPA renders, the admin, operator and non-admin identities each authenticate as advertised, and the seeded device's certificate authenticates on `/public` while a request without it is refused
 - [x] Design system: `.workhorse/design/design-system.md` describing the current theme, shell, page anatomy, colour meanings, typography, components and copy conventions
