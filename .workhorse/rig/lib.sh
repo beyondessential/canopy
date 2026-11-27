@@ -57,6 +57,16 @@ export CARGO_TERM_COLOR=never
 # A rig build is built once, and sccache cannot cache an incremental compile.
 export CARGO_INCREMENTAL=0
 
+# The manager gives a step that touches the database both names. The server
+# binary reads DATABASE_URL and psql is handed the other, so each is taken from
+# the other rather than a step dying on the name it happens to want. Neither is
+# set for deps or build, which touch no database.
+if [ -n "${RIG_DATABASE_URL:-}" ] || [ -n "${DATABASE_URL:-}" ]; then
+  RIG_DATABASE_URL="${RIG_DATABASE_URL:-$DATABASE_URL}"
+  DATABASE_URL="${DATABASE_URL:-$RIG_DATABASE_URL}"
+  export RIG_DATABASE_URL DATABASE_URL
+fi
+
 # The stand-ins for everything outside a Canopy instance, shared with the e2e
 # fixture so the two cannot drift. rig.json promises a tester there is no AWS,
 # Kubernetes, Tailscale control plane or Slack behind the lease.
