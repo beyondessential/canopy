@@ -316,7 +316,7 @@ fn every_operation_tag_is_registered() {
 	);
 }
 
-/// Every operation on the administrative surface carries a safety-mode grade.
+/// Every operation on the operator surface carries a safety-mode grade.
 ///
 /// The macro already makes an ungraded entry a compile error, so this cannot
 /// fail through the route tables. What it does catch is a grade that reaches the
@@ -325,7 +325,7 @@ fn every_operation_tag_is_registered() {
 /// through the macro. A grade the enforcement layer cannot parse is an
 /// unenforced handler.
 ///
-/// spec: SAFE#grading-the-administrative-surface
+/// spec: SAFE#grading-the-operator-surface
 #[test]
 fn every_operation_declares_a_safety_mode() {
 	let spec = build_spec();
@@ -352,7 +352,7 @@ fn every_operation_declares_a_safety_mode() {
 
 	assert!(
 		ungraded.is_empty(),
-		"operations on the administrative surface carrying no readable safety mode:\n{}",
+		"operations on the operator surface carrying no readable safety mode:\n{}",
 		ungraded.into_iter().collect::<Vec<_>>().join("\n"),
 	);
 	assert!(graded > 100, "expected the whole surface, found {graded}");
@@ -361,7 +361,7 @@ fn every_operation_declares_a_safety_mode() {
 /// Every danger operation says why it is danger, with reasons the interface
 /// knows how to word, and no other operation carries any.
 ///
-/// spec: SAFE#grading-the-administrative-surface
+/// spec: SAFE#grading-the-operator-surface
 #[test]
 fn every_danger_operation_declares_known_reasons() {
 	let spec = build_spec();

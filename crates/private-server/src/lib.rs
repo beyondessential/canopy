@@ -22,7 +22,7 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 	// SAFE spec). The grades come from the document the `routes!` entries just
 	// produced, so there is one declaration per handler and no second copy to
 	// drift. Applied to the API routes only: the SPA and Swagger are not the
-	// administrative surface.
+	// operator surface.
 	let safety = crate::safety::SafetyState {
 		app: state.clone(),
 		grades: std::sync::Arc::new(crate::safety::GradeMap::from_openapi(&api_spec)),

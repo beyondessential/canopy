@@ -234,7 +234,7 @@ test.describe("the reachability alerting switch, on both forms", () => {
 	});
 });
 
-// spec: SAFE#grading-the-administrative-surface
+// spec: SAFE#grading-the-operator-surface
 test.describe("adding a machine with its reachability quiet", () => {
 	test.use({ safetyMode: "read-only" });
 	test.beforeEach(async ({ sql }) => {

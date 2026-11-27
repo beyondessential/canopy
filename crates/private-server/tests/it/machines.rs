@@ -91,7 +91,7 @@ async fn adding_a_machine_ranks_it() {
 /// Adding a machine with its reachability alert off writes the machine-scoped
 /// silence on canopy's reachability check as part of the addition, so the one
 /// write-graded call covers it. Left on, nothing is silenced.
-// spec: SAFE#grading-the-administrative-surface
+// spec: SAFE#grading-the-operator-surface
 #[tokio::test(flavor = "multi_thread")]
 async fn adding_a_machine_can_silence_its_reachability() {
 	commons_tests::server::run(async |_conn, _, private| {

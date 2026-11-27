@@ -170,7 +170,7 @@ fn resolve_admins(policy: &PolicyFile) -> AdminGrants {
 		for src in &grant.src {
 			match src.as_str() {
 				"autogroup:member" => out.all_members = true,
-				// Tagged devices never reach the administrative surface, so a
+				// Tagged devices never reach the operator surface, so a
 				// tagged source contributes no administrative login.
 				"autogroup:tagged" => {}
 				s if s.starts_with("autogroup:") => {
