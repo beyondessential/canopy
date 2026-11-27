@@ -26,14 +26,14 @@ test.describe("safety modes", () => {
 	test.use({ safetyMode: "read-only" });
 
 	test("a page comes up read-only, and says so", async ({ page }) => {
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 		await expect(modeControl(page)).toContainText(/read-only/i);
 	});
 
 	test("raising to write takes effect without confirmation", async ({
 		page,
 	}) => {
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 		await modeControl(page).click();
 		await page.getByRole("menuitem", { name: /write/i }).click();
 
@@ -47,7 +47,7 @@ test.describe("safety modes", () => {
 	test("raising to danger asks first, and can be declined", async ({
 		page,
 	}) => {
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 		await modeControl(page).click();
 		await page.getByRole("menuitem", { name: /danger/i }).click();
 
@@ -63,7 +63,7 @@ test.describe("safety modes", () => {
 	test("a raise shows the time it has left, counting down from ten", async ({
 		page,
 	}) => {
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 		await raiseTo(page, "write");
 		// Opens just under ten minutes and is always visible, not something to
 		// go and check.
@@ -73,7 +73,7 @@ test.describe("safety modes", () => {
 	test("an operator lowers without waiting for the countdown", async ({
 		page,
 	}) => {
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 		await raiseTo(page, "danger");
 		await lower(page);
 		await expect(modeControl(page)).toContainText(/read-only/i);
@@ -81,7 +81,7 @@ test.describe("safety modes", () => {
 	});
 
 	test("a reloaded page comes back read-only", async ({ page }) => {
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 		await raiseTo(page, "danger");
 
 		// The session identifier is held in memory and never persisted, so a
@@ -93,14 +93,14 @@ test.describe("safety modes", () => {
 	test("a blocked control offers the raise, and carries the action out once confirmed", async ({
 		page,
 	}) => {
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 
 		// Present, not removed: the surface has the same shape in every mode.
 		const add = page.getByRole("button", { name: "Add admin" });
 		await expect(add).toBeVisible();
 		await expect(page.getByLabel(/requires danger mode/i).first()).toBeVisible();
 
-		await page.getByLabel("Email").fill("blocked@example.invalid");
+		await page.getByLabel("Add email to Admin").fill("blocked@example.invalid");
 		await add.click();
 
 		// Nothing was done yet, not even the form's own validation: the operator
@@ -119,7 +119,7 @@ test.describe("safety modes", () => {
 		await dialog.getByRole("button", { name: "Cancel" }).click();
 		await expect(dialog).toHaveCount(0);
 		await expect(modeControl(page)).toContainText(/read-only/i);
-		await expect(page.getByLabel("Email")).toHaveValue("blocked@example.invalid");
+		await expect(page.getByLabel("Add email to Admin")).toHaveValue("blocked@example.invalid");
 		await expect(page.getByLabel(/requires danger mode/i).first()).toBeVisible();
 
 		// Confirming raises, and the same activation carries on and acts.
@@ -133,10 +133,10 @@ test.describe("safety modes", () => {
 	test("a blocked danger control raises to danger from write too", async ({
 		page,
 	}) => {
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 		await raiseTo(page, "write");
 
-		await page.getByLabel("Email").fill("from-write@example.invalid");
+		await page.getByLabel("Add email to Admin").fill("from-write@example.invalid");
 		await page.getByRole("button", { name: "Add admin" }).click();
 		const dialog = page.getByRole("dialog");
 		await expect(dialog).toContainText("This action needs danger mode");
@@ -405,8 +405,8 @@ test.describe("safety modes", () => {
 		await page.route("**/api/safety/raise", (route) =>
 			route.fulfill({ status: 500, json: { title: "no" } }),
 		);
-		await page.goto("/settings/admins");
-		await page.getByLabel("Email").fill("refused@example.invalid");
+		await page.goto("/settings/permissions");
+		await page.getByLabel("Add email to Admin").fill("refused@example.invalid");
 		await page.getByRole("button", { name: "Add admin" }).click();
 		await page
 			.getByRole("dialog")
@@ -417,14 +417,14 @@ test.describe("safety modes", () => {
 		await page.getByRole("button", { name: "Close" }).click();
 		await expect(modeControl(page)).toContainText(/read-only/i);
 		await expect(page.getByText("refused@example.invalid")).toHaveCount(0);
-		await expect(page.getByLabel("Email")).toHaveValue("refused@example.invalid");
+		await expect(page.getByLabel("Add email to Admin")).toHaveValue("refused@example.invalid");
 	});
 
 	test("a double click on a blocked control carries the action out once", async ({
 		page,
 	}) => {
-		await page.goto("/settings/admins");
-		await page.getByLabel("Email").fill("twice@example.invalid");
+		await page.goto("/settings/permissions");
+		await page.getByLabel("Add email to Admin").fill("twice@example.invalid");
 		await page.getByRole("button", { name: "Add admin" }).dblclick();
 
 		await expect(page.getByRole("dialog")).toHaveCount(1);
@@ -448,7 +448,7 @@ test.describe("safety modes", () => {
 			await route.continue();
 		});
 
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 		await modeControl(page).click();
 		await page.getByRole("menuitem", { name: /write/i }).click();
 		await expect(modeControl(page)).toContainText(/write/i);
@@ -533,11 +533,14 @@ test.describe("safety modes", () => {
 		page,
 	}) => {
 		// Danger: adding an allow-list entry.
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 		const dangerous = page.getByRole("button", { name: "Add admin" });
 		await expect(dangerous).toHaveCSS("background-image", /rgba\(239, 83, 80/);
 		await expect(dangerous).toHaveCSS("filter", "grayscale(0.8)");
-		await page.getByLabel(/requires danger mode/i).first().hover();
+		await page
+			.getByLabel(/requires danger mode/i)
+			.filter({ has: dangerous })
+			.hover();
 		await expect(dangerous).toHaveCSS("filter", "grayscale(0)");
 
 		// Write: saving a snippet, in the write grade's colour.
@@ -550,7 +553,7 @@ test.describe("safety modes", () => {
 	test("the mode control and its menu wear each mode's stripe", async ({
 		page,
 	}) => {
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 
 		// Read-only is plain; each raised mode in the menu carries its stripe,
 		// muted until the pointer is on it.
@@ -582,9 +585,9 @@ test.describe("safety modes", () => {
 	test("a blocked control is reachable from the keyboard, and Enter in its form offers the raise", async ({
 		page,
 	}) => {
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 		const add = page.getByRole("button", { name: "Add admin" });
-		const email = page.getByLabel("Email");
+		const email = page.getByLabel("Add email to Admin");
 		const dialog = page.getByRole("dialog");
 		const confirm = dialog.getByRole("button", { name: "Continue in danger mode" });
 
@@ -615,6 +618,35 @@ test.describe("safety modes", () => {
 		await confirm.click();
 		await expect(page.getByText("keyboard@example.invalid")).toBeVisible();
 	});
+
+	for (const [level, offered, withheld] of [
+		["admin", ["read-only", "write", "danger"], []],
+		["pm", ["read-only", "write"], ["danger"]],
+		["all", ["read-only"], ["write", "danger"]],
+	] as const) {
+		test(`the mode control offers ${offered.join(", ")} at ${level}`, async ({
+			page,
+		}) => {
+			await page.route("**/api/commons/current_user_level", (route) =>
+				route.fulfill({ json: level }),
+			);
+			await page.goto("/versions");
+			await modeControl(page).click();
+			const items = page.getByRole("menuitem");
+			// The level answers after the page draws; wait for its options.
+			await expect(items).toHaveCount(offered.length);
+			for (const mode of offered) {
+				await expect(
+					page.getByRole("menuitem", { name: new RegExp(mode, "i") }),
+				).toBeVisible();
+			}
+			for (const mode of withheld) {
+				await expect(
+					page.getByRole("menuitem", { name: new RegExp(mode, "i") }),
+				).toHaveCount(0);
+			}
+		});
+	}
 
 	test("a control withheld from a non-administrator is absent, not blocked", async ({
 		page,
@@ -681,7 +713,7 @@ test.describe("safety modes, below a control that is disabled for its own reason
 test.describe("safety modes, raised", () => {
 	test("a usable control is drawn in its grade's colour", async ({ page }) => {
 		// Danger: adding an allow-list entry, in the danger colour.
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 		await expect(page.getByRole("button", { name: "Add admin" })).toHaveCSS(
 			"background-color",
 			"rgb(211, 47, 47)",

@@ -2856,3 +2856,52 @@ export async function seedMachinePackages(
 		);
 	}
 }
+
+/** The login the e2e stack's debug build acts as, an administrator. */
+export const DEV_LOGIN = "admin@localhost";
+
+/** Put `login` on a level's list. */
+export async function seedAccessListEntry(
+	sql: Sql,
+	level: "admin" | "pm",
+	login: string,
+): Promise<void> {
+	await sql.query(
+		"INSERT INTO access_list_entries (level, login) VALUES ($1::access_level, lower($2)) ON CONFLICT DO NOTHING",
+		[level, login],
+	);
+}
+
+/** Empty both levels' lists. */
+export async function resetAccessLists(sql: Sql): Promise<void> {
+	await sql.query("TRUNCATE access_list_entries");
+}
+
+/** Choose `path` as `login`'s homepage. */
+export async function seedHomepage(
+	sql: Sql,
+	path: string,
+	login: string = DEV_LOGIN,
+): Promise<void> {
+	await sql.query(
+		"INSERT INTO operator_homepages (login, path) VALUES (lower($1), $2) ON CONFLICT (login) DO UPDATE SET path = EXCLUDED.path",
+		[login, path],
+	);
+}
+
+/** The homepage `login` has chosen, or `null`. */
+export async function chosenHomepage(
+	sql: Sql,
+	login: string = DEV_LOGIN,
+): Promise<string | null> {
+	const rows = await sql.query<{ path: string }>(
+		"SELECT path FROM operator_homepages WHERE login = lower($1)",
+		[login],
+	);
+	return rows[0]?.path ?? null;
+}
+
+/** Clear every operator's homepage choice. */
+export async function resetHomepages(sql: Sql): Promise<void> {
+	await sql.query("TRUNCATE operator_homepages");
+}

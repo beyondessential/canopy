@@ -47,13 +47,13 @@ test.describe("sidebar navigation", () => {
 	test("expands the current section and toggles others in place", async ({
 		page,
 	}) => {
-		await page.goto("/settings/admins");
+		await page.goto("/settings/permissions");
 
 		const settingsPages = sidebar(page).getByRole("group", {
 			name: "Settings pages",
 		});
 		await expect(settingsPages).toBeVisible();
-		await expect(sidebarLink(page, "Admins")).toHaveAttribute(
+		await expect(sidebarLink(page, "Permissions")).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
@@ -62,7 +62,7 @@ test.describe("sidebar navigation", () => {
 
 		await page.getByRole("button", { name: "Expand Fleet" }).click();
 		await expect(fleetPages).toBeVisible();
-		await expect(page).toHaveURL(/\/settings\/admins$/);
+		await expect(page).toHaveURL(/\/settings\/permissions$/);
 
 		await page.getByRole("button", { name: "Collapse Fleet" }).click();
 		await expect(fleetPages).toHaveCount(0);
