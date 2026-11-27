@@ -627,4 +627,32 @@ test.describe("status page", () => {
 		await expect(page).toHaveURL(/\/fleet\/figures$/);
 		await expect(page.getByRole("group", { name: "Tamanu" })).toBeVisible();
 	});
+
+	/// The machine enclosure's wash is mixed from the palette, so it follows
+	/// the mode. A fixed rgba held the light theme's orange and red on a dark
+	/// card, where nobody looking at the light theme would ever see it.
+	// spec: CHK#presentation
+	for (const [scheme, degraded, down] of [
+		["light", "rgba(237, 108, 2, 0.1)", "rgba(211, 47, 47, 0.12)"],
+		["dark", "rgba(255, 167, 38, 0.1)", "rgba(244, 67, 54, 0.12)"],
+	] as const) {
+		test(`the health legend's enclosures take their wash from the ${scheme} palette`, async ({
+			page,
+		}) => {
+			await page.emulateMedia({ colorScheme: scheme });
+			await page.goto("/status");
+
+			const pill = (title: string) =>
+				page.locator(`[aria-label="${title}"], [title="${title}"]`).first();
+
+			await expect(pill("Machine's own checks warning")).toHaveCSS(
+				"background-color",
+				degraded,
+			);
+			await expect(pill("Machine unreachable")).toHaveCSS(
+				"background-color",
+				down,
+			);
+		});
+	}
 });

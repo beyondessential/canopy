@@ -231,7 +231,7 @@ function MachineBlock({
 								// between two workloads on one box is subordinate
 								// to the break between the box and its workloads.
 								...(index > 0
-									? { borderTop: 1, borderColor: DIVIDER_LIGHT }
+									? { borderTop: 1, borderColor: dividerLight }
 									: {}),
 							}}
 						>
@@ -270,7 +270,9 @@ function MachineBlock({
 	);
 }
 
-const DIVIDER_LIGHT = "rgba(0, 0, 0, 0.06)";
+/// Half the weight of a divider, and mixed from it, so the rule keeps its
+/// place in the hierarchy on a dark card instead of being black on near-black.
+const dividerLight = (theme: Theme) => alpha(theme.palette.divider, 0.06);
 
 /// The wash over each box in an environment while a window over it holds:
 /// light enough that the cards inside stay readable through it.

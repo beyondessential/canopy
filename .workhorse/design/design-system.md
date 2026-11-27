@@ -202,4 +202,4 @@ These exist in the shipped UI and are not to be copied into new work.
 - Title case in a few labels: "Server Versions", "Delete Snippet", "Extra Data", "PSQL Snippets", "SQL Playground".
 - "server" where the subject is an application or a machine ("N servers" in `GroupShorty`, "Server reports OK" in `HealthChip`).
 - A handful of `*Outlined` icons among the filled set.
-- Colours fixed to light mode: the machine enclosure's degraded and down washes (`MachineEnclosure`), and a fixed-black tint in `GroupTree`.
+- A hard-coded colour where a palette key would do. The warning green in `StatusDot` and the chart series green in `RunThroughputChart` are the deliberate exceptions, and each says why.

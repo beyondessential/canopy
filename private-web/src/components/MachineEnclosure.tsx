@@ -18,10 +18,20 @@ import { type HealthState, type ShortStatus, maintenanceLine } from "../types";
 // box, and everything on it is unreachable with it.
 // spec: CHK#presentation
 const STATES = {
-	fine: { border: "divider", fill: "transparent" },
-	degraded: { border: "warning.main", fill: "rgba(237, 108, 2, 0.10)" },
-	down: { border: "error.main", fill: "rgba(211, 47, 47, 0.12)" },
+	fine: { border: "divider", wash: null },
+	degraded: { border: "warning.main", wash: ["warning", 0.1] },
+	down: { border: "error.main", wash: ["error", 0.12] },
 } as const;
+
+/// The wash inside the pill, mixed from the state's own palette colour so it
+/// follows the mode. A fixed rgba would hold the light theme's orange and red
+/// on a dark card, where the palette has lighter ones that read against it.
+function stateWash(theme: Theme, state: keyof typeof STATES): string {
+	const { wash } = STATES[state];
+	if (!wash) return "transparent";
+	const [colour, opacity] = wash;
+	return alpha(theme.palette[colour].main, opacity);
+}
 
 /// A box that has never reported is drawn empty, in either of its marks: the
 /// surface it sits on, edged with a dotted line, so it reads as not yet filled
@@ -249,7 +259,7 @@ export default function MachineEnclosure({
 						: {
 								border: 1,
 								borderColor: STATES[state].border,
-								bgcolor: STATES[state].fill,
+								bgcolor: (theme: Theme) => stateWash(theme, state),
 							}),
 					backgroundImage: (theme) =>
 						ownWindow ? ownWindowStripes(theme, settling) : "none",
