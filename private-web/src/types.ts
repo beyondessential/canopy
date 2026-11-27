@@ -168,6 +168,7 @@ export type FacilityServerStatus = Solidify<Schemas["FacilityServerStatus"]>;
 export type ServerGroupCard = Solidify<Schemas["ServerGroupCard"]>;
 export type ServerGroup = Solidify<Schemas["ServerGroup"]>;
 export type GroupDetail = Solidify<Schemas["GroupDetail"]>;
+export type NamedProjectDetails = Solidify<Schemas["NamedProjectDetails"]>;
 export type AnsibleVariable = Solidify<Schemas["AnsibleVariable"]>;
 export type AnsibleLease = Solidify<Schemas["AnsibleLease"]>;
 export type AnsibleVariableView = Solidify<Schemas["AnsibleVariableView"]>;
