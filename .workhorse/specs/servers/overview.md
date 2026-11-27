@@ -98,7 +98,7 @@ A **machine** carries the name its operator gave it, its identity, its group, it
 An **application** carries its type, its rank, its optional name, its public name, the URL it is reached at, the DNS names it serves at and the DNS name grants and pause state that work from them, its notes and tags, and how long it may be silent before it is considered unreachable.
 
 A DNS name an application serves at is held by that application alone across the fleet, which is what lets a request about a DNS name resolve to one application on a machine hosting several (see [DNS](../public-server/dns-names.md), "Declared DNS names").
-Its URL is where an operator reaches it, which is a presentation concern rather than an authorisation one (see [SVC](../private-server/service-links.md)).
+Its URL is where an operator reaches it (see [SVC](../private-server/service-links.md)), and the origin a [sign-in to Tamanu](../private-server/tamanu-sign-in.md) is sent to.
 
 Both carry tags and effective billing labels, so a check filed against either can be graded by policy rules against the tags of its own target.
 An application's type is among the reserved read-only tags on applications, together with the software and role it decomposes into (see [APP](application-types.md)), and appears on no machine, not being a property of a box.
