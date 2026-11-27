@@ -66,6 +66,7 @@ Canopy mints a short-lived token for the signed-in PM and links to `https://<tam
 The list of groups with production environments, the PM's own groups in a section at the top and highlighted, a search box across groups, and each group's details from A and B (and D's sign-in links once D lands).
 
 - A tab of the fleet view at `/fleet/pm`, beside `archived` and `figures`.
+- Labelled "Projects" in the sidebar.
 - "My groups" are the groups naming the signed-in person as PM in charge, matched on their tailnet login.
 
 ### Homepage choice
@@ -142,5 +143,5 @@ In `.workhorse/design/mockups/v6/`:
 - [x] F: two grants naming different `home`s: decided (see F).
 - [x] F: keep reading the policy file until the operator's ingress can forward caps.
 - [x] Homepage: any page, set by a home toggle in the sidebar's top-right corner.
+- [x] 12. The PM view's sidebar label is "Projects".
 - [x] 14. Clicking the toggle on your chosen homepage clears the choice.
-- [ ] 12. Sidebar label for the PM view ("Projects" in the mockups).
