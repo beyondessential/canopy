@@ -116,6 +116,21 @@ struct Cache {
 	/// value in place, so a control-plane outage never withdraws a level or a
 	/// default homepage.
 	policy: Option<PolicyRead>,
+	/// The tailnet's members other than suspended ones, as of the last
+	/// successful read. Empty until a read succeeds; a failed read leaves the
+	/// previous list in place.
+	users: Vec<TailnetUser>,
+}
+
+/// A member of the tailnet, as the control plane lists them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TailnetUser {
+	/// The login, as the control plane spells it.
+	pub login: String,
+	/// The display name.
+	pub name: String,
+	/// The profile picture's address, where they have one.
+	pub profile_pic: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -187,6 +202,38 @@ struct DeviceRecord {
 	key_expiry_disabled: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct UsersResponse {
+	users: Vec<UserRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UserRecord {
+	#[serde(rename = "loginName")]
+	login_name: String,
+	#[serde(rename = "displayName", default)]
+	display_name: String,
+	#[serde(rename = "profilePicUrl", default)]
+	profile_pic_url: Option<String>,
+	#[serde(default)]
+	status: String,
+}
+
+impl UsersResponse {
+	/// The users listed, leaving out suspended ones.
+	fn members(self) -> Vec<TailnetUser> {
+		self.users
+			.into_iter()
+			.filter(|user| user.status != "suspended")
+			.map(|user| TailnetUser {
+				login: user.login_name,
+				name: user.display_name,
+				profile_pic: user.profile_pic_url.filter(|url| !url.is_empty()),
+			})
+			.collect()
+	}
+}
+
 impl TailnetDirectory {
 	/// Build a directory and kick off the background refresh loop. The
 	/// first refresh is awaited synchronously so the directory has a
@@ -214,6 +261,11 @@ impl TailnetDirectory {
 		if let Err(e) = directory.refresh_policy().await {
 			tracing::warn!(error = %e, "initial tailnet policy read failed; levels come from the access lists alone");
 		}
+		// Non-fatal too: without the users read (e.g. the OAuth client lacks
+		// `users:read`) no tailnet member is suggested.
+		if let Err(e) = directory.refresh_users().await {
+			tracing::warn!(error = %e, "initial tailnet users read failed; no tailnet member is suggested");
+		}
 
 		let bg = directory.clone();
 		tokio::spawn(async move {
@@ -225,6 +277,9 @@ impl TailnetDirectory {
 				}
 				if let Err(e) = bg.refresh_policy().await {
 					tracing::warn!(error = %e, "tailnet policy refresh failed");
+				}
+				if let Err(e) = bg.refresh_users().await {
+					tracing::warn!(error = %e, "tailnet users refresh failed");
 				}
 			}
 		});
@@ -263,6 +318,12 @@ impl TailnetDirectory {
 				pm: Vec::new(),
 			},
 		}
+	}
+
+	/// The tailnet's members other than suspended ones, as of the last
+	/// successful read.
+	pub async fn users(&self) -> Vec<TailnetUser> {
+		self.inner.cache.read().await.users.clone()
 	}
 
 	/// Lookup a tailnet IP. Returns `None` for unknown IPs. On a miss the
@@ -504,6 +565,57 @@ impl TailnetDirectory {
 		Ok(())
 	}
 
+	/// Force-refresh the tailnet's members.
+	pub async fn refresh_users(&self) -> Result<()> {
+		let token = self.access_token().await?;
+		let url = format!(
+			"{}/api/v2/tailnet/{}/users?type=member",
+			self.inner.config.api_base.trim_end_matches('/'),
+			self.inner.config.tailnet,
+		);
+		let resp = self
+			.inner
+			.client
+			.get(&url)
+			.bearer_auth(&token)
+			.send()
+			.await
+			.map_err(|e| AppError::custom(format!("tailscale users request: {e}")))?;
+
+		if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+			self.inner.oauth.write().await.token = None;
+			let token = self.access_token().await?;
+			let retry = self
+				.inner
+				.client
+				.get(&url)
+				.bearer_auth(&token)
+				.send()
+				.await
+				.map_err(|e| AppError::custom(format!("tailscale users retry: {e}")))?;
+			return self.ingest_users(retry).await;
+		}
+
+		self.ingest_users(resp).await
+	}
+
+	async fn ingest_users(&self, resp: reqwest::Response) -> Result<()> {
+		if !resp.status().is_success() {
+			let status = resp.status();
+			let body = resp.text().await.unwrap_or_default();
+			return Err(AppError::custom(format!(
+				"tailscale users: {status}: {body}"
+			)));
+		}
+		let parsed: UsersResponse = resp
+			.json()
+			.await
+			.map_err(|e| AppError::custom(format!("decoding users response: {e}")))?;
+
+		self.inner.cache.write().await.users = parsed.members();
+		Ok(())
+	}
+
 	async fn access_token(&self) -> Result<String> {
 		{
 			let state = self.inner.oauth.read().await;
@@ -574,6 +686,7 @@ impl TailnetDirectory {
 			by_node_id,
 			last_refresh: Some(Instant::now()),
 			policy: None,
+			users: Vec::new(),
 		};
 		Self {
 			inner: Arc::new(Inner {
@@ -609,6 +722,18 @@ impl TailnetDirectory {
 			.expect("a fresh directory is not locked")
 			.policy = Some(PolicyRead::now(&policy));
 		directory
+	}
+
+	/// This test directory, with its tailnet's members already read
+	/// successfully. Its API is unreachable, so [`Self::refresh_users`] fails
+	/// as a control-plane outage would.
+	pub fn with_users(self, users: impl IntoIterator<Item = TailnetUser>) -> Self {
+		self.inner
+			.cache
+			.try_write()
+			.expect("a fresh directory is not locked")
+			.users = users.into_iter().collect();
+		self
 	}
 }
 
@@ -699,6 +824,76 @@ mod tests {
 			Some("/fleet/pm"),
 		);
 		assert_eq!(dir.policy_summary().await.read_at, before);
+	}
+
+	// spec: GRP#project-details
+	#[test]
+	fn a_users_read_leaves_out_suspended_members() {
+		let read: UsersResponse = serde_json::from_value(serde_json::json!({
+			"users": [
+				{
+					"id": "u1",
+					"displayName": "Pat Lee",
+					"loginName": "pat@bes.au",
+					"profilePicUrl": "https://example.com/pat.png",
+					"tailnetId": "t1",
+					"created": "2024-01-01T00:00:00Z",
+					"type": "member",
+					"role": "member",
+					"status": "active",
+					"deviceCount": 2,
+					"lastSeen": "2026-11-01T00:00:00Z",
+					"currentlyConnected": true,
+				},
+				{
+					"id": "u2",
+					"displayName": "Sam Roe",
+					"loginName": "sam@bes.au",
+					"profilePicUrl": "",
+					"status": "idle",
+				},
+				{
+					"id": "u3",
+					"displayName": "Gone Away",
+					"loginName": "gone@bes.au",
+					"status": "suspended",
+				},
+			],
+		}))
+		.expect("a users response parses");
+
+		assert_eq!(
+			read.members(),
+			vec![
+				TailnetUser {
+					login: "pat@bes.au".into(),
+					name: "Pat Lee".into(),
+					profile_pic: Some("https://example.com/pat.png".into()),
+				},
+				TailnetUser {
+					login: "sam@bes.au".into(),
+					name: "Sam Roe".into(),
+					profile_pic: None,
+				},
+			],
+		);
+	}
+
+	// spec: GRP#project-details
+	#[tokio::test]
+	async fn a_failed_users_read_keeps_the_last_good_list() {
+		let pat = TailnetUser {
+			login: "pat@bes.au".into(),
+			name: "Pat Lee".into(),
+			profile_pic: None,
+		};
+		let dir = TailnetDirectory::for_test([]).with_users([pat.clone()]);
+
+		dir.refresh_users()
+			.await
+			.expect_err("the test directory's API is unreachable");
+
+		assert_eq!(dir.users().await, vec![pat]);
 	}
 
 	#[test]
