@@ -1,8 +1,34 @@
 # Sourced by every entry point.
 
-# The rig runs steps with a home of its own, so rustup installs the toolchain
-# there once, without docs, and later steps reuse it.
-if command -v rustup >/dev/null 2>&1; then
+# The rig runs steps with a home of its own, so the Rust tooling is pointed back
+# at the person's: their cargo config (a compiler wrapper, say), registry cache
+# and toolchains. Variables they set themselves come through env.fromPerson and
+# win; these are the defaults for the ones they leave unset.
+if [ -n "${RIG_PERSON_HOME:-}" ]; then
+  if [ -z "${CARGO_HOME:-}" ] && [ -d "$RIG_PERSON_HOME/.cargo" ]; then
+    export CARGO_HOME="$RIG_PERSON_HOME/.cargo"
+  fi
+  if [ -z "${RUSTUP_HOME:-}" ] && [ -d "$RIG_PERSON_HOME/.rustup" ]; then
+    export RUSTUP_HOME="$RIG_PERSON_HOME/.rustup"
+  fi
+
+  # sccache keeps its cache under the cache home, which is the rig's own unless
+  # the person set theirs. A server the rig starts is shared with the person's
+  # own builds, so it caches where theirs would.
+  case "${XDG_CACHE_HOME:-$HOME/.cache}" in
+    "$HOME"/*) person_cache="$RIG_PERSON_HOME/.cache" ;;
+    *) person_cache="$XDG_CACHE_HOME" ;;
+  esac
+  export SCCACHE_DIR="${SCCACHE_DIR:-$person_cache/sccache}"
+  if [ -z "${SCCACHE_CONF:-}" ] && [ -f "$RIG_PERSON_HOME/.config/sccache/config" ]; then
+    export SCCACHE_CONF="$RIG_PERSON_HOME/.config/sccache/config"
+  fi
+fi
+
+# With the person's rustup, rust-toolchain.toml picks the toolchain from those
+# they have, and the rig leaves them as they are. Without it, rustup installs
+# stable into the rig's home once, without docs, and later steps reuse it.
+if [ -z "${RUSTUP_HOME:-}" ] && command -v rustup >/dev/null 2>&1; then
   rustup toolchain install stable --profile minimal --no-self-update >&2
   export RUSTUP_TOOLCHAIN=stable
 fi
@@ -12,21 +38,6 @@ export SKIP_FRONTEND_BUILD=1
 export CARGO_TERM_COLOR=never
 # A rig build is built once, and sccache cannot cache an incremental compile.
 export CARGO_INCREMENTAL=0
-
-# sccache is the machine's, shared with every build on it, only when the machine
-# says where its cache is (SCCACHE_DIR, given to the rig through passEnv).
-# Otherwise sccache, found through a parent directory's cargo config, would start
-# a server of the rig's own on the shared port, caching into the rig's home, and
-# the person's own builds would then use that server.
-case "${RUSTC_WRAPPER:-}" in
-  "" | *sccache*)
-    if [ -n "${SCCACHE_DIR:-}" ] && command -v sccache >/dev/null 2>&1; then
-      export RUSTC_WRAPPER=sccache
-    else
-      export RUSTC_WRAPPER=
-    fi
-    ;;
-esac
 
 # What the seed step leaves for the lease: the seeded device's certificate.
 RIG_OUT="$RIG_SOURCE/.rig-out"

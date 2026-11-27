@@ -11,6 +11,14 @@
     "memoryMb": { "deps": 8192, "build": 8192, "serve": 1024 }
   },
   "serve": { "ready": { "path": "/healthz", "timeoutSeconds": 120 } },
+  "env": {
+    "fromPerson": [
+      "CARGO_HOME", "RUSTUP_HOME", "RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WRAPPER",
+      "SCCACHE_DIR", "SCCACHE_CACHE_SIZE", "SCCACHE_CONF", "SCCACHE_SERVER_PORT", "SCCACHE_IDLE_TIMEOUT",
+      "XDG_CACHE_HOME", "npm_config_cache", "NPM_CONFIG_CACHE"
+    ],
+    "personHome": true
+  },
   "provides": {
     "baseUrl": "http://127.0.0.1:{port}",
     "accounts": [
