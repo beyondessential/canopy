@@ -25,6 +25,24 @@ if [ -n "${RIG_PERSON_HOME:-}" ]; then
   fi
 fi
 
+# A server a compile starts lives in the step's cgroup and goes when the step
+# ends, under the person's own builds that share it. So where sccache is the
+# wrapper, the server is started in a scope of its own; one already running is
+# left alone.
+uses_sccache() {
+  case "${RUSTC_WRAPPER-unset}" in
+    *sccache*) return 0 ;;
+    unset) ;;
+    *) return 1 ;;
+  esac
+  case "${CARGO_BUILD_RUSTC_WRAPPER:-}" in *sccache*) return 0 ;; esac
+  grep -qsE '^[[:space:]]*rustc-wrapper[[:space:]]*=.*sccache' \
+    "${CARGO_HOME:-$HOME/.cargo}/config.toml" "${CARGO_HOME:-$HOME/.cargo}/config"
+}
+if uses_sccache && command -v sccache >/dev/null 2>&1 && command -v systemd-run >/dev/null 2>&1; then
+  systemd-run --user --scope --collect --quiet sccache --start-server >/dev/null 2>&1 || true
+fi
+
 # With the person's rustup, rust-toolchain.toml picks the toolchain from those
 # they have, and the rig leaves them as they are. Without it, rustup installs
 # stable into the rig's home once, without docs, and later steps reuse it.

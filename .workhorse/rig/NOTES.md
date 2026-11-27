@@ -15,7 +15,8 @@ production build of the SPA, on 127.0.0.1. The device API is the private-server'
 Entry points:
 
 - `deps`: `npm ci` in `private-web/`, and a debug `cargo build` of the three binaries, once per
-  `Cargo.lock` and `package-lock.json`. Each build takes a copy of that `target/` (`mode` is
+  `Cargo.lock`, `package-lock.json`, `rust-toolchain.toml` and `lib.sh` (which sets up the toolchain
+  and cache, and so decides the paths a dependency build is fingerprinted by). Each build takes a copy of that `target/` (`mode` is
   `clone`), so it recompiles only the workspace's own crates.
 - `build`: `npm run build` in `private-web/`, then the debug `private-server`, `migrate` and
   `seed`. A debug build because the debug identity, the fake ACME authority and the seeder are
@@ -35,7 +36,7 @@ Rust tooling is the person's: the recipe takes `CARGO_HOME`, `RUSTUP_HOME`, the 
 and sccache's variables from their environment (`env.fromPerson`), and where they are unset points
 them at `.cargo`, `.rustup` and sccache's cache under the person's home (`env.personHome`). So a rig
 build uses their cargo config, registry cache, toolchains and compiler cache, and an sccache
-server it starts caches where the person's own builds do. Without a rustup under the person's home,
+server the rig needs is started in a systemd scope of its own, so it outlives the step and is not charged to it, and caches where the person's own builds do. Without a rustup under the person's home,
 rustup installs a minimal stable toolchain into the rig's home on first use. Incremental
 compilation is off in every step, since a rig build is built once and sccache cannot cache it.
 

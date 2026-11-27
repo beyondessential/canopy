@@ -2,7 +2,7 @@
   "version": 1,
   "name": "canopy",
   "deps": {
-    "lockfiles": ["Cargo.lock", "private-web/package-lock.json"],
+    "lockfiles": ["Cargo.lock", "private-web/package-lock.json", "rust-toolchain.toml", ".workhorse/rig/lib.sh"],
     "link": ["private-web/node_modules", "target"],
     "mode": "clone"
   },
