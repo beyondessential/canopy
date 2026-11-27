@@ -8,7 +8,7 @@ Canopy issues a short-lived token naming the signed-in person, from the operator
 
 Tamanu's half, accepting the token and mapping the person to a Tamanu user, is a card of its own in Tamanu. A root password kept in Bitwarden covers the rare access that needs one.
 
-## Add the support access level
+## Add the support access level · B7
 
 Adds support between admin and PM on the permissions page's ladder, reached by its own grant key or email list like the other levels. Support does the day-to-day fleet work on machines, applications and groups, and saves and deletes bestool snippets; admin is support plus Canopy's own settings, some of which only admins may see.
 
