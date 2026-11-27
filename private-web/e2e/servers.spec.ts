@@ -32,6 +32,7 @@ test.describe("servers list page", () => {
 			"aria-current",
 			"page",
 		);
+		await expect(sidebarLink(page, "Projects")).toBeVisible();
 		await expect(sidebarLink(page, "Archived")).toBeVisible();
 		await expect(sidebarLink(page, "Figures")).toBeVisible();
 
@@ -41,7 +42,7 @@ test.describe("servers list page", () => {
 		await expect(sidebarLink(page, "Ungrouped")).toHaveCount(0);
 		await expect(
 			sidebar(page).getByRole("group", { name: "Fleet pages" }).getByRole("link"),
-		).toHaveCount(3);
+		).toHaveCount(4);
 
 		// The group's name shows as a link to its detail page.
 		await expect(
@@ -78,7 +79,7 @@ test.describe("server detail page", () => {
 		// The tree at the foot of the page links the same address on this
 		// application's own row.
 		const hostLink = page
-			.getByRole("link", { name: new RegExp(server.host) })
+			.getByRole("link", { name: new RegExp(server.host!) })
 			.first();
 		await expect(hostLink).toBeVisible();
 
