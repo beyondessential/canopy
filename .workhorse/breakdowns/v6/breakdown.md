@@ -2,7 +2,7 @@
 
 Parts of the PM interface that move separately from this card, which builds the Projects view, the PM details on a group, the homepage choice and the permissions page.
 
-## Sign in to Tamanu through Canopy
+## Sign in to Tamanu through Canopy · C7
 
 Canopy issues a short-lived token naming the signed-in person, from the operator UI, and the Projects view links to each Tamanu's login with it, so a PM reaches Tamanu without a password. Canopy is already an OIDC issuer, but its tokens name machines and applications; this adds tokens that name a person. Every issuance is audited, giving a per-person access log.
 
