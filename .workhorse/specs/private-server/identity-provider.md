@@ -7,7 +7,7 @@ id: IDP
 Canopy is an OpenID Connect issuer for its fleet.
 It publishes the keys its identity tokens are signed with, keeps the register of relying parties those tokens are issued for, and holds which machines and applications may obtain tokens for each.
 How a machine requests a token, and what the token carries, are in [IDT](../public-server/identity-tokens.md).
-The same keys sign the tokens a person signs in to Tamanu with (see [TSI](tamanu-sign-in.md)).
+The same keys sign the tokens a person signs in to Tamanu with (see [TSI](tamanu-sign-in.md)), and wherever this spec speaks of the tokens a key signed, it means both kinds.
 
 ## Configuration
 
@@ -55,7 +55,7 @@ A key older than the key signing never signs again, so a removable key can be ta
 Each key is presented as signing, published, or removable, a key in any of the other states being presented as published.
 A key not yet served is a fault, raised by the self-alert below, and a key stays retired for no longer than a token lifetime, so neither needs a presentation of its own.
 Each key is also presented with when it was first served, when it last signed, and how many tokens it signed in the last thirty days, to two significant figures.
-Those figures count identity tokens and sign-in tokens alike, and are derived from the audit log's record of issuing each (see [IDT](../public-server/identity-tokens.md), "Recording", and [TSI](tamanu-sign-in.md), "Recording").
+Those figures are derived from the audit log's record of issuing each kind (see [IDT](../public-server/identity-tokens.md), "Recording", and [TSI](tamanu-sign-in.md), "Recording").
 
 When the documents served at the issuer cannot be fetched, name a different issuer, or carry a key set that differs from the configured keys, or when no configured key can sign, Canopy raises a self-alert (see [SELF](self-alerts.md)).
 
