@@ -39,6 +39,10 @@ server it starts caches where the person's own builds do. Without a rustup under
 rustup installs a minimal stable toolchain into the rig's home on first use. Incremental
 compilation is off in every step, since a rig build is built once and sccache cannot cache it.
 
+A machine-wide jobserver (steve, or a make that set one up) reaches the rig through `MAKEFLAGS`,
+which Cargo reads, so rig builds take their jobs from the same pool as everything else on the
+machine.
+
 Limits:
 
 - Only the foreground server is watched. If the header-trusting server exits, the lease stays up

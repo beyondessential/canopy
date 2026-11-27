@@ -15,7 +15,7 @@
     "fromPerson": [
       "CARGO_HOME", "RUSTUP_HOME", "RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WRAPPER",
       "SCCACHE_DIR", "SCCACHE_CACHE_SIZE", "SCCACHE_CONF", "SCCACHE_SERVER_PORT", "SCCACHE_IDLE_TIMEOUT",
-      "XDG_CACHE_HOME", "npm_config_cache", "NPM_CONFIG_CACHE"
+      "MAKEFLAGS", "MFLAGS", "XDG_CACHE_HOME", "npm_config_cache", "NPM_CONFIG_CACHE"
     ],
     "personHome": true
   },
