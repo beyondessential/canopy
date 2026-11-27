@@ -10,7 +10,7 @@ Tamanu's half, accepting the token and mapping the person to a Tamanu user, is a
 
 ## Add the support access level
 
-Adds support between admin and PM on the permissions page's ladder, reached by its own grant key or email list like the other levels. Support does the day-to-day fleet work on machines, applications and groups; admin is support plus Canopy's own settings, some of which only admins may see.
+Adds support between admin and PM on the permissions page's ladder, reached by its own grant key or email list like the other levels. Support does the day-to-day fleet work on machines, applications and groups, and saves and deletes bestool snippets; admin is support plus Canopy's own settings, some of which only admins may see.
 
 That splits today's single admin gate into two grades: every write handler is placed as support or admin, and the admin-only settings pages gain a read gate. Where the support/admin line falls is this card's to decide, along with the tailnet policy change that gives people support.
 

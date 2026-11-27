@@ -55,6 +55,11 @@
 - [ ] A query string on the page isn't kept in the chosen homepage (verifies spec: HOME)
 - [ ] The toggle works in read-only mode (verifies spec: HOME, SAFE)
 
+## Bestool snippets
+
+- [ ] An all-level caller lists and opens snippets but cannot save or delete one; an admin can (verifies spec: ADM)
+- [ ] Deleting a snippet without a tailnet identity is refused (verifies spec: ADM)
+
 ## Safety modes
 
 - [ ] The mode control offers write but not danger to a PM, both to an admin, and neither to an all-level caller (verifies spec: SAFE)

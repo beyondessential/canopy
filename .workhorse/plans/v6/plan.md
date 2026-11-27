@@ -63,6 +63,10 @@ The groups are ordered by name. Splitting them into the viewer's and everyone el
 
 `SafetyModeControl` offers write from PM up and danger only to admins. Nothing changes server-side: a raise authorises nothing, and handlers are gated by level.
 
+### Bestool snippets
+
+Saving and deleting a snippet take `TailscaleAdmin`, like every other write; reading stays open to all. `delete_snippet` takes no identity extractor today, which this also fixes.
+
 ### Settings
 
 `/settings/admins` becomes `/settings/permissions` ("Permissions" under Access), with a redirect from the old path. `Admins.tsx` becomes `Permissions.tsx`.
@@ -103,6 +107,7 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 - [ ] `server_groups::update_project_details` and the details on `get`
 - [ ] `server_groups::projects`
 - [ ] `fns/homepage.rs`
+- [ ] `bestool::save_snippet` and `delete_snippet` take `TailscaleAdmin`
 - [ ] `just gen-openapi`
 
 ### SPA
