@@ -10,18 +10,26 @@ fi
 # build.rs would otherwise run npm ci and the SPA build inside cargo.
 export SKIP_FRONTEND_BUILD=1
 export CARGO_TERM_COLOR=never
+# A rig build is built once, and sccache cannot cache an incremental compile.
+export CARGO_INCREMENTAL=0
 
-# What the build and seed leave for the lease: binaries, when target is shared
-# with other builds (see build), and the seeded device's certificate.
+# sccache is the machine's, shared with every build on it, only when the machine
+# says where its cache is (SCCACHE_DIR, given to the rig through passEnv).
+# Otherwise sccache, found through a parent directory's cargo config, would start
+# a server of the rig's own on the shared port, caching into the rig's home, and
+# the person's own builds would then use that server.
+case "${RUSTC_WRAPPER:-}" in
+  "" | *sccache*)
+    if [ -n "${SCCACHE_DIR:-}" ] && command -v sccache >/dev/null 2>&1; then
+      export RUSTC_WRAPPER=sccache
+    else
+      export RUSTC_WRAPPER=
+    fi
+    ;;
+esac
+
+# What the seed step leaves for the lease: the seeded device's certificate.
 RIG_OUT="$RIG_SOURCE/.rig-out"
-
-bin() {
-  if [ -x "$RIG_OUT/$1" ]; then
-    printf '%s/%s' "$RIG_OUT" "$1"
-  else
-    printf '%s/target/debug/%s' "$RIG_SOURCE" "$1"
-  fi
-}
 
 # The manager picks RIG_PORT without holding it, so the OS can hand it out again.
 free_port() {

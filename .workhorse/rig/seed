@@ -2,8 +2,8 @@
 set -eu
 . "$RIG_RECIPE_DIR/lib.sh"
 
-"$(bin migrate)"
-"$(bin seed)"
+"$RIG_SOURCE/target/debug/migrate"
+"$RIG_SOURCE/target/debug/seed"
 
 # The seeder gives devices placeholder keys. Swap the first one's (the device
 # behind Suva Facility) for a real certificate's, so the device API can be

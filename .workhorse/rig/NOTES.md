@@ -19,8 +19,10 @@ Entry points:
   `clone`), so it recompiles only the workspace's own crates.
 - `build`: `npm run build` in `private-web/`, then the debug `private-server`, `migrate` and
   `seed`. A debug build because the debug identity, the fake ACME authority and the seeder are
-  compiled out of release builds. Where the file system cannot clone, `target/` is a link shared
-  by every build, so the binaries are copied out to `.rig-out/`.
+  compiled out of release builds. Where the file system cannot clone, the manager links `target/`
+  to the dependency build instead, and the build replaces the link with a copy of its own: with a
+  shared `target/`, Cargo takes another commit's workspace crates as fresh while that commit's
+  source is still on disk.
 - `seed`: `migrate`, then `seed`, then swaps the seeder's placeholder key on the first device for
   a real certificate's, kept in `.rig-out/`.
 - `serve`: the header-trusting server in the background, then the base URL's in the foreground,
@@ -29,6 +31,13 @@ Entry points:
 Needs: `cargo` (through rustup, which installs the stable toolchain into the rig's home on first
 use), `node` and `npm`, `psql`, `openssl` and `curl` on the PATH the manager runs with; a Postgres
 whose user in the manager's URL has `CREATEDB`.
+
+Compiler cache: incremental compilation is off in every step. sccache is used when the machine
+gives the rig `SCCACHE_DIR` (and `SCCACHE_CACHE_SIZE`, where its cache is not the default size)
+through `passEnv` in the rig root's `config.json`, so rig builds share the machine's cache and its
+server. Without `SCCACHE_DIR`, an sccache wrapper is turned off, since a server the rig started
+would cache into the rig's home and serve the person's own builds from there. A wrapper other than
+sccache, given through `passEnv` as `RUSTC_WRAPPER`, is left alone.
 
 Limits:
 

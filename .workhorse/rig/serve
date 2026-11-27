@@ -21,7 +21,7 @@ export SERVER_VERSIONS_SECRET=rig
 export PUBLIC_URL="$RIG_BASE_URL/public"
 export META_LOG="${META_LOG:-private_server=info,warn}"
 
-server="$(bin private-server)"
+server="$RIG_SOURCE/target/debug/private-server"
 headers_port=$(free_port)
 
 trap 'kill $(jobs -p) 2>/dev/null || true; wait' EXIT
