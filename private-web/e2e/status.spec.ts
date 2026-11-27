@@ -642,8 +642,10 @@ test.describe("status page", () => {
 			await page.emulateMedia({ colorScheme: scheme });
 			await page.goto("/status");
 
-			const pill = (title: string) =>
-				page.locator(`[aria-label="${title}"], [title="${title}"]`).first();
+			// The legend's pills carry no machine name, so their accessible
+			// name is the state alone; a real machine's reads "name · state".
+			const pill = (name: string) =>
+				page.getByLabel(name, { exact: true }).first();
 
 			await expect(pill("Machine's own checks warning")).toHaveCSS(
 				"background-color",
