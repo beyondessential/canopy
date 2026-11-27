@@ -52,6 +52,7 @@ A detail not filled in reads as none.
 
 Anyone at the PM level or above edits a group's project details, on any group (see [ADM](../private-server/access-levels.md)).
 They are edited apart from the rest of the group, in a form holding only the three, so editing them leads to nothing else a PM cannot change.
+The form suggests a PM in charge from the tailnet's members and the people who have used Canopy, each by display name and login, and takes any login or email address typed in as well.
 Editing them is graded write (see [SAFE](../private-server/safety-modes.md)).
 A change to them is an audited action whose detail holds each detail changed, with its value before and after (see [AUD](../platform/audit-log.md)).
 A save that leaves them as they were records nothing.

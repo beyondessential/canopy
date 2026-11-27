@@ -42,6 +42,7 @@ Three nullable text columns on `server_groups`: `project`, `pm_in_charge`, `grou
 - `server_groups::update_project_details`: `TailscalePm`, `write`, `audit(GroupProjectDetailsChanged)`, `audit.unchanged()` when nothing differs. The action records the group, and its detail holds each changed field with `from` and `to`.
 - `get` and the projects listing return the PM in charge with the display name from `tailscale_users` where the login is known there.
 - The group's admin edit form (`GroupEdit`) doesn't carry the three fields, so it can't be used to change them.
+- The PM in charge field is an autocomplete over `server_groups::pm_candidates` (`TailscalePm`, read_only, silent): the tailnet's users from `GET /api/v2/tailnet/{tailnet}/users?type=member` (cached in `TailnetDirectory` beside the devices, refreshed on the same loop; suspended users left out; a failed read keeps the previous list) merged with `tailscale_users`, deduplicated by login ignoring case, sorted by display name. Free text stays accepted. The users read needs the OAuth client's `users:read` scope; without it the list is `tailscale_users` alone.
 
 ### Projects listing
 
@@ -114,6 +115,7 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 - [x] `fns/access.rs` replacing `fns/admins.rs`
 - [x] `server_groups::update_project_details`, refusing a PM in charge with no `@`, and the details on `get`
 - [x] `server_groups::projects`
+- [ ] Tailnet users in `TailnetDirectory`, and `server_groups::pm_candidates`
 - [x] `fns/homepage.rs`
 - [x] `bestool::save_snippet` and `delete_snippet` take `TailscaleAdmin`
 - [x] `canopy-mcp`: project details on `get_group`, searched by `find_groups`
@@ -127,6 +129,7 @@ Assumes beyondessential/tailscale#55 lands, granting the Tamanu PM team `{ "pm":
 - [x] `/` resolves the homepage
 - [x] Projects view at `/fleet/pm`: sections, highlight, search, address links
 - [x] Group detail: Project panel and its edit dialog, shown from PM up
+- [ ] PM in charge as an autocomplete over the candidates, taking free text too
 - [x] Permissions page at `/settings/permissions`, with a redirect from `/settings/admins`
 - [x] `SafetyModeControl` offers every mode at every level
 - [x] Projects view: a production environment with no Tamanu reads as none

@@ -34,6 +34,8 @@
 - [x] A PM in charge with no `@`, or nothing either side of it, is refused (verifies spec: GRP)
 - [x] An edit leaves an audit entry holding each changed field before and after; saving unchanged details leaves none (verifies spec: GRP)
 - [x] The PM in charge shows by display name for a login Canopy knows, and as entered otherwise (verifies spec: GRP)
+- [ ] The PM in charge field suggests tailnet members and people who have used Canopy, once each, by name and login, leaving out suspended tailnet users (verifies spec: GRP)
+- [ ] Picking a suggestion saves its login; typing an email address no one is suggested for saves it as typed (verifies spec: GRP)
 - [x] Empty details read as none (verifies spec: GRP)
 
 ## Projects view
