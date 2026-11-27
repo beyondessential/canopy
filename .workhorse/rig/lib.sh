@@ -71,10 +71,17 @@ fi
 # fixture so the two cannot drift. rig.json promises a tester there is no AWS,
 # Kubernetes, Tailscale control plane or Slack behind the lease.
 export_fake_deps() {
+  file="$RIG_SOURCE/scripts/fake-deps.env"
   while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in '' | '#'*) continue ;; esac
-    export "$line"
-  done < "$RIG_SOURCE/scripts/fake-deps.env"
+    # Trimmed as the fixture trims it, so a trailing space or a CRLF ending
+    # cannot leave the rig with a value the fixture never sees.
+    line=$(printf '%s' "$line" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    case "$line" in
+      '' | '#'*) continue ;;
+      [A-Za-z_]*=*) export "$line" ;;
+      *) echo "serve: $file: not NAME=value: $line" >&2; exit 1 ;;
+    esac
+  done < "$file"
 }
 
 # The binaries a lease runs. deps warms the dependency build with exactly the
@@ -91,13 +98,20 @@ cargo_build_rig_bins() {
 # What the seed step leaves for the lease: the seeded device's certificate.
 RIG_OUT="$RIG_SOURCE/.rig-out"
 
-# The manager picks RIG_PORT without holding it, so the OS can hand it out again.
+# A port nothing is listening on, for the second server.
 free_port() {
-  node -e '
-    const s = require("node:net").createServer().listen(0, "127.0.0.1", () => {
-      const { port } = s.address();
-      s.close(() => process.exit(String(port) === process.env.RIG_PORT ? 1 : (console.log(port), 0)));
-    });' || free_port
+  # The manager picks RIG_PORT without holding it, so the OS can hand it out
+  # again; a collision is re-rolled a few times rather than for ever, since
+  # every other reason node fails here would not come right either.
+  for _ in 1 2 3 4 5; do
+    port=$(node -e '
+      const s = require("node:net").createServer().listen(0, "127.0.0.1", () => {
+        const { port } = s.address();
+        s.close(() => process.exit(String(port) === process.env.RIG_PORT ? 1 : (console.log(port), 0)));
+      });') && { printf '%s\n' "$port"; return 0; }
+  done
+  echo "serve: no free port found" >&2
+  return 1
 }
 
 # Both servers have to be up inside the lease's ready window, so a wait is
