@@ -200,13 +200,16 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 		const api = spawn(privateServerBin, [], {
 			env: {
 				...process.env,
+				// First, so what this worker decides for itself below wins: a
+				// name added to the shared file for the rig's sake must never
+				// point every worker at one database.
+				...FAKE_DEPS,
 				DATABASE_URL: databaseUrl,
 				// The outer environment (ramdisk-pg.sh, justfile) exports
 				// RO_DATABASE_URL pointing at its own cluster's base database;
 				// the read pool must target this stack's per-worker database.
 				RO_DATABASE_URL: databaseUrl,
 				BIND_ADDRESS: `127.0.0.1:${apiPort}`,
-				...FAKE_DEPS,
 				// Needed by mint_enrollment to build the ticket's api_url; the
 				// setup-instructions flow auto-mints on an unregistered server.
 				PUBLIC_URL: process.env.PUBLIC_URL ?? "https://api.e2e.invalid",
