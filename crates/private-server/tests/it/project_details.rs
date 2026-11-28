@@ -256,7 +256,15 @@ async fn a_pm_in_charge_without_text_either_side_of_an_at_is_refused() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		seed(&mut conn).await;
 
-		for pm in ["pat", "@example.com", "pat@", "@"] {
+		for pm in [
+			"pat",
+			"@example.com",
+			"pat@",
+			"@",
+			"pat @example.com",
+			"p@t@example.com",
+			"Pat <pat@example.com>",
+		] {
 			let response = private
 				.post("/api/fleet/groups/update_project_details")
 				.json(&json!({

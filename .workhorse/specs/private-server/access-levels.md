@@ -91,7 +91,7 @@ The page explains how to grant a level on the tailnet: the capability's name, th
 It says when the policy was last read, or that Canopy is not configured to read it.
 
 Only an administrator adds a login to a list or removes one.
-A login not shaped as a tailnet login or an email address, with text either side of an `@`, is refused, since it could never match anyone.
+A login not shaped as a tailnet login or an email address, with text either side of one `@` and no spaces or angle brackets, is refused, since it could never match anyone.
 Adding a login issues access and removing one invalidates it, so both are graded accordingly (see [SAFE](safety-modes.md)).
 Both are audited actions, naming the level and the login (see [AUD](../platform/audit-log.md)).
 

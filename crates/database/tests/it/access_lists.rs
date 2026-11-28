@@ -64,7 +64,15 @@ async fn a_blank_login_is_refused() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_login_that_could_never_match_anyone_is_refused() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		for bad in ["pm-team", "pat bes.au", "@example.com", "pat@"] {
+		for bad in [
+			"pm-team",
+			"pat bes.au",
+			"@example.com",
+			"pat@",
+			"pat @example.com",
+			"p@t@example.com",
+			"Pat <pat@example.com>",
+		] {
 			AccessListEntry::add(&mut conn, ListLevel::Pm, bad)
 				.await
 				.expect_err(bad);

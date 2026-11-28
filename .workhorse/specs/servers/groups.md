@@ -44,7 +44,7 @@ A group carries three project details, for the people running the project it ser
 
 Any of them may be empty.
 The PM in charge is what the Projects view matches a person against, so it names a person rather than describing one (see [PRJ](projects.md)).
-A PM in charge not shaped as a login or an email address, with text either side of an `@`, is refused.
+A PM in charge not shaped as a login or an email address, with text either side of one `@` and no spaces or angle brackets, is refused.
 Wherever Canopy shows the PM in charge, it names them by the display name Canopy knows for that login, and by the login or address as entered where it knows none.
 
 The group's page presents its project details in a panel of their own, beside its notes.

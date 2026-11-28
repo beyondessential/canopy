@@ -165,18 +165,18 @@ impl ProjectDetails {
 	}
 
 	/// Refuse a PM in charge that doesn't name a person by a login or an
-	/// address, with text either side of an `@`.
+	/// address (see [`crate::access_lists::is_login_shaped`]).
 	fn validate(&self) -> Result<()> {
 		let Some(pm) = &self.pm_in_charge else {
 			return Ok(());
 		};
-		match pm.split_once('@') {
-			Some((local, domain)) if !local.is_empty() && !domain.is_empty() => Ok(()),
-			_ => Err(AppError::BadRequest(format!(
-				"the PM in charge must be a tailnet login or an email address, \
-				 with text either side of an @; got {pm:?}"
-			))),
+		if crate::access_lists::is_login_shaped(pm) {
+			return Ok(());
 		}
+		Err(AppError::BadRequest(format!(
+			"the PM in charge must be a tailnet login or an email address, \
+			 with text either side of one @; got {pm:?}"
+		)))
 	}
 
 	/// The details with the display name Canopy knows for the PM in charge,

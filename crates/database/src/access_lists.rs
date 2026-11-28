@@ -114,6 +114,23 @@ pub fn normalise_login(login: &str) -> String {
 	login.trim().to_lowercase()
 }
 
+/// Whether `login` is shaped as a tailnet login or an email address: one `@`
+/// with text either side, and nothing a login never carries (whitespace, angle
+/// brackets). Anything else could never match a caller's identity.
+// spec: ADM#the-permissions-page
+// spec: GRP#project-details
+pub fn is_login_shaped(login: &str) -> bool {
+	match login.split_once('@') {
+		Some((local, domain)) => {
+			!local.is_empty()
+				&& !domain.is_empty()
+				&& !domain.contains('@')
+				&& !login.contains(|c: char| c.is_whitespace() || c == '<' || c == '>')
+		}
+		None => false,
+	}
+}
+
 /// One login on one level's list.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable)]
 #[diesel(table_name = crate::schema::access_list_entries)]
@@ -162,14 +179,11 @@ impl AccessListEntry {
 		}
 		// A login no identity could carry would sit on the list conferring
 		// nothing, and read as though someone held the level.
-		match login.split_once('@') {
-			Some((local, domain)) if !local.is_empty() && !domain.is_empty() => {}
-			_ => {
-				return Err(AppError::BadRequest(format!(
-					"a login must be a tailnet login or an email address, \
-					 with text either side of an @; got {login:?}"
-				)));
-			}
+		if !is_login_shaped(&login) {
+			return Err(AppError::BadRequest(format!(
+				"a login must be a tailnet login or an email address, \
+				 with text either side of one @; got {login:?}"
+			)));
 		}
 		diesel::insert_into(dsl::access_list_entries)
 			.values((dsl::level.eq(level), dsl::login.eq(login)))
