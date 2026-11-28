@@ -19,7 +19,7 @@ The payload carries:
   The field will become mandatory; new reporters must send it.
   The reserved source names (see [CHK](../monitoring/checks.md), "Sources") are rejected.
 - **machine** — the machine's health checks and its detail.
-- **applications** — the applications the reporter found, each with its own health checks and detail.
+- **applications** — the applications the reporter found, each with its own health checks and detail, and the capabilities the reporter declares for it.
 
 Per the check-state model, the push is the source's whole truth for each target it describes: checks omitted from it are recovered, and other sources' checks are unaffected.
 
@@ -68,6 +68,21 @@ A check is reported with or without instances push by push, and it remains one c
 
 A check's name is reported bare.
 Canopy qualifies an application's checks with that application's type when cataloguing them (see [CHK](../monitoring/checks.md), "Names").
+
+## Capabilities
+
+An application in a push may carry `capabilities`, a list of names, each declaring something the application and its reporter accept from Canopy.
+The list is that source's whole declaration for the application: a push carrying no list declares none, and a name left out of a later push is withdrawn.
+Canopy holds each source's latest declaration for each application, and an application has a capability while any of its sources declares it.
+A `capabilities` that is not a list of names is refused.
+A name Canopy does not recognise is held, and means nothing to it.
+
+The names Canopy recognises are:
+
+- `tamanu-sign-in`: the Tamanu accepts sign-in tokens, and the agent on its box opens and checks them (see [TSI](../private-server/tamanu-sign-in.md)).
+
+> [!NOTE]
+> A capability is the reporter's to declare because only the box knows what its own agent and Tamanu can do: support depends on both, and on neither's version alone.
 
 ## Identifying an application
 

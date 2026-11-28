@@ -23,10 +23,14 @@ Sign-in is offered on an address when all of these hold:
 - the address is the application's tailnet address, or its public address served over HTTPS;
 - the Canopy instance has an issuer and a signing key configured (see [IDP](identity-provider.md), "Configuration");
 - the application is live, and runs on a machine whose bound identity has authenticated over mutual TLS with a key that is still active (see [DTR](device-trust.md));
-- Canopy holds the key the application's reporter names it by (see [STA](../public-server/statuses.md), "Identifying an application").
+- Canopy holds the key the application's reporter names it by (see [STA](../public-server/statuses.md), "Identifying an application");
+- a source reporting on the application declares that it accepts sign-in tokens (see [STA](../public-server/statuses.md), "Capabilities").
 
 > [!NOTE]
 > A token is encrypted to the key the box authenticates with and names its application by the reporter's key, so a Tamanu without either has nothing to open a token with or to match it against. An application on a cluster has no machine, and so no such key.
+
+An operator's browser can be set to offer sign-in where everything else holds but no source declares it, for testing a Tamanu and agent that accept tokens before their reporter says so.
+Issuing a token does not depend on the declaration, which only decides where sign-in is offered.
 
 Signing in is open to callers at the PM level and above (see [ADM](access-levels.md)).
 It is graded read-only (see [SAFE](safety-modes.md), "Grading the operator surface"): it can be undone, it writes nothing to the fleet or to Canopy's records, and the token it issues is the caller's own, for one Tamanu, for a minute.
