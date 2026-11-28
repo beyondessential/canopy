@@ -32,6 +32,7 @@ pub mod dns_names;
 pub mod identity;
 pub mod issues;
 pub mod kubernetes_clusters;
+pub(crate) mod like;
 pub mod machine_enrollment_challenges;
 pub mod machine_enrollment_tokens;
 pub mod machines;

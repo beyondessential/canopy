@@ -1292,17 +1292,6 @@ pub struct Cursor {
 	pub id: Uuid,
 }
 
-/// The pattern matching a name that contains `name`, with the characters
-/// `ILIKE` reads specially taken literally.
-pub(crate) fn contains_pattern(name: &str) -> String {
-	format!(
-		"%{}%",
-		name.replace('\\', "\\\\")
-			.replace('%', "\\%")
-			.replace('_', "\\_")
-	)
-}
-
 /// Whether one of an entry's records has a name containing this. The names are
 /// read as one text, a name to a line, which the trigram index on it serves, so
 /// a search spanning a line break would match across two names: it has its line
@@ -1310,7 +1299,9 @@ pub(crate) fn contains_pattern(name: &str) -> String {
 macro_rules! name_matches {
 	($name:expr) => {
 		diesel::dsl::sql::<sql_types::Bool>("audit_record_names(records) ILIKE ")
-			.bind::<sql_types::Text, _>(contains_pattern(&$name.replace(['\n', '\r'], " ")))
+			.bind::<sql_types::Text, _>(crate::like::contains_pattern(
+				&$name.replace(['\n', '\r'], " "),
+			))
 	};
 }
 

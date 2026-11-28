@@ -1221,7 +1221,7 @@ impl ServerGroup {
 	) -> crate::schema::server_groups::BoxedQuery<'a, diesel::pg::Pg> {
 		use crate::schema::server_groups::dsl;
 
-		let pattern = crate::audit::contains_pattern(term);
+		let pattern = crate::like::contains_pattern(term);
 		let query = dsl::server_groups
 			.filter(dsl::deleted_at.is_null())
 			.into_boxed();
