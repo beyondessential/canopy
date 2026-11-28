@@ -101,6 +101,16 @@ test.describe("permissions page", () => {
 		await expect(levelRow(page, "PM")).toContainText("Policy not read");
 	});
 
+	test("a policy configured but not yet read grants to no one known", async ({
+		page,
+	}) => {
+		await withPolicy(page, { admin: [], pm: [] }, null);
+		await page.goto("/settings/permissions");
+		await expect(page.getByText("The policy hasn't been read yet.")).toBeVisible();
+		await expect(levelRow(page, "PM")).toContainText("Policy not read");
+		await expect(levelRow(page, "PM")).not.toContainText("Granted to no one");
+	});
+
 	test("explains how to grant a level on the tailnet", async ({ page }) => {
 		await page.goto("/settings/permissions");
 		const panel = page

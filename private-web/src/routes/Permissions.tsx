@@ -77,7 +77,7 @@ function PermissionsPage() {
 							<LevelRow
 								key={holders.level}
 								holders={holders}
-								policyConfigured={policy.configured}
+								policyRead={policy.configured && policy.read_at != null}
 								onChange={overview.reload}
 							/>
 						))}
@@ -112,11 +112,12 @@ function LevelCell({ name, powers }: { name: string; powers: string }) {
 
 function LevelRow({
 	holders,
-	policyConfigured,
+	policyRead,
 	onChange,
 }: {
 	holders: Holders;
-	policyConfigured: boolean;
+	/** Whether the policy has been read, so an empty grant is known to be empty. */
+	policyRead: boolean;
 	onChange: () => void;
 }) {
 	const name = LEVEL_NAMES[holders.level];
@@ -143,7 +144,7 @@ function LevelRow({
 					))
 				) : (
 					<Typography variant="caption" color="text.secondary" component="div">
-						{policyConfigured ? "Granted to no one" : "Policy not read"}
+						{policyRead ? "Granted to no one" : "Policy not read"}
 					</Typography>
 				)}
 			</TableCell>
