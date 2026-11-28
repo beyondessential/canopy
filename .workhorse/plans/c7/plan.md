@@ -6,7 +6,7 @@ The agent's half (decrypt, verify, replay record) is seedling's and Tamanu's hal
 
 ## Notes
 
-- **Depends on V6.** The PM level, its extractor, the projects view and the safety-mode fix (every operator offered every mode) are V6's. Its current tip is not in this branch: update from `workhorse/v6` (or from main once V6 merges) before the projects-view step.
+- **Built on V6.** The PM level (`TailscalePm` in `commons-servers` `tailscale_auth`), the projects view (`routes/Projects.tsx`) and every operator being offered every mode are V6's, and this branch is based on V6's work.
 - **JWE with `ring`.** `oidc` already depends on `ring`, which has ephemeral ECDH on P-256, SHA-256 and AES-256-GCM. `ECDH-ES` needs the Concat KDF of RFC 7518 §4.6.2 on top, a few lines over `ring::digest`. Reach for a JOSE crate only if this falls short.
 - **The key the box last authenticated with** is not tracked today: `device_keys` has no use timestamp. Add one, stamped on mTLS authentication, throttled so the device API does not write on every request.
 - **Rate limits are counted from the audit log**, not from public-server's in-memory limiter: count `TamanuSignInIssued` entries per actor and per application over the window (AUD already counts entries by records and detail). That survives restarts and replicas, and lets the jobs sweep see who is at a limit for the self-alert. Refusals are not recorded, so "at the limit" is a count at or over it.
@@ -43,7 +43,7 @@ The agent's half (decrypt, verify, replay record) is seedling's and Tamanu's hal
 
 ### Private server (`crates/private-server`)
 
-- [ ] `fns/tamanu_sign_in.rs`: `issue` taking the PM-level extractor, `Audit`, and `{ application_id, address: public | tailnet }`; checks eligibility and the instance's issuer, applies both limits (refused as rate limited), signs via `identity::signing`, encrypts, records, returns the sign-in URL
+- [ ] `fns/tamanu_sign_in.rs`: `issue` taking `TailscalePm`, `Audit`, and `{ application_id, address: public | tailnet }`; checks eligibility and the instance's issuer, applies both limits (refused as rate limited), signs via `identity::signing`, encrypts, records, returns the sign-in URL
 - [ ] Mount at `/api/tamanu_sign_in` with `routes!(read_only, audit(TamanuSignInIssued): issue)`
 - [ ] Application detail and the projects view responses carry each address's sign-in availability
 - [ ] `just gen-openapi`
@@ -61,7 +61,7 @@ The agent's half (decrypt, verify, replay record) is seedling's and Tamanu's hal
 
 - [ ] Sign-in control: opens a tab on click, calls `issue`, navigates the tab to the returned URL, or closes it and shows the refusal or failure inline
 - [ ] `ServerDetail.tsx`: control beside the application link when that address is offerable
-- [ ] Projects view (after updating from V6): control beside each offerable address
+- [ ] `Projects.tsx`: control beside each offerable address, next to its `Address` link
 - [ ] `just typecheck`
 
 ## Tests
@@ -71,4 +71,4 @@ The agent's half (decrypt, verify, replay record) is seedling's and Tamanu's hal
 - [ ] `private-server` endpoint: PM issues and the token decrypts with the box's key carrying the expected claims; an all-level caller is refused (`CANOPY_TRUST_TAILSCALE_HEADERS`); refused for no `reported_key`, no authenticated key, a cluster application, an `http` URL, no issuer configured; per-person and per-Tamanu limits; audit entry and detail
 - [ ] `public-server`: `/machines/self` carries the issuer when configured
 - [ ] `jobs`: the self-alert raises at a limit and recovers once none is
-- [ ] Playwright: the control on an application page opens the sign-in URL in a new tab; absent when not offerable; a refusal shows inline; projects view control once that view is in
+- [ ] Playwright: the control on an application page opens the sign-in URL in a new tab; absent when not offerable; a refusal shows inline; the control beside each offerable address in the projects view
