@@ -11,6 +11,7 @@ How metadata is reported is the status contract (see [STA](../public-server/stat
 
 When an application has a known address — its configured URL, or its machine's tailnet name when it has no configured URL — the detail view offers a link that opens it in a new tab.
 An application with no known address offers no application link.
+Beside the link to a Tamanu central or facility, sign-in to it is offered where it can be (see [TSI](tamanu-sign-in.md)).
 
 ## Munin link
 

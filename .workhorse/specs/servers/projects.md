@@ -39,6 +39,7 @@ Each has two addresses, each a link opening in a new tab:
 - its public address, which is the application's configured URL;
 - its tailnet address, which is the tailnet name of the device bound to its machine, linked over HTTPS at that MagicDNS name as Canopy's other links to a machine are (see [SVC](../private-server/service-links.md)).
 
+Beside each address, sign-in to that Tamanu is offered where it can be (see [TSI](../private-server/tamanu-sign-in.md)).
 Where either address is not known, it reads as none.
 An application hosted on a cluster has no machine, and so no tailnet address.
 

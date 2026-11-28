@@ -14,7 +14,7 @@ The levels are admin, PM (project manager), and all.
 They are a ladder: each includes everything the levels below it may do, and a caller's level is the highest any source gives them.
 
 - All reads the operator surface, apart from the reads other specs keep to an administrator, such as the [audit log](../platform/audit-log.md), [secret Ansible variable values](ansible/variables.md) and the [fleet query interface's access tokens](mcp.md).
-- PM also edits any group's project details (see [GRP](../servers/groups.md), "Project details").
+- PM also edits any group's project details (see [GRP](../servers/groups.md), "Project details"), and signs in to a Tamanu through Canopy (see [TSI](tamanu-sign-in.md)).
 - Admin does everything on the operator surface, Canopy's own settings included.
 
 Every caller reaching the operator surface with a tailnet user identity holds all.
