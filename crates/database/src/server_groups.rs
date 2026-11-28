@@ -133,6 +133,15 @@ pub struct ServerGroup {
 	pub ground_contact: Option<String>,
 }
 
+/// A group as the projects view lists it: its name and project details.
+// spec: PRJ#what-each-group-shows
+#[derive(Debug, Clone)]
+pub struct ProjectListing {
+	pub id: Uuid,
+	pub name: String,
+	pub details: ProjectDetails,
+}
+
 /// A group's three project details, each absent when not filled in.
 // spec: GRP#project-details
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -394,10 +403,13 @@ impl ServerGroup {
 
 	/// Every live group with a live production environment, in order of name:
 	/// a production application in it, or a production machine, which is in
-	/// its environment whether or not anything on it has reported.
+	/// its environment whether or not anything on it has reported. Each is read
+	/// only as far as the projects view shows it.
 	// spec: PRJ#which-groups-it-lists
 	// spec: GRP#environments
-	pub async fn with_production_environment(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+	pub async fn with_production_environment(
+		db: &mut AsyncPgConnection,
+	) -> Result<Vec<ProjectListing>> {
 		use crate::schema::{applications, machines, server_groups::dsl};
 		use diesel::dsl::exists;
 
@@ -409,14 +421,34 @@ impl ServerGroup {
 			.filter(machines::group_id.eq(dsl::id.nullable()))
 			.filter(machines::deleted_at.is_null())
 			.filter(machines::rank.eq(ServerRank::Production));
-		dsl::server_groups
-			.select(Self::as_select())
-			.filter(dsl::deleted_at.is_null())
-			.filter(exists(production_application).or(exists(production_machine)))
-			.order((dsl::name.asc(), dsl::id.asc()))
-			.load(db)
-			.await
-			.map_err(AppError::from)
+		let rows: Vec<(Uuid, String, Option<String>, Option<String>, Option<String>)> =
+			dsl::server_groups
+				.select((
+					dsl::id,
+					dsl::name,
+					dsl::project,
+					dsl::pm_in_charge,
+					dsl::ground_contact,
+				))
+				.filter(dsl::deleted_at.is_null())
+				.filter(exists(production_application).or(exists(production_machine)))
+				.order((dsl::name.asc(), dsl::id.asc()))
+				.load(db)
+				.await?;
+		Ok(rows
+			.into_iter()
+			.map(
+				|(id, name, project, pm_in_charge, ground_contact)| ProjectListing {
+					id,
+					name,
+					details: ProjectDetails {
+						project,
+						pm_in_charge,
+						ground_contact,
+					},
+				},
+			)
+			.collect())
 	}
 
 	/// The live production Tamanu centrals and facilities of `group_ids`, with

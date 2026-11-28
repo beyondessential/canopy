@@ -751,7 +751,11 @@ pub async fn projects(
 	let viewer = user.login.to_lowercase();
 	let groups = ServerGroup::with_production_environment(&mut conn).await?;
 	let ids: Vec<Uuid> = groups.iter().map(|group| group.id).collect();
-	let mut details = named_project_details(&mut conn, &groups.iter().collect::<Vec<_>>()).await?;
+	let logins: Vec<&str> = groups
+		.iter()
+		.filter_map(|group| group.details.pm_in_charge.as_deref())
+		.collect();
+	let names = KnownUser::names_ignoring_case(&mut conn, &logins).await?;
 	let mut tamanu: std::collections::HashMap<Uuid, Vec<ProjectTamanu>> =
 		std::collections::HashMap::new();
 	let mut found = ServerGroup::production_tamanu(&mut conn, &ids).await?;
@@ -785,10 +789,11 @@ pub async fn projects(
 			.into_iter()
 			.map(|group| ProjectGroup {
 				yours: group
+					.details
 					.pm_in_charge
 					.as_deref()
 					.is_some_and(|pm| pm.to_lowercase() == viewer),
-				project_details: details.remove(&group.id).unwrap_or_default(),
+				project_details: group.details.named(&names),
 				tamanu: tamanu.remove(&group.id).unwrap_or_default(),
 				id: group.id,
 				name: group.name,
