@@ -25,6 +25,7 @@ import ApplicationTypeChip from "./ApplicationTypeChip";
 import { waveWhileHolding } from "./MachineEnclosure";
 import MachineMark from "./MachineMark";
 import StatusDot from "./StatusDot";
+import { isWebAddress } from "../lib/webAddress";
 
 /// The group as an operator navigates it: rank, then the boxes at that rank,
 /// then the workloads on each box. A box serving no environment yet is listed
@@ -350,7 +351,7 @@ function Meta({ link, children }: { link?: boolean; children: string }) {
 			color="text.secondary"
 			sx={{ ml: "auto", pl: 1, flexShrink: 0 }}
 		>
-			{link && /^https?:\/\//.test(children) ? (
+			{link && isWebAddress(children) ? (
 				<MuiLink
 					href={children}
 					target="_blank"
