@@ -14,7 +14,9 @@ use crate::access_lists::normalise_login;
 /// Whether a path can be a homepage: a path within the operator interface,
 /// beginning with a single `/`, more than `/` alone, and carrying no query or
 /// fragment. A backslash is refused too, since URL parsers read it as a `/`,
-/// which would let `/\host` reach another site as `//host` would.
+/// which would let `/\host` reach another site as `//host` would. So is a `.`
+/// or `..` segment, plain or percent-encoded: the path it resolves to is
+/// another one, and `/..` resolves to the root, which would open itself.
 // spec: HOME#the-default-homepage
 pub fn is_valid_path(path: &str) -> bool {
 	path.starts_with('/')
@@ -22,6 +24,15 @@ pub fn is_valid_path(path: &str) -> bool {
 		&& path != "/"
 		&& !path.contains(['?', '#', '\\'])
 		&& !path.chars().any(char::is_control)
+		&& !path.split('/').any(is_dot_segment)
+}
+
+/// Whether a segment is one URL resolution reads as `.` or `..`.
+fn is_dot_segment(segment: &str) -> bool {
+	matches!(
+		segment.to_ascii_lowercase().replace("%2e", ".").as_str(),
+		"." | ".."
+	)
 }
 
 /// The homepage an operator has chosen.
@@ -75,7 +86,14 @@ mod tests {
 
 	#[test]
 	fn a_homepage_is_a_path_within_the_interface() {
-		for good in ["/status", "/fleet/pm", "/fleet/pm/", "/a"] {
+		for good in [
+			"/status",
+			"/fleet/pm",
+			"/fleet/pm/",
+			"/a",
+			"/v1.2",
+			"/a/...b",
+		] {
 			assert!(is_valid_path(good), "{good:?} should be a homepage");
 		}
 		for bad in [
@@ -88,6 +106,13 @@ mod tests {
 			"/status?filter=x",
 			"/status#top",
 			"/status\n",
+			"/..",
+			"/.",
+			"/fleet/../..",
+			"/fleet/./pm",
+			"/%2e%2e",
+			"/%2E.",
+			"/.%2e/x",
 		] {
 			assert!(!is_valid_path(bad), "{bad:?} should not be a homepage");
 		}

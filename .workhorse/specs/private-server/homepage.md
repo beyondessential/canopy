@@ -38,7 +38,7 @@ A Canopy capability value in the tailnet policy may carry `home`, a path within 
 The grant's sources, resolved as for a level, receive that path, where the grant's destinations include `tag:server-canopy` as a level-conferring grant's do.
 A value may also carry `priority`, a number ranking its `home` against others, and a value carrying none, or one that is not a number, ranks at zero.
 
-A `home` is taken only where it is a path within the operator interface, beginning with a single `/`, with more than `/` alone and with no query or fragment, so a policy value never sends anyone elsewhere or back to the root.
+A `home` is taken only where it is a path within the operator interface, beginning with a single `/`, with more than `/` alone, with no `.` or `..` segment and with no query or fragment, so a policy value never sends anyone elsewhere or back to the root.
 Any other `home` is ignored.
 
 A person covered by several grants may be given several `home`s, and one is their default, chosen by, in order:
