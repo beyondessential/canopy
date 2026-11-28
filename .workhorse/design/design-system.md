@@ -13,20 +13,56 @@ The UI is MUI (`@mui/material`) with a deliberately thin theme (`private-web/src
 
 Light and dark follow the operating system (`prefers-color-scheme`, `private-web/src/main.tsx`). Only `primary` and `secondary` are set; every other colour is MUI's default for the mode.
 
-| Palette key | Light | Dark | Used for |
-|---|---|---|---|
-| `primary` | `#388e3c` leaf | `#66bb6a` | The brand wordmark, primary (contained) buttons, the active sub-page, links in rendered Markdown |
-| `secondary` | `#32669a` sky | `#5b8cbe` | The current sidebar section, a version 2 to 4 behind latest, the Senaite application type |
-| `success` | `#2e7d32` | `#66bb6a` | Passing, healthy, current |
-| `warning` | `#ed6c02` | `#ffa726` | Needs attention soon; write mode |
-| `error` | `#d32f2f` | `#f44336` | Down, failing, production; danger mode |
-| `info` | `#0288d1` | `#29b6f6` | Neutral notice; lingering incidents; demo and test ranks |
-| `text.secondary` | 60% black | 70% white | Labels, metadata, empty states, muted trail segments |
-| `text.disabled` | 38% black | 50% white | Never reported, unknown |
-| `divider` | 12% black | 12% white | Every hairline: outlined surfaces, rows, gridlines |
-| `action.hover` | MUI default | MUI default | Current row, operator-present group cards, code backgrounds |
+| Palette key | Used for |
+|---|---|
+| `primary` | The brand wordmark, primary (contained) buttons, the active sub-page, links in rendered Markdown |
+| `secondary` | The current sidebar section, a version 2 to 4 behind latest, the Senaite application type |
+| `success` | Passing, healthy, current |
+| `warning` | Needs attention soon; write mode |
+| `error` | Down, failing, production; danger mode |
+| `info` | Neutral notice; lingering incidents; demo and test ranks |
+| `text.secondary` | Labels, metadata, empty states, muted trail segments |
+| `text.disabled` | Never reported, unknown |
+| `divider` | Every hairline: outlined surfaces, rows, gridlines |
+| `action.hover` | Current row, operator-present group cards, code backgrounds |
 
-Read colours through palette keys (`color="warning"`, `sx={{ color: "text.secondary" }}`, `theme.palette.error.main`), never a hex, so both modes work without a second value.
+Read colours through palette keys (`color="warning"`, `sx={{ color: "text.secondary" }}`, `theme.palette.error.main`), never a hex, so both modes work without a second value. The values below are what those keys resolve to, for reference.
+
+### Light
+
+| Token | Value |
+|---|---|
+| `primary` | `#388e3c` |
+| `secondary` | `#32669a` |
+| `success` | `#2e7d32` |
+| `warning` | `#ed6c02` |
+| `error` | `#d32f2f` |
+| `info` | `#0288d1` |
+| `text.primary` | `rgba(0, 0, 0, 0.87)` |
+| `text.secondary` | `rgba(0, 0, 0, 0.6)` |
+| `text.disabled` | `rgba(0, 0, 0, 0.38)` |
+| `divider` | `rgba(0, 0, 0, 0.12)` |
+| `action.hover` | `rgba(0, 0, 0, 0.04)` |
+| `background.default` | `#ffffff` |
+| `grey[100]` | `#f5f5f5` |
+
+### Dark
+
+| Token | Value |
+|---|---|
+| `primary` | `#66bb6a` |
+| `secondary` | `#5b8cbe` |
+| `success` | `#66bb6a` |
+| `warning` | `#ffa726` |
+| `error` | `#f44336` |
+| `info` | `#29b6f6` |
+| `text.primary` | `#ffffff` |
+| `text.secondary` | `rgba(255, 255, 255, 0.7)` |
+| `text.disabled` | `rgba(255, 255, 255, 0.5)` |
+| `divider` | `rgba(255, 255, 255, 0.12)` |
+| `action.hover` | `rgba(255, 255, 255, 0.08)` |
+| `background.default` | `#121212` |
+| `grey[900]` | `#212121` |
 
 ### Chrome
 
@@ -76,24 +112,44 @@ A tint is `alpha(palette.X.main or .light, small)`, never a hand-mixed colour. T
 - **Monospace.** `fontFamily: "monospace"` for anything an operator might copy or compare character by character: ids, hashes, keys, snapshot ids, check names, version strings in titles, `key=value` tags, and SQL results.
 - **Numbers that tick** (countdowns, live figures) use `fontVariantNumeric: "tabular-nums"`.
 
-| Variant | Size / weight | Used for |
-|---|---|---|
-| `h4` (as `h1`) | 2.125rem / 400 | Page title on list and detail pages |
-| `h5` (as `h1` or `h2`) | 1.5rem / 400 | Page title on form and configuration pages; a free-standing section heading |
-| `h6` (as `h2`) | 1.25rem / 500 | Section heading inside a surface; the brand wordmark |
-| `subtitle2` | 0.875rem / 500 | Sub-heading within a section |
-| `body2` | 0.875rem / 400 | The default for content: rows, facts, table cells, legends |
-| `caption` | 0.75rem / 400 | Fact labels, timestamps, secondary lines |
-| `overline` | 0.6875rem / 500 in the sidebar | Settings group headings in the sidebar |
+| Element | Variant | Size | Weight | Used for |
+|---|---|---|---|---|
+| Page title | `h4` (as `h1`) | 2.125rem | 400 | Page title on list and detail pages |
+| Form page title | `h5` (as `h1` or `h2`) | 1.5rem | 400 | Page title on form and configuration pages; a free-standing section heading |
+| Section heading | `h6` (as `h2`) | 1.25rem | 500 | Section heading inside a surface; the brand wordmark |
+| Sub-heading | `subtitle2` | 0.875rem | 500 | Sub-heading within a section |
+| Body | `body2` | 0.875rem | 400 | The default for content: rows, facts, table cells, legends |
+| Caption | `caption` | 0.75rem | 400 | Fact labels, timestamps, secondary lines |
+| Sidebar group | `overline` | 0.6875rem | 500 | Settings group headings in the sidebar, at a size and weight set there |
 
 `body2` is the working size; `body1` is rare. Secondary text is `color="text.secondary"`, not a smaller size.
 
 ## Spacing and shape
 
-- MUI defaults: an 8px spacing unit and a 4px radius (`borderRadius: 1`). There are no theme overrides.
-- Page sections stack with `Stack spacing={3}`; groups within a section with `spacing={2}`; rows and inline items with `spacing={1}` or `0.5`.
-- A surface's padding is `p: 2`; a compact row is `p: 1.5`.
-- Radii beyond the default are for shapes that mean something: full pills (`999px`) for machine enclosures, `10px` count badges, `50%` dots and avatars, square (`0`) for the mode band.
+MUI defaults: an 8px spacing unit and a 4px radius (`borderRadius: 1`). There are no theme overrides.
+
+### Spacing
+
+| Token | Value | Usage |
+|---|---|---|
+| `spacing(0.5)` | 4px | Tight inline items |
+| `spacing(1)` | 8px | Rows and inline items |
+| `spacing(1.5)` | 12px | A compact row's padding (`p: 1.5`); a detail page's header stack |
+| `spacing(2)` | 16px | Groups within a section; a surface's padding (`p: 2`); grid gaps |
+| `spacing(3)` | 24px | Page sections (`Stack spacing={3}`); the content's vertical padding |
+| `spacing(4)` | 32px | Between facts in a facts row |
+
+### Radius
+
+Radii beyond the default are for shapes that mean something.
+
+| Token | Value | Usage |
+|---|---|---|
+| default radius | 4px | Surfaces, shorties, buttons, chips |
+| count badge radius | 10px | Count badges |
+| pill radius | 999px | Machine enclosures |
+| round radius | 50% | Dots and avatars |
+| square radius | 0 | The mode band |
 
 ## Surfaces
 
