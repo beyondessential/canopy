@@ -937,6 +937,8 @@ pub async fn search(
 ) -> Result<Json<Vec<ServerGroup>>> {
 	let mut conn = state.db.get().await?;
 	// The group picker shows a short list to choose from.
-	let groups = ServerGroup::search(&mut conn, &args.query, GroupMatch::Name, Some(50)).await?;
+	let groups = ServerGroup::search(&mut conn, &args.query, GroupMatch::Name, Some(50))
+		.await?
+		.groups;
 	Ok(Json(groups))
 }

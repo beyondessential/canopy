@@ -331,6 +331,14 @@ pub struct PartialServerGroup {
 	pub slack_close_delay: Option<PgDuration>,
 }
 
+/// The groups a search found, and how many matched before any limit.
+#[derive(Debug, Clone)]
+pub struct GroupSearch {
+	pub groups: Vec<ServerGroup>,
+	/// Every group the term matched, of which `groups` may be the first few.
+	pub matched: i64,
+}
+
 /// What a group search matches its term against, beside the group's identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupMatch {
@@ -1167,54 +1175,47 @@ impl ServerGroup {
 
 	/// Live groups whose identifier is `term`, or whose text `matching` names
 	/// contains it ignoring case, in order of name, and no more than `limit` of
-	/// them where one is given. A wildcard in the term matches only itself.
+	/// them where one is given, with how many matched in all. A wildcard in the
+	/// term matches only itself.
 	// spec: MCP#discovery
 	pub async fn search(
 		db: &mut AsyncPgConnection,
 		term: &str,
 		matching: GroupMatch,
 		limit: Option<i64>,
-	) -> Result<Vec<Self>> {
+	) -> Result<GroupSearch> {
 		use crate::schema::server_groups::dsl;
+		use diesel::dsl::sql;
+		use diesel::sql_types::BigInt;
 
 		if let Ok(id) = term.parse::<Uuid>()
 			&& let Ok(group) = Self::get_by_id(db, id).await
 			&& group.deleted_at.is_none()
 		{
-			return Ok(vec![group]);
+			return Ok(GroupSearch {
+				groups: vec![group],
+				matched: 1,
+			});
 		}
 
+		// The count is taken over every match before the limit applies, so
+		// one query says both what is shown and how much was left out. Where
+		// the limit leaves no row, none carries it.
 		let mut query = Self::matching(term, matching)
-			.select(Self::as_select())
+			.select((Self::as_select(), sql::<BigInt>("COUNT(*) OVER ()")))
 			.order((dsl::name.asc(), dsl::id.asc()));
 		if let Some(limit) = limit {
 			query = query.limit(limit);
 		}
-		query.load(db).await.map_err(AppError::from)
+		let rows: Vec<(Self, i64)> = query.load(db).await?;
+		let matched = rows.as_slice().first().map_or(0, |(_, matched)| *matched);
+		Ok(GroupSearch {
+			groups: rows.into_iter().map(|(group, _)| group).collect(),
+			matched,
+		})
 	}
 
-	/// How many groups [`Self::search`] finds for `term`, without a limit.
-	// spec: MCP#discovery
-	pub async fn count_matching(
-		db: &mut AsyncPgConnection,
-		term: &str,
-		matching: GroupMatch,
-	) -> Result<i64> {
-		if let Ok(id) = term.parse::<Uuid>()
-			&& let Ok(group) = Self::get_by_id(db, id).await
-			&& group.deleted_at.is_none()
-		{
-			return Ok(1);
-		}
-		Self::matching(term, matching)
-			.count()
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
-	}
-
-	/// The live groups whose text `matching` names contains `term`, as a query
-	/// [`Self::search`] and [`Self::count_matching`] share.
+	/// The live groups whose text `matching` names contains `term`.
 	fn matching<'a>(
 		term: &str,
 		matching: GroupMatch,

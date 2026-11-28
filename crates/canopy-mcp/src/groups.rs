@@ -137,15 +137,15 @@ impl CanopyMcp {
 		Parameters(args): Parameters<FindGroupsArgs>,
 	) -> Result<CallToolResult, McpError> {
 		let mut conn = self.conn().await?;
-		// Each group returned costs a backup lookup, so the list is held to the
-		// limit in the database, and one more than it is read to tell whether
-		// it was cut short. An empty term matches every group.
+		// The list is held to the limit in the database, and one more than it
+		// is read so even a limit of none carries the count. An empty term
+		// matches every group.
 		let term = args.query.as_deref().unwrap_or_default();
 		let limit = args
 			.limit
 			.unwrap_or(DEFAULT_GROUP_LIMIT)
 			.clamp(0, DEFAULT_GROUP_LIMIT);
-		let mut groups = ServerGroup::search(
+		let found = ServerGroup::search(
 			&mut conn,
 			term,
 			GroupMatch::NameOrProjectDetails,
@@ -153,15 +153,10 @@ impl CanopyMcp {
 		)
 		.await
 		.map_err(mcp_err)?;
-		let truncated = groups.len() as i64 > limit;
+		let total_matched = found.matched as usize;
+		let mut groups = found.groups;
+		let truncated = total_matched > limit as usize;
 		groups.truncate(limit as usize);
-		let total_matched = if truncated {
-			ServerGroup::count_matching(&mut conn, term, GroupMatch::NameOrProjectDetails)
-				.await
-				.map_err(mcp_err)? as usize
-		} else {
-			groups.len()
-		};
 		let ids: Vec<Uuid> = groups.iter().map(|g| g.id).collect();
 		let counts = ServerGroup::live_server_counts(&mut conn)
 			.await

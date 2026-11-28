@@ -302,7 +302,8 @@ async fn a_wildcard_in_a_group_search_matches_only_itself() {
 		for matching in [GroupMatch::Name, GroupMatch::NameOrProjectDetails] {
 			let found = ServerGroup::search(&mut conn, "%", matching, None)
 				.await
-				.unwrap();
+				.unwrap()
+				.groups;
 			assert_eq!(
 				found.iter().map(|g| g.id).collect::<Vec<_>>(),
 				[percent],
@@ -310,7 +311,8 @@ async fn a_wildcard_in_a_group_search_matches_only_itself() {
 			);
 			let found = ServerGroup::search(&mut conn, "_", matching, None)
 				.await
-				.unwrap();
+				.unwrap()
+				.groups;
 			assert_eq!(
 				found.iter().map(|g| g.id).collect::<Vec<_>>(),
 				[underscore],
