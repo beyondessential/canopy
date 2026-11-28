@@ -3,6 +3,7 @@ import {
 	createContext,
 	useCallback,
 	useContext,
+	useEffect,
 	useMemo,
 	useState,
 } from "react";
@@ -10,6 +11,9 @@ import { callApi, useApi } from "../api";
 
 /** Where the root goes when neither a choice nor the policy names a page. */
 export const FALLBACK_HOMEPAGE = "/status";
+
+/** How soon to read the homepage again after a read that failed. */
+const RETRY_MS = 3_000;
 
 export interface HomepageState {
 	/** The page the person has chosen, `null` where they have chosen none, or
@@ -32,7 +36,17 @@ const HomepageContext = createContext<HomepageState | null>(null);
 /** One fetch of the caller's homepage, shared by the root and the toggle so a
  * change through the toggle is what the root opens next. spec: HOME */
 export function HomepageProvider({ children }: { children: ReactNode }) {
-	const answer = useApi("homepage", "get");
+	const [tick, setTick] = useState(0);
+	const answer = useApi("homepage", "get", {}, [tick]);
+	// Until it has answered once, a failed read is retried, so one blip does
+	// not leave the toggle unusable for the session. An answer once given is
+	// kept: the query never changes, so a later read holds the earlier one.
+	const failed = answer.status === "error";
+	useEffect(() => {
+		if (!failed) return;
+		const id = window.setTimeout(() => setTick((n) => n + 1), RETRY_MS);
+		return () => window.clearTimeout(id);
+	}, [failed]);
 	// A choice made this session, overriding the fetched one once made.
 	const [chosenHere, setChosenHere] = useState<string | null | undefined>(
 		undefined,
