@@ -1,0 +1,4 @@
+DROP INDEX audit_entries_tamanu_sign_in_by_actor;
+DROP INDEX audit_entries_tamanu_sign_in_by_kid;
+ALTER TABLE application_reported_detail DROP COLUMN capabilities;
+ALTER TABLE device_keys DROP COLUMN last_authenticated_at;

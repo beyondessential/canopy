@@ -983,6 +983,10 @@ pub fn key_states(
 		.collect()
 }
 
+/// The audit actions recording a token a key signed, as their stable names.
+// spec: IDP#signing-keys
+const SIGNED_ACTIONS: [&str; 2] = ["identity_token_issued", "tamanu_sign_in_issued"];
+
 /// What the audit log says each key has signed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct KeyUsage {
@@ -994,13 +998,13 @@ pub struct KeyUsage {
 	pub latest_expiry: Option<Timestamp>,
 }
 
-/// The usage of each of `kids`, from the issuances in the audit log; a key
-/// that signed nothing in the log's ninety days is absent. Only issuances that
-/// took place count: a refusal is settled failed, and one committed ahead and
-/// never settled is still pending.
+/// The usage of each of `kids`, from the issuances of identity tokens and of
+/// sign-in tokens in the audit log; a key that signed nothing in the log's
+/// ninety days is absent. Only issuances that took place count: a refusal is
+/// settled failed, and one committed ahead and never settled is still pending.
 ///
-/// Each figure is read for each key on its own, through the partial index on
-/// issuances by key and time, so the count reads only that key's entries and
+/// Each figure is read for each key on its own, through each kind's partial
+/// index on issuances by key and time, so the count reads only that key's entries and
 /// the most recent signature is found without reading back past it.
 // spec: IDP#signing-keys
 pub async fn key_usage(
@@ -1023,28 +1027,42 @@ pub async fn key_usage(
 		return Ok(HashMap::new());
 	}
 	// A token lives for its relying party's lifetime at most, so one still live
-	// was issued within that bound, and the expiry is read from those alone.
+	// was issued within that bound, and the expiry is read from those alone. A
+	// sign-in token lives for a minute, well within it.
 	let live_window_minutes = LIFETIME_MINUTES.end() + 1;
-	let rows: Vec<Row> = diesel::sql_query(
+	// Each kind of token through its own partial index, combined per key.
+	// spec: TSI#recording
+	let each = |select: &str, window: &str| {
+		SIGNED_ACTIONS
+			.iter()
+			.map(|action| {
+				format!(
+					"(SELECT {select} FROM audit_entries a \
+					   WHERE a.action = '{action}' \
+					     AND a.recorded_at > {window} \
+					     AND (a.outcome IS NULL OR a.outcome = 'done') \
+					     AND a.detail ->> 'kid' = k.kid)"
+				)
+			})
+			.collect::<Vec<_>>()
+	};
+	let latest = |select: &str, window: &str| {
+		each(&format!("{select} ORDER BY a.recorded_at DESC LIMIT 1"), window)
+	};
+	let rows: Vec<Row> = diesel::sql_query(format!(
 		"SELECT k.kid, \
-		        (SELECT a.recorded_at FROM audit_entries a \
-		          WHERE a.action = 'identity_token_issued' \
-		            AND a.recorded_at > now() - interval '90 days' \
-		            AND (a.outcome IS NULL OR a.outcome = 'done') \
-		            AND a.detail ->> 'kid' = k.kid \
-		          ORDER BY a.recorded_at DESC LIMIT 1) AS last_signed_at, \
-		        (SELECT count(*) FROM audit_entries a \
-		          WHERE a.action = 'identity_token_issued' \
-		            AND a.recorded_at > now() - interval '30 days' \
-		            AND (a.outcome IS NULL OR a.outcome = 'done') \
-		            AND a.detail ->> 'kid' = k.kid) AS signed_30d, \
-		        (SELECT max((a.detail ->> 'expires_at')::timestamptz) FROM audit_entries a \
-		          WHERE a.action = 'identity_token_issued' \
-		            AND a.recorded_at > now() - make_interval(mins => $2) \
-		            AND (a.outcome IS NULL OR a.outcome = 'done') \
-		            AND a.detail ->> 'kid' = k.kid) AS latest_expiry \
+		        GREATEST({}) AS last_signed_at, \
+		        ({}) AS signed_30d, \
+		        GREATEST({}) AS latest_expiry \
 		 FROM unnest($1::text[]) AS k(kid)",
-	)
+		latest("a.recorded_at", "now() - interval '90 days'").join(", "),
+		each("count(*)", "now() - interval '30 days'").join(" + "),
+		each(
+			"max((a.detail ->> 'expires_at')::timestamptz)",
+			"now() - make_interval(mins => $2)"
+		)
+		.join(", "),
+	))
 	.bind::<diesel::sql_types::Array<diesel::sql_types::Text>, _>(kids)
 	.bind::<diesel::sql_types::Integer, _>(live_window_minutes)
 	.load(conn)

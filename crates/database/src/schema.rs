@@ -141,6 +141,7 @@ diesel::table! {
 		version -> Nullable<Text>,
 		reported_at -> Timestamptz,
 		version_reported_at -> Nullable<Timestamptz>,
+		capabilities -> Array<Nullable<Text>>,
 	}
 }
 
@@ -514,6 +515,7 @@ diesel::table! {
 		key_data -> Bytea,
 		name -> Nullable<Text>,
 		is_active -> Bool,
+		last_authenticated_at -> Nullable<Timestamptz>,
 	}
 }
 

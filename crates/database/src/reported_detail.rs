@@ -95,7 +95,10 @@ impl ReportedDetail {
 		};
 		let (machine_extra, application_extra) = split_by_grain(extra);
 		MachineReportedDetail::record(db, machine, source, &machine_extra).await?;
-		Self::record_for_application(db, server, source, &application_extra, version).await
+		// A push in this shape has no place for capabilities, so it declares
+		// none.
+		// spec: STA#capabilities
+		Self::record_for_application(db, server, source, &application_extra, version, &[]).await
 	}
 
 	/// Record one source's detail for one application, the reporter having
@@ -105,13 +108,18 @@ impl ReportedDetail {
 	/// to, so what arrives here is the application's and the machine's went to
 	/// [`MachineReportedDetail::record`] directly. The replace and version
 	/// rules are [`Self::record`]'s.
+	///
+	/// `capabilities` is what the source declares for the application in this
+	/// push, replacing what it declared before.
 	// spec: FIG#sourcing
+	// spec: STA#capabilities
 	pub async fn record_for_application(
 		db: &mut AsyncPgConnection,
 		server: Uuid,
 		source: &str,
 		extra: &serde_json::Value,
 		version: Option<&VersionStr>,
+		capabilities: &[String],
 	) -> Result<()> {
 		use crate::schema::application_reported_detail::dsl;
 
@@ -132,11 +140,13 @@ impl ReportedDetail {
 				dsl::version.eq(version),
 				dsl::reported_at.eq(diesel::dsl::now),
 				dsl::version_reported_at.eq(carried_at),
+				dsl::capabilities.eq(capabilities),
 			))
 			.on_conflict((dsl::application_id, dsl::source))
 			.do_update()
 			.set((
 				dsl::extra.eq(extra),
+				dsl::capabilities.eq(capabilities),
 				// COALESCE over the excluded row: a version-less push keeps
 				// the version this source last reported.
 				dsl::version.eq(diesel::dsl::sql::<
@@ -155,6 +165,29 @@ impl ReportedDetail {
 			.await
 			.map_err(AppError::from)?;
 		Ok(())
+	}
+
+	/// Which of `applications` some source declares `capability` for.
+	// spec: STA#capabilities
+	pub async fn declaring(
+		db: &mut AsyncPgConnection,
+		applications: &[Uuid],
+		capability: &str,
+	) -> Result<std::collections::HashSet<Uuid>> {
+		use crate::schema::application_reported_detail::dsl;
+
+		if applications.is_empty() {
+			return Ok(Default::default());
+		}
+		let ids: Vec<Uuid> = dsl::application_reported_detail
+			.select(dsl::application_id)
+			.distinct()
+			.filter(dsl::application_id.eq_any(applications))
+			.filter(dsl::capabilities.contains(vec![capability]))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(ids.into_iter().collect())
 	}
 
 	/// Every source's current detail for one server.

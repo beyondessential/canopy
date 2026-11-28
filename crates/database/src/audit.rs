@@ -920,6 +920,18 @@ actions! {
 		}
 	}
 
+	/// A person was issued a token to sign in to a Tamanu. The token itself is
+	/// never recorded; `encrypted_to` is the thumbprint of the device key it was
+	/// encrypted to.
+	// spec: TSI#recording
+	TamanuSignInIssued = "tamanu_sign_in_issued", "Sign in to Tamanu" {
+		records { application: Record, machine: Record }
+		detail {
+			sub: String, jti: String, kid: String, expires_at: Timestamp,
+			encrypted_to: String, origin: String,
+		}
+	}
+
 	/// A machine or an application was granted identity tokens for a relying
 	/// party.
 	// spec: IDP#grants

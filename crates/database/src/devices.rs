@@ -84,7 +84,19 @@ pub struct DeviceKey {
 
 	/// Whether this key is active and can be used for authentication.
 	pub is_active: bool,
+
+	/// When this key last authenticated over mutual TLS, to within
+	/// [`AUTHENTICATED_STAMP_EVERY`]. Authentication over the tailnet carries
+	/// no key, and leaves it.
+	// spec: TSI#encryption
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub last_authenticated_at: Option<Timestamp>,
 }
+
+/// How stale a key's [`DeviceKey::last_authenticated_at`] may get before an
+/// authentication with it stamps it again, so the device API does not write on
+/// every request.
+pub const AUTHENTICATED_STAMP_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Device with its keys and latest connection info for management purposes.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1108,6 +1120,69 @@ impl DeviceKey {
 			.get_result(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Note that the active key `key` authenticated over mutual TLS just now,
+	/// unless it was noted within [`AUTHENTICATED_STAMP_EVERY`].
+	// spec: TSI#encryption
+	pub async fn mark_authenticated(db: &mut AsyncPgConnection, key: &[u8]) -> Result<()> {
+		use crate::schema::device_keys::dsl;
+
+		diesel::update(
+			dsl::device_keys
+				.filter(dsl::key_data.eq(key))
+				.filter(dsl::is_active.eq(true))
+				.filter(diesel::dsl::sql::<diesel::sql_types::Bool>(&format!(
+					"(last_authenticated_at IS NULL \
+					   OR last_authenticated_at < now() - interval '{} seconds')",
+					AUTHENTICATED_STAMP_EVERY.as_secs()
+				))),
+		)
+		.set(dsl::last_authenticated_at.eq(diesel::dsl::now))
+		.execute(db)
+		.await
+		.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// The active key of `device` that most recently authenticated over mutual
+	/// TLS, which is the one its own agent holds. None when no active key of
+	/// it has.
+	// spec: TSI#encryption
+	pub async fn last_authenticated(
+		db: &mut AsyncPgConnection,
+		device_id: Uuid,
+	) -> Result<Option<Self>> {
+		Ok(Self::last_authenticated_of(db, &[device_id])
+			.await?
+			.remove(&device_id))
+	}
+
+	/// [`Self::last_authenticated`] for several devices at once.
+	pub async fn last_authenticated_of(
+		db: &mut AsyncPgConnection,
+		device_ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, Self>> {
+		use crate::schema::device_keys::dsl;
+
+		if device_ids.is_empty() {
+			return Ok(Default::default());
+		}
+		let keys: Vec<Self> = dsl::device_keys
+			.select(Self::as_select())
+			.filter(dsl::device_id.eq_any(device_ids))
+			.filter(dsl::is_active.eq(true))
+			.filter(dsl::last_authenticated_at.is_not_null())
+			.distinct_on(dsl::device_id)
+			.order((
+				dsl::device_id,
+				dsl::last_authenticated_at.desc(),
+				dsl::id,
+			))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(keys.into_iter().map(|key| (key.device_id, key)).collect())
 	}
 
 	pub async fn find_by_device(db: &mut AsyncPgConnection, device_id: Uuid) -> Result<Vec<Self>> {
