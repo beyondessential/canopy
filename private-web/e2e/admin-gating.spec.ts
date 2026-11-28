@@ -2,7 +2,7 @@ import { expect, test } from "./test-fixtures";
 import { resetSeededTables, seedServerGroup } from "./seed";
 import { sidebarLink } from "./nav";
 
-const PROBE = "**/api/commons/is_current_user_admin";
+const PROBE = "**/api/commons/current_user_level";
 
 // "New group" on the fleet listing is admin-only and unambiguous, so it makes a
 // good stand-in for every admin-gated control in the app: they all read the
@@ -21,7 +21,7 @@ test.describe("admin gating", () => {
 	}) => {
 		const group = await seedServerGroup(sql, { name: "probe-count-group" });
 
-		// Routes used to each run their own `is_current_user_admin` query. That
+		// Routes used to each run their own admin query. That
 		// gave every page an independent answer — and an independent chance to
 		// fail — which is how one half of a page ended up in admin mode while
 		// the other half wasn't. Now the provider owns the probe, so visiting
@@ -60,7 +60,7 @@ test.describe("admin gating", () => {
 		await page.goto("/fleet");
 
 		await expect(
-			page.getByText("Couldn't check your admin status"),
+			page.getByText("Couldn't check your access level"),
 		).toBeVisible();
 		await expect(adminControl(page)).toBeHidden();
 	});
@@ -78,7 +78,7 @@ test.describe("admin gating", () => {
 		});
 
 		await page.goto("/fleet");
-		const banner = page.getByText("Couldn't check your admin status");
+		const banner = page.getByText("Couldn't check your access level");
 		await expect(banner).toBeVisible();
 
 		// The provider retries on its own; the button just skips the wait.

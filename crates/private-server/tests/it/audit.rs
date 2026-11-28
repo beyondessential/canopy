@@ -386,9 +386,13 @@ async fn only_an_administrator_reads_the_log() {
 	unsafe { std::env::set_var("CANOPY_TRUST_TAILSCALE_HEADERS", "1") };
 
 	commons_tests::server::run(async |mut conn, _, private| {
-		database::admins::Admin::add(&mut conn, "boss@example.com")
-			.await
-			.unwrap();
+		database::access_lists::AccessListEntry::add(
+			&mut conn,
+			database::access_lists::ListLevel::Admin,
+			"boss@example.com",
+		)
+		.await
+		.unwrap();
 
 		private
 			.post("/api/audit/list")

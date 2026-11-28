@@ -1,4 +1,5 @@
 import NotesHistory from "../components/NotesHistory";
+import { ProjectPanel } from "../components/ProjectDetails";
 import {
 	Alert,
 	Box,
@@ -213,6 +214,13 @@ export default function GroupDetail() {
 			))}
 
 			{operators.length > 0 && <OperatorsSection operators={operators} />}
+
+			<ProjectPanel
+				groupId={group.id}
+				groupName={group.name}
+				details={detail.data.project_details}
+				onSaved={detail.reload}
+			/>
 
 			{group.notes && (
 				<Paper variant="outlined" sx={{ p: 2 }}>

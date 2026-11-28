@@ -4,7 +4,7 @@
 // Nextest still runs every #[tokio::test] in parallel as usual.
 
 mod abandoned_grain_migration;
-mod admins;
+mod access_lists;
 mod ansible_catalogue;
 mod ansible_enums;
 mod ansible_leases;
@@ -91,6 +91,7 @@ mod snippet_name_constraint;
 mod status_figures;
 mod statuses_device_fk;
 mod tag_reserved_prefix;
+mod tailscale_users;
 mod upgrade_plan_rank_migration;
 mod upgrade_plans;
 mod version_known_issue_provenance;

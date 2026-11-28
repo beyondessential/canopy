@@ -7,6 +7,7 @@ import {
 	useState,
 } from "react";
 import { useApi } from "../api";
+import type { AccessLevel } from "../types";
 import { useReloadInterval } from "./useReloadInterval";
 
 /** How often to re-probe once we have an answer. */
@@ -15,11 +16,16 @@ const REPROBE_MS = 5 * 60_000;
 const RETRY_MS = 3_000;
 
 export interface AdminStatus {
-	/** `true` if confirmed admin, `false` if confirmed non-admin, `undefined`
-	 * while the status is still unknown (no probe has ever succeeded). */
+	/** The caller's access level once the probe has answered: `null` for a
+	 * caller bearing no tailnet identity, `undefined` while the level is still
+	 * unknown (no probe has ever succeeded). */
+	level: AccessLevel | null | undefined;
+	/** `true` if confirmed admin, `false` if confirmed below admin, `undefined`
+	 * while the level is still unknown. */
 	isAdmin: boolean | undefined;
 	/** The probe has answered at least once this session. While this is false,
-	 * `isAdmin` is `undefined` and admin-only UI is hidden. */
+	 * `level` and `isAdmin` are `undefined` and controls beyond reading are
+	 * hidden. */
 	resolved: boolean;
 	/** The most recent probe failed. Only interesting when `resolved` is false:
 	 * once we have an answer we keep it and ride out transient failures. */
@@ -33,9 +39,10 @@ export interface AdminStatus {
 // instead of silently reporting non-admin.
 const AdminContext = createContext<AdminStatus | null>(null);
 
-/** Single source of truth for the caller's admin status. Mounted once near the
- * router root; every consumer reads the same value through {@link useIsAdmin}
- * so the whole page agrees. Never probe `commons.is_current_user_admin`
+/** Single source of truth for the caller's access level. Mounted once near the
+ * router root; every consumer reads the same value through
+ * {@link useAccessLevel} or {@link useIsAdmin} so the whole page agrees. Never
+ * probe `commons.current_user_level`
  * directly from a component — per-component probes have their own lifecycle
  * and their own failure modes, which is how one half of a page ends up in
  * admin mode while the other half isn't. */
@@ -45,18 +52,21 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 	// single failed probe at initial load would hide every admin control
 	// until a manual hard reload.
 	const tick = useReloadInterval(REPROBE_MS);
-	const probe = useApi("commons", "is_current_user_admin", {}, [tick]);
+	const probe = useApi("commons", "current_user_level", {}, [tick]);
 	const { reload } = probe;
-	const answer = probe.status === "ok" ? probe.data : null;
+	// `null` is an answer (no tailnet identity), so "no answer" is `undefined`.
+	const answer = probe.status === "ok" ? probe.data : undefined;
 	const error = probe.status === "error" ? probe.error : null;
 
 	// Last confirmed answer. Kept sticky across background-refetch errors so a
 	// transient blip (e.g. the tailnet control plane momentarily unreachable)
 	// never yanks admin controls out from under an admin mid-session; only the
 	// first-ever load shows `undefined`.
-	const [known, setKnown] = useState<boolean | undefined>(undefined);
+	const [known, setKnown] = useState<AccessLevel | null | undefined>(
+		undefined,
+	);
 	useEffect(() => {
-		if (answer !== null) setKnown(answer);
+		if (answer !== undefined) setKnown(answer);
 	}, [answer]);
 
 	// Until we've learned the status at least once, retry a failed probe
@@ -73,7 +83,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
 	const value = useMemo<AdminStatus>(
 		() => ({
-			isAdmin: known,
+			level: known,
+			isAdmin: known === undefined ? undefined : known === "admin",
 			resolved: known !== undefined,
 			error,
 			reload,
@@ -95,6 +106,12 @@ export function useAdminStatus(): AdminStatus {
 		throw new Error("useAdminStatus must be used inside <AdminProvider>");
 	}
 	return ctx;
+}
+
+/** The caller's access level once the probe has resolved, `null` for a caller
+ * with no tailnet identity, or `undefined` while the level is unknown. */
+export function useAccessLevel(): AccessLevel | null | undefined {
+	return useAdminStatus().level;
 }
 
 /** Returns `true`/`false` once the probe has resolved, or `undefined` while the

@@ -4,7 +4,7 @@
 
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use database::{
-	admins::Admin,
+	access_lists::{AccessListEntry, ListLevel},
 	audit::{self, Entry, Filter},
 };
 use serde_json::{Value, json};
@@ -142,7 +142,9 @@ async fn writes_are_for_administrators_and_reads_for_any_tailnet_user() {
 	unsafe { std::env::set_var("CANOPY_TRUST_TAILSCALE_HEADERS", "1") };
 
 	commons_tests::server::run(async |mut conn, _, private| {
-		Admin::add(&mut conn, "boss@example.com").await.unwrap();
+		AccessListEntry::add(&mut conn, ListLevel::Admin, "boss@example.com")
+			.await
+			.unwrap();
 		let session = private
 			.post("/api/safety/session")
 			.add_header("Tailscale-User-Login", "boss@example.com")

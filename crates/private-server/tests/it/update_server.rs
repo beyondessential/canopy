@@ -13,7 +13,7 @@ async fn update_server_basic_fields() {
 		.await
 		.unwrap();
 
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+		conn.batch_execute("INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')")
 			.await
 			.unwrap();
 
@@ -44,7 +44,7 @@ async fn update_server_partial_update() {
 		.await
 		.unwrap();
 
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+		conn.batch_execute("INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')")
 			.await
 			.unwrap();
 
@@ -80,7 +80,7 @@ async fn update_server_device_id() {
 		.await
 		.unwrap();
 
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+		conn.batch_execute("INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')")
 			.await
 			.unwrap();
 
@@ -109,7 +109,7 @@ async fn update_server_invalid_rank() {
 		.await
 		.unwrap();
 
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+		conn.batch_execute("INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')")
 			.await
 			.unwrap();
 
@@ -131,9 +131,11 @@ async fn update_server_invalid_rank() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_server_not_found() {
 	commons_tests::server::run(async |mut conn, _, private| {
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
-			.await
-			.unwrap();
+		conn.batch_execute(
+			"INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')",
+		)
+		.await
+		.unwrap();
 
 		let response = private
 			.post("/api/fleet/applications/update")
@@ -158,7 +160,7 @@ async fn update_server_group_id() {
 			('88888888-8888-8888-8888-888888888888', 'Group A');
 			WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '99999999-9999-9999-9999-999999999999') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('99999999-9999-9999-9999-999999999999', 'Member', 'https://member.example.com', 'production', 'tamanu-facility', '99999999-9999-9999-9999-999999999999');
-			INSERT INTO admins (email) VALUES ('admin@example.com')",
+			INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')",
 		)
 		.await
 		.unwrap();
@@ -195,7 +197,7 @@ async fn update_server_clear_group_id() {
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Group');
 			WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Member', 'https://m2.example.com', 'production', 'tamanu-facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
-			INSERT INTO admins (email) VALUES ('admin@example.com')",
+			INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')",
 		)
 		.await
 		.unwrap();
@@ -227,7 +229,7 @@ async fn update_server_notes_and_tags() {
 		conn.batch_execute(
 			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', 'cccccccc-cccc-cccc-cccc-cccccccccccc') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Tagged Application', 'https://tagged.example.com', 'production', 'tamanu-central', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
-			INSERT INTO admins (email) VALUES ('admin@example.com')",
+			INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')",
 		)
 		.await
 		.unwrap();
@@ -274,7 +276,7 @@ async fn update_server_leaves_the_machine_identity_alone() {
 		.await
 		.unwrap();
 
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+		conn.batch_execute("INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')")
 			.await
 			.unwrap();
 

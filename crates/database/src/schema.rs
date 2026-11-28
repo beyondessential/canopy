@@ -2,13 +2,21 @@
 
 pub mod sql_types {
 	#[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+	#[diesel(postgres_type(name = "access_level"))]
+	pub struct AccessLevel;
+
+	#[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
 	#[diesel(postgres_type(name = "tsvector", schema = "pg_catalog"))]
 	pub struct Tsvector;
 }
 
 diesel::table! {
-	admins (email) {
-		email -> Text,
+	use diesel::sql_types::*;
+	use super::sql_types::AccessLevel;
+
+	access_list_entries (level, login) {
+		level -> AccessLevel,
+		login -> Text,
 		created_at -> Timestamptz,
 	}
 }
@@ -920,6 +928,13 @@ diesel::table! {
 }
 
 diesel::table! {
+	operator_homepages (login) {
+		login -> Text,
+		path -> Text,
+	}
+}
+
+diesel::table! {
 	operator_sessions (id) {
 		id -> Uuid,
 		login -> Text,
@@ -1132,6 +1147,9 @@ diesel::table! {
 		effective_version -> Nullable<Text>,
 		deleted_at -> Nullable<Timestamptz>,
 		slack_close_delay -> Interval,
+		project -> Nullable<Text>,
+		pm_in_charge -> Nullable<Text>,
+		ground_contact -> Nullable<Text>,
 	}
 }
 
@@ -1496,7 +1514,7 @@ diesel::joinable!(vulnerability_lapses -> vulnerability_decisions (decision_id))
 diesel::joinable!(vulnerability_matches -> vulnerabilities (vulnerability_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
-	admins,
+	access_list_entries,
 	ansible_catalogue,
 	ansible_leases,
 	ansible_secret_values_held,
@@ -1558,6 +1576,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	migration_tests,
 	migration_timings,
 	notes_revisions,
+	operator_homepages,
 	operator_sessions,
 	post_migration_timings,
 	recovery_vault_writes,

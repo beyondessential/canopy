@@ -1,4 +1,4 @@
-//! Enforcement of the safety-mode grades declared on the administrative
+//! Enforcement of the safety-mode grades declared on the operator
 //! surface's handlers.
 //!
 //! Spec: `.workhorse/specs/private-server/safety-modes.md` (id `SAFE`).
@@ -71,7 +71,7 @@ impl TouchLog {
 	fn due(&self, id: Uuid, login: &str) -> bool {
 		let now = Instant::now();
 		// A poisoned lock is no reason to refuse every request on the
-		// administrative surface: the worst a torn entry costs is one extra
+		// operator surface: the worst a torn entry costs is one extra
 		// write of a timestamp.
 		let mut written = self.0.lock().unwrap_or_else(|held| held.into_inner());
 		// Sessions come and go, so entries no longer standing in the way of a
@@ -96,7 +96,7 @@ impl TouchLog {
 	}
 }
 
-/// The grade each handler on the administrative surface requires, keyed by the
+/// The grade each handler on the operator surface requires, keyed by the
 /// method and routed path the request matched.
 #[derive(Debug, Default)]
 pub struct GradeMap(HashMap<(Method, String), SafetyMode>);

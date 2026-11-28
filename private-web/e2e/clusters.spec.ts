@@ -167,11 +167,11 @@ test.describe("a cluster's page", () => {
 		sql,
 	}) => {
 		const cluster = await seedCluster(sql, { name: "ops-readonly" });
-		await page.route("**/api/commons/is_current_user_admin", (route) =>
+		await page.route("**/api/commons/current_user_level", (route) =>
 			route.fulfill({
 				status: 200,
 				contentType: "application/json",
-				body: "false",
+				body: '"all"',
 			}),
 		);
 

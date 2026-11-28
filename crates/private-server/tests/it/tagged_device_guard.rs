@@ -24,7 +24,7 @@ async fn tagged_device_rejected_on_spa_fallback() {
 async fn tagged_device_rejected_on_api_route() {
 	commons_tests::server::run(async |_conn, _public, private| {
 		let response = private
-			.post("/api/commons/is_current_user_admin")
+			.post("/api/commons/current_user_level")
 			.add_header("Forwarded", "for=100.64.0.42")
 			.json(&serde_json::json!({}))
 			.await;

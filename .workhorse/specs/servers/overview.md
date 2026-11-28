@@ -147,7 +147,7 @@ The audit entry names the record and the revision, and the text is held in the r
 
 ## Navigating the two grains
 
-The fleet is browsed by group, and its listing offers the groups, the archived records, and the fleet's figures.
+The fleet is browsed by group, and its listing offers the groups, the projects view (see [PRJ](projects.md)), the archived records, and the fleet's figures.
 
 Everything the fleet holds is addressed beneath the fleet: its listings, its applications, its machines, and the clusters hosting applications, in the operator UI and in the private API alike.
 So a listing and a record are never told apart by which of them a name happens to match first, and an address says which grain it names.

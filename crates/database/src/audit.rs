@@ -960,6 +960,33 @@ actions! {
 		detail { audience: String, grants_revoked: usize }
 	}
 
+	/// A login was put on a level's list.
+	// spec: ADM#the-permissions-page
+	AccessListEntryAdded = "access_list_entry_added", "Add to access list", retention = Year {
+		records { }
+		detail { level: crate::access_lists::ListLevel, login: String }
+	}
+
+	/// A login was taken off a level's list.
+	// spec: ADM#the-permissions-page
+	AccessListEntryRemoved = "access_list_entry_removed", "Remove from access list", retention = Year {
+		records { }
+		detail { level: crate::access_lists::ListLevel, login: String }
+	}
+
+	/// A group's project details were changed. The detail holds each detail
+	/// changed, with its value before and after, and nothing for one left as
+	/// it was.
+	// spec: GRP#project-details
+	GroupProjectDetailsChanged = "group_project_details_changed", "Change project details" {
+		records { group: Record }
+		detail {
+			project: Option<crate::server_groups::DetailChange>,
+			pm_in_charge: Option<crate::server_groups::DetailChange>,
+			ground_contact: Option<crate::server_groups::DetailChange>,
+		}
+	}
+
 	/// An artifact was registered against a version.
 	ArtifactRegistered = "artifact_registered", "Register artifact" {
 		records { artifact: Record, version: Option<Record>, group: Option<Record>, device: Record }
@@ -1265,17 +1292,6 @@ pub struct Cursor {
 	pub id: Uuid,
 }
 
-/// The pattern matching a name that contains `name`, with the characters
-/// `ILIKE` reads specially taken literally.
-fn contains_pattern(name: &str) -> String {
-	format!(
-		"%{}%",
-		name.replace('\\', "\\\\")
-			.replace('%', "\\%")
-			.replace('_', "\\_")
-	)
-}
-
 /// Whether one of an entry's records has a name containing this. The names are
 /// read as one text, a name to a line, which the trigram index on it serves, so
 /// a search spanning a line break would match across two names: it has its line
@@ -1283,7 +1299,9 @@ fn contains_pattern(name: &str) -> String {
 macro_rules! name_matches {
 	($name:expr) => {
 		diesel::dsl::sql::<sql_types::Bool>("audit_record_names(records) ILIKE ")
-			.bind::<sql_types::Text, _>(contains_pattern(&$name.replace(['\n', '\r'], " ")))
+			.bind::<sql_types::Text, _>(crate::like::contains_pattern(
+				&$name.replace(['\n', '\r'], " "),
+			))
 	};
 }
 

@@ -697,9 +697,18 @@ impl Application {
 		} else {
 			format!("https://{url}")
 		};
-		Ok(UrlField(candidate.parse().map_err(|e| {
-			AppError::BadRequest(format!("Invalid URL: {e}"))
-		})?))
+		let parsed: url::Url = candidate
+			.parse()
+			.map_err(|e| AppError::BadRequest(format!("Invalid URL: {e}")))?;
+		// An address Canopy shows as a link, so a scheme that runs script
+		// where it is rendered is refused rather than stored.
+		if !matches!(parsed.scheme(), "http" | "https") {
+			return Err(AppError::BadRequest(format!(
+				"Invalid URL: {} is not a web address",
+				parsed.scheme()
+			)));
+		}
+		Ok(UrlField(parsed))
 	}
 
 	/// Map a hosting hint to the `cloud` flag.
@@ -1277,6 +1286,17 @@ fn canonicalize_host_defaults_to_https() {
 	assert_eq!(h("  bar.example.com  "), "https://bar.example.com/");
 	assert_eq!(h("http://insecure.example"), "http://insecure.example/");
 	assert_eq!(h("https://full.example/path"), "https://full.example/path");
+
+	for bad in [
+		"javascript:alert(1)",
+		"data:text/html,x",
+		"ftp://files.example",
+	] {
+		assert!(
+			Application::canonicalize_host(bad).is_err(),
+			"{bad} is not a web address"
+		);
+	}
 }
 
 #[test]

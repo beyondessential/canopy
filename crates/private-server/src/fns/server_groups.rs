@@ -2,14 +2,24 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
-use commons_servers::{audit::Audit, backup_jobs::BillingLabels, tailscale_auth::TailscaleAdmin};
+use commons_servers::{
+	audit::Audit,
+	backup_jobs::BillingLabels,
+	tailscale_auth::{TailscaleAdmin, TailscalePm},
+};
 use commons_types::{
 	Uuid,
-	server::{TagMap, rank::ServerRank},
+	server::{TagMap, app_type::ApplicationType, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 };
+use database::access_lists::normalise_login;
+use database::audit::{Action, Record};
 use database::notes_log::{self, Author, NotesRecord, NotesRevision, Via};
-use database::server_groups::{NewServerGroup, PartialServerGroup, ServerGroup};
+use database::server_groups::{
+	GroupMatch, NamedProjectDetails, NewServerGroup, PartialServerGroup, ProjectDetails,
+	ServerGroup,
+};
+use database::tailscale_users::TailscaleUser as KnownUser;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -24,6 +34,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only, silent: get))
 		.routes(routes!(write, audit_optional(NotesChanged): create))
 		.routes(routes!(write, audit_optional(NotesChanged): update))
+		.routes(routes!(write, audit(GroupProjectDetailsChanged): update_project_details))
+		.routes(routes!(read_only, silent: pm_candidates))
+		.routes(routes!(read_only, silent: projects))
 		.routes(routes!(read_only, silent: notes_history))
 		.routes(routes!(write, silent: delete))
 		.routes(routes!(write, silent: restore))
@@ -155,6 +168,10 @@ pub(crate) async fn group_billing_labels(
 pub struct GroupDetail {
 	/// The group itself.
 	pub group: ServerGroup,
+	/// The group's project details, the PM in charge with the display name
+	/// Canopy knows for them.
+	// spec: GRP#project-details
+	pub project_details: NamedProjectDetails,
 	/// The group's member applications, sorted by name, with current status and
 	/// display host included.
 	pub applications: Vec<super::applications::ServerInfo>,
@@ -294,9 +311,14 @@ pub async fn get(
 		)
 		.await?
 		.is_none();
+	let project_details = named_project_details(&mut conn, &[&group])
+		.await?
+		.remove(&group.id)
+		.unwrap_or_default();
 
 	Ok(Json(GroupDetail {
 		group,
+		project_details,
 		applications,
 		machines,
 		maintained,
@@ -492,6 +514,294 @@ pub async fn update(
 	Ok(Json(group))
 }
 
+/// The project details of `groups`, by group id, each PM in charge with the
+/// display name Canopy knows for their login.
+// spec: GRP#project-details
+pub(crate) async fn named_project_details(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	groups: &[&ServerGroup],
+) -> Result<std::collections::HashMap<Uuid, NamedProjectDetails>> {
+	let logins: Vec<&str> = groups
+		.iter()
+		.filter_map(|group| group.pm_in_charge.as_deref())
+		.collect();
+	let names = KnownUser::names_ignoring_case(conn, &logins).await?;
+	Ok(groups
+		.iter()
+		.map(|group| (group.id, group.project_details().named(&names)))
+		.collect())
+}
+
+/// Request to set a group's project details.
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateProjectDetailsArgs {
+	/// Identifier of the group.
+	pub server_group_id: Uuid,
+	/// The group's project details. Each replaces what is held; an absent or
+	/// empty one clears it.
+	pub details: ProjectDetails,
+}
+
+/// Set a group's project details.
+///
+/// Replaces the group's project, PM in charge and contact on the ground,
+/// from the PM level up, on any group. An empty detail is cleared. Responds
+/// 400 when the PM in charge doesn't have text either side of an `@`, and 404
+/// when the group does not exist. A save that leaves the details as they were
+/// records nothing.
+// spec: GRP#project-details
+#[utoipa::path(
+	post,
+	path = "/update_project_details",
+	operation_id = "server_groups_update_project_details",
+	tag = "server_groups",
+	security(("tailscale-pm" = [])),
+	request_body = UpdateProjectDetailsArgs,
+	responses(
+		(status = 200, body = NamedProjectDetails),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn update_project_details(
+	audit: Audit,
+	_pm: TailscalePm,
+	Json(args): Json<UpdateProjectDetailsArgs>,
+) -> Result<Json<NamedProjectDetails>> {
+	let mut conn = audit.begin().await?;
+	let change =
+		ServerGroup::update_project_details(&mut conn, args.server_group_id, args.details).await?;
+	if change.is_empty() {
+		audit.unchanged();
+	} else {
+		let group = Record::group(&mut conn, args.server_group_id).await?;
+		conn.record(Action::GroupProjectDetailsChanged {
+			group,
+			project: change.project,
+			pm_in_charge: change.pm_in_charge,
+			ground_contact: change.ground_contact,
+		})
+		.await?;
+	}
+	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
+	let details = named_project_details(&mut conn, &[&group])
+		.await?
+		.remove(&group.id)
+		.unwrap_or_default();
+	Ok(Json(details))
+}
+
+/// Someone the project details form suggests for the PM in charge.
+// spec: GRP#project-details
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PmCandidate {
+	/// Their login, which the PM in charge is set to.
+	pub login: String,
+	/// Their display name.
+	pub name: String,
+	/// Their profile picture's address, where one is known.
+	pub profile_pic: Option<String>,
+}
+
+/// List the people to suggest for a group's PM in charge.
+///
+/// The tailnet's members other than suspended ones, and everyone who has used
+/// Canopy, each once by login ignoring case, in order of display name. Where
+/// both know someone, the tailnet's name and picture are taken. Without a
+/// tailnet API configured, or before its users have been read, the list is the
+/// people who have used Canopy alone.
+// spec: GRP#project-details
+#[utoipa::path(
+	post,
+	path = "/pm_candidates",
+	operation_id = "server_groups_pm_candidates",
+	tag = "server_groups",
+	security(("tailscale-pm" = [])),
+	responses(
+		(status = 200, body = Vec<PmCandidate>),
+	),
+)]
+pub async fn pm_candidates(
+	State(state): State<AppState>,
+	_pm: TailscalePm,
+) -> Result<Json<Vec<PmCandidate>>> {
+	let mut conn = state.db.get().await?;
+	let mut by_login: std::collections::HashMap<String, PmCandidate> =
+		std::collections::HashMap::new();
+	// Least recently updated first, so a newer spelling of a login wins.
+	for known in KnownUser::all(&mut conn).await? {
+		by_login.insert(
+			normalise_login(&known.login),
+			PmCandidate {
+				login: known.login,
+				name: known.name,
+				profile_pic: known.profile_pic,
+			},
+		);
+	}
+	if let Some(directory) = &state.tailnet_directory {
+		for member in directory.users().await {
+			let key = normalise_login(&member.login);
+			let (known_name, known_pic) = by_login
+				.remove(&key)
+				.map(|known| (Some(known.name), known.profile_pic))
+				.unwrap_or_default();
+			let name = match known_name {
+				Some(known_name) if member.name.trim().is_empty() => known_name,
+				_ => member.name,
+			};
+			by_login.insert(
+				key,
+				PmCandidate {
+					login: member.login,
+					name,
+					profile_pic: member.profile_pic.or(known_pic),
+				},
+			);
+		}
+	}
+	let mut candidates: Vec<PmCandidate> = by_login.into_values().collect();
+	// Neither the control plane nor Canopy's own record always carries a
+	// display name, and a candidate named nothing is a blank row.
+	for candidate in &mut candidates {
+		if candidate.name.trim().is_empty() {
+			candidate.name = candidate.login.clone();
+		}
+	}
+	candidates.sort_by_cached_key(|candidate| {
+		(
+			candidate.name.to_lowercase(),
+			candidate.login.to_lowercase(),
+		)
+	});
+	Ok(Json(candidates))
+}
+
+/// A group the projects view lists: a live group with a live production
+/// environment.
+// spec: PRJ#what-each-group-shows
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProjectGroup {
+	/// Identifier of the group.
+	pub id: Uuid,
+	/// The group's name.
+	pub name: String,
+	/// The group's project details, the PM in charge with the display name
+	/// Canopy knows for them.
+	pub project_details: NamedProjectDetails,
+	/// Whether the caller is the group's PM in charge, matched on their tailnet
+	/// login ignoring case, so the view sets the caller's own groups apart.
+	// spec: PRJ#which-groups-it-lists
+	pub yours: bool,
+	/// The Tamanu in the group's production environment: its central first,
+	/// then each facility in order of name. Empty where the production
+	/// environment holds neither.
+	pub tamanu: Vec<ProjectTamanu>,
+}
+
+/// A production Tamanu central or facility, with the addresses it is reached
+/// at.
+// spec: PRJ#what-each-group-shows
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProjectTamanu {
+	/// Identifier of the application.
+	pub application_id: Uuid,
+	/// Whether it is a central or a facility.
+	pub r#type: ApplicationType,
+	/// The application's own name, where an operator gave it one. Without
+	/// one it presents as its type.
+	pub name: Option<String>,
+	/// The machine it runs on, which tells apart facilities sharing a name.
+	/// Absent for an application hosted on a cluster.
+	pub machine_id: Option<Uuid>,
+	/// The name of the machine it runs on. Absent for an application hosted
+	/// on a cluster.
+	pub machine_name: Option<String>,
+	/// Its public address: the application's configured URL, where it has
+	/// one.
+	pub url: Option<String>,
+	/// Its tailnet address: the tailnet name of the device bound to its
+	/// machine, to link over HTTPS at that MagicDNS name. Absent for an
+	/// application hosted on a cluster, or a machine with no bound device.
+	// spec: SVC
+	pub tailnet_name: Option<String>,
+}
+
+/// List the fleet's projects.
+///
+/// Every live group with a live production environment, in order of name,
+/// each with its project details, whether the caller is its PM in charge, and
+/// its production Tamanu central and facilities.
+// spec: PRJ
+#[utoipa::path(
+	post,
+	path = "/projects",
+	operation_id = "server_groups_projects",
+	tag = "server_groups",
+	security(("tailscale-user" = [])),
+	responses(
+		(status = 200, body = Vec<ProjectGroup>),
+	),
+)]
+pub async fn projects(
+	State(state): State<AppState>,
+	user: TailscaleUser,
+) -> Result<Json<Vec<ProjectGroup>>> {
+	let mut conn = state.db.get().await?;
+	let viewer = user.login.to_lowercase();
+	let groups = ServerGroup::with_production_environment(&mut conn).await?;
+	let ids: Vec<Uuid> = groups.iter().map(|group| group.id).collect();
+	let logins: Vec<&str> = groups
+		.iter()
+		.filter_map(|group| group.details.pm_in_charge.as_deref())
+		.collect();
+	let names = KnownUser::names_ignoring_case(&mut conn, &logins).await?;
+	let mut tamanu: std::collections::HashMap<Uuid, Vec<ProjectTamanu>> =
+		std::collections::HashMap::new();
+	let mut found = ServerGroup::production_tamanu(&mut conn, &ids).await?;
+	// Central first, then facilities by the name each presents, the machine
+	// telling apart two sharing one.
+	// spec: PRJ#what-each-group-shows
+	found.sort_by_cached_key(|app| {
+		(
+			app.r#type != ApplicationType::TamanuCentral,
+			app.name
+				.clone()
+				.unwrap_or_else(|| app.r#type.to_string().replace('-', " "))
+				.to_lowercase(),
+			app.machine_name.clone().unwrap_or_default().to_lowercase(),
+			app.application_id,
+		)
+	});
+	for app in found {
+		tamanu.entry(app.group_id).or_default().push(ProjectTamanu {
+			application_id: app.application_id,
+			r#type: app.r#type,
+			name: app.name,
+			machine_id: app.machine_id,
+			machine_name: app.machine_name,
+			url: app.url.map(|url| url.0.to_string()),
+			tailnet_name: app.tailnet_name,
+		});
+	}
+	Ok(Json(
+		groups
+			.into_iter()
+			.map(|group| ProjectGroup {
+				yours: group
+					.details
+					.pm_in_charge
+					.as_deref()
+					.is_some_and(|pm| pm.to_lowercase() == viewer),
+				project_details: group.details.named(&names),
+				tamanu: tamanu.remove(&group.id).unwrap_or_default(),
+				id: group.id,
+				name: group.name,
+			})
+			.collect(),
+	))
+}
+
 /// A group's notes revision log.
 ///
 /// Every change to the group's notes with who made it, how, and when, newest
@@ -626,6 +936,9 @@ pub async fn search(
 	Json(args): Json<ServerGroupsSearchArgs>,
 ) -> Result<Json<Vec<ServerGroup>>> {
 	let mut conn = state.db.get().await?;
-	let groups = ServerGroup::search(&mut conn, &args.query).await?;
+	// The group picker shows a short list to choose from.
+	let groups = ServerGroup::search(&mut conn, &args.query, GroupMatch::Name, Some(50))
+		.await?
+		.groups;
 	Ok(Json(groups))
 }

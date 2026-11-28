@@ -14,6 +14,7 @@ import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import { useEffect, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { useIsAdmin } from "../hooks/useIsAdmin";
+import { HomeToggle } from "./HomeToggle";
 import { SafetyModeBand } from "./SafetyModeControl";
 
 /** Whether `pathname` is `path` or somewhere beneath it. */
@@ -82,9 +83,11 @@ const SECTIONS: NavSection[] = [
 						// Everything the fleet holds is reached from its groups.
 						current: (pathname) =>
 							under("/fleet")(pathname) &&
+							!under("/fleet/pm")(pathname) &&
 							!under("/fleet/archived")(pathname) &&
 							!under("/fleet/figures")(pathname),
 					},
+					page("Projects", "/fleet/pm"),
 					page("Archived", "/fleet/archived"),
 					page("Figures", "/fleet/figures"),
 				],
@@ -137,8 +140,8 @@ const SECTIONS: NavSection[] = [
 			{
 				heading: "Access",
 				pages: [
-					page("Admins", "/settings/admins"),
-					page("MCP access", "/settings/mcp-tokens"),
+					page("Permissions", "/settings/permissions", true),
+					page("MCP access", "/settings/mcp-tokens", true),
 					page("Certificate authority", "/settings/certificate-authority"),
 					page("Identity provider", "/settings/identity-provider"),
 					page("Audit log", "/settings/audit-log", true),
@@ -167,6 +170,16 @@ const SECTIONS: NavSection[] = [
 /** The sections offered, given whether the SQL console is available. */
 export function navSections(sqlAvailable: boolean): NavSection[] {
 	return SECTIONS.filter((section) => sqlAvailable || !section.needsSql);
+}
+
+/** The first of a section's pages the caller is shown, which is where the
+ * section itself lands. */
+export function firstPage(sectionTo: string, isAdmin: boolean): string {
+	const section = SECTIONS.find((s) => s.to === sectionTo);
+	const visible = section?.groups
+		?.flatMap((group) => group.pages)
+		.find((p) => isAdmin || !p.adminOnly);
+	return visible?.to ?? sectionTo;
 }
 
 /** The Canopy mark and name, linking home. */
@@ -348,8 +361,18 @@ export function AppSidebar({
 
 	return (
 		<Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-			<Box sx={{ px: 3, py: 1.5 }}>
+			<Box
+				sx={{
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "space-between",
+					pl: 3,
+					pr: 1,
+					py: 1.5,
+				}}
+			>
 				<Brand />
+				<HomeToggle />
 			</Box>
 			<Box
 				component="nav"

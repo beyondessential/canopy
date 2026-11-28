@@ -17,14 +17,19 @@ import {
 	AppSidebar,
 	Brand,
 	IncidentCount,
+	firstPage,
 	navSections,
 } from "./components/AppSidebar";
-import { AdminProvider } from "./hooks/useIsAdmin";
+import { AdminProvider, useAdminStatus } from "./hooks/useIsAdmin";
 import { SafetyModeProvider } from "./hooks/useSafetyMode";
 import { SafetyModeControl } from "./components/SafetyModeControl";
 import { ApplicationTypesProvider } from "./hooks/useApplicationTypes";
 import { useReloadInterval } from "./hooks/useReloadInterval";
-import Admins from "./routes/Admins";
+import Permissions from "./routes/Permissions";
+import NotFound from "./routes/NotFound";
+import Projects from "./routes/Projects";
+import { HomepageProvider } from "./hooks/useHomepage";
+import { HomeRedirect } from "./components/HomeToggle";
 import BackupConfig from "./routes/BackupConfig";
 import BackupDefaults from "./routes/BackupDefaults";
 import RecoveryVault from "./routes/RecoveryVault";
@@ -83,6 +88,14 @@ import VulnerabilitySources from "./routes/VulnerabilitySources";
 ///
 /// Replaces rather than pushes, so the back button goes where the operator came
 /// from instead of bouncing off the redirect.
+/** Settings lands on the first of its pages the caller is shown, once their
+ * level is known. */
+function SettingsIndex() {
+	const { resolved, isAdmin } = useAdminStatus();
+	if (!resolved) return null;
+	return <Navigate to={firstPage("/settings", isAdmin === true)} replace />;
+}
+
 function Moved({ to }: { to: (id: string) => string }) {
 	const { id = "" } = useParams<{ id: string }>();
 	return <Navigate to={to(id)} replace />;
@@ -139,6 +152,7 @@ export default function App() {
 	return (
 		<AdminProvider>
 		<SafetyModeProvider>
+		<HomepageProvider>
 		<ApplicationTypesProvider>
 		<Box sx={{ display: "flex" }}>
 			{wide ? (
@@ -223,7 +237,7 @@ export default function App() {
 			<SelfAlertsBanner reloadTick={reloadTick} />
 			<Container component="main" maxWidth="lg" sx={{ py: 3 }}>
 				<Routes>
-					<Route path="/" element={<Navigate to="/status" replace />} />
+					<Route path="/" element={<HomeRedirect />} />
 					<Route path="/status" element={<Status />} />
 					<Route path="/alerts" element={<SelfAlerts />} />
 					<Route path="/incidents" element={<Incidents />} />
@@ -252,6 +266,7 @@ export default function App() {
 					<Route path="/versions/:version" element={<VersionDetail />} />
 					<Route path="/fleet" element={<Servers />}>
 						<Route index element={<GroupsList />} />
+						<Route path="pm" element={<Projects />} />
 						<Route path="archived" element={<ArchivedList />} />
 						<Route path="figures" element={<FleetFigures />} />
 					</Route>
@@ -366,11 +381,12 @@ export default function App() {
 						}
 					/>
 					<Route path="/settings">
+						<Route index element={<SettingsIndex />} />
+						<Route path="permissions" element={<Permissions />} />
 						<Route
-							index
-							element={<Navigate to="/settings/admins" replace />}
+							path="admins"
+							element={<Navigate to="/settings/permissions" replace />}
 						/>
-						<Route path="admins" element={<Admins />} />
 						<Route path="backup-defaults" element={<BackupDefaults />} />
 						<Route path="recovery" element={<RecoveryVault />} />
 						<Route path="healthchecks" element={<Healthchecks />} />
@@ -413,11 +429,13 @@ export default function App() {
 						/>
 					</Route>
 					<Route path="/sql" element={<Sql />} />
+					<Route path="*" element={<NotFound />} />
 				</Routes>
 			</Container>
 			</Box>
 		</Box>
 		</ApplicationTypesProvider>
+		</HomepageProvider>
 		</SafetyModeProvider>
 		</AdminProvider>
 	);

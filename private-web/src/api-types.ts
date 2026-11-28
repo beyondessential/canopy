@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/api/admins/add": {
+    "/api/access/add": {
         parameters: {
             query?: never;
             header?: never;
@@ -14,18 +14,17 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Add an email address to the admin allow-list.
-         * @description Grants admin access to the given email address. Has no effect if the
-         *     email is already an admin.
+         * Put a login on a level's list.
+         * @description Has no effect where the login is already on it, whatever its case.
          */
-        post: operations["admin_add"];
+        post: operations["access_add"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/admins/delete": {
+    "/api/access/list": {
         parameters: {
             query?: never;
             header?: never;
@@ -35,18 +34,19 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Remove an email address from the admin allow-list.
-         * @description Revokes admin access for the given email address. Has no effect if the
-         *     email was not an admin.
+         * The lists, and what the tailnet policy grants each level.
+         * @description Returns admin then PM, each with the logins on its list and the sources the
+         *     tailnet policy grants it to as the policy writes them, with who each
+         *     covers; and whether and when Canopy last read the policy.
          */
-        post: operations["admin_delete"];
+        post: operations["access_list"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/admins/list": {
+    "/api/access/remove": {
         parameters: {
             query?: never;
             header?: never;
@@ -56,11 +56,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the admin allow-list.
-         * @description Returns the email addresses of every account currently granted admin
-         *     access to this API, in no particular order.
+         * Take a login off a level's list.
+         * @description Has no effect where the login is not on it, whatever its case.
          */
-        post: operations["admin_list"];
+        post: operations["access_remove"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1641,7 +1640,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/commons/is_current_user_admin": {
+    "/api/commons/current_user_level": {
         parameters: {
             query?: never;
             header?: never;
@@ -1651,18 +1650,18 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Check whether the caller is an admin.
-         * @description Reports `true` if the caller is authenticated and their identity is on
-         *     the admin allow-list, `false` if the caller definitely isn't an admin —
-         *     including when the caller is not authenticated at all. This endpoint
-         *     intentionally requires no authentication of its own, since it exists so a
-         *     client can check whether to show admin-only controls before doing anything
-         *     else.
+         * The caller's access level.
+         * @description Reports the level the caller holds on the operator surface: `admin`, `pm`,
+         *     or `all` for a caller holding nothing higher, and `null` for a caller
+         *     bearing no tailnet identity at all. This endpoint intentionally requires no
+         *     level of its own, since it exists so a client can decide which controls to
+         *     offer before doing anything else.
          *
-         *     A failure that isn't an authorization outcome (a database blip while
-         *     reading the allow-list, say) is reported as an error, not as `false`.
+         *     A failure that isn't an authorisation outcome (a database blip while
+         *     reading the access lists, say) is reported as an error, not as a lower
+         *     level, because a caller cannot tell a wrongly-low answer from a real one.
          */
-        post: operations["is_current_user_admin"];
+        post: operations["current_user_level"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2827,6 +2826,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fleet/groups/pm_candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the people to suggest for a group's PM in charge.
+         * @description The tailnet's members other than suspended ones, and everyone who has used
+         *     Canopy, each once by login ignoring case, in order of display name. Where
+         *     both know someone, the tailnet's name and picture are taken. Without a
+         *     tailnet API configured, or before its users have been read, the list is the
+         *     people who have used Canopy alone.
+         */
+        post: operations["server_groups_pm_candidates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/groups/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the fleet's projects.
+         * @description Every live group with a live production environment, in order of name,
+         *     each with its project details, whether the caller is its PM in charge, and
+         *     its production Tamanu central and facilities.
+         */
+        post: operations["server_groups_projects"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet/groups/restore": {
         parameters: {
             query?: never;
@@ -2909,6 +2954,30 @@ export interface paths {
          *     group does not exist and 400 if the request is invalid.
          */
         post: operations["server_groups_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/groups/update_project_details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a group's project details.
+         * @description Replaces the group's project, PM in charge and contact on the ground,
+         *     from the PM level up, on any group. An empty detail is cleared. Responds
+         *     400 when the PM in charge doesn't have text either side of an `@`, and 404
+         *     when the group does not exist. A save that leaves the details as they were
+         *     records nothing.
+         */
+        post: operations["server_groups_update_project_details"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3434,6 +3503,69 @@ export interface paths {
          *     malformed variable reference, or an odd number of entries.
          */
         post: operations["healthcheck_update_rules"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/homepage/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clear the caller's choice, so the root opens their default again.
+         * @description Has no effect where the caller has chosen nothing.
+         */
+        post: operations["homepage_clear"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/homepage/get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The caller's homepage.
+         * @description Returns the path the caller has chosen, if any, and the default the tailnet
+         *     policy gives them, if any. The root opens the chosen path, else the
+         *     default, else the status page.
+         */
+        post: operations["homepage_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/homepage/set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Choose the caller's homepage, replacing any earlier choice.
+         * @description Refuses a path that does not begin with a single `/`, is `/` alone, or
+         *     carries a query or fragment.
+         */
+        post: operations["homepage_set"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6075,6 +6207,19 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description A level on the operator surface. The levels are a ladder: each includes
+         *     everything the levels below it may do, so they order from all up to admin.
+         * @enum {string}
+         */
+        AccessLevel: "all" | "pm" | "admin";
+        /** @description Who holds the levels above all, and how. */
+        AccessOverview: {
+            /** @description Admin then PM, each with its list and what the policy grants it. */
+            levels: components["schemas"]["LevelHolders"][];
+            /** @description The tailnet policy Canopy reads levels from. */
+            policy: components["schemas"]["PolicyStatus"];
+        };
         /** @description Who took an action. */
         Actor: {
             /** @enum {string} */
@@ -6101,11 +6246,6 @@ export interface components {
             job: string;
             /** @enum {string} */
             kind: "canopy";
-        };
-        /** @description Request body for granting admin access to an email address. */
-        AddArgs: {
-            /** @description The email address to add to the admin allow-list. */
-            email: string;
         };
         /** @description Request to register an existing public key on a device. */
         AddKeyArgs: {
@@ -7857,6 +7997,16 @@ export interface components {
              */
             relay_identity_id: string;
         };
+        /**
+         * @description A source of a grant conferring a level, as the policy writes it, with who
+         *     it covers.
+         */
+        ConferringSource: {
+            /** @description Who it resolves to. */
+            covers: components["schemas"]["SourceCoverage"];
+            /** @description The source as written in the grant. */
+            source: string;
+        };
         /** @description Request parameters for listing a device's connection history. */
         ConnectionHistoryArgs: {
             before?: null | components["schemas"]["HistoryCursor"];
@@ -8111,11 +8261,6 @@ export interface components {
             namespace?: components["schemas"]["NamespaceRef"];
             /** @description The source whose check to decommission. */
             source: string;
-        };
-        /** @description Request body for revoking admin access from an email address. */
-        DeleteArgs: {
-            /** @description The email address to remove from the admin allow-list. */
-            email: string;
         };
         /** @description A DNS name an operator has denied to the machine for the section's kind. */
         DeniedView: {
@@ -8790,6 +8935,11 @@ export interface components {
              *     ended and watching resumes when it elapses.
              */
             maintenance_settling: boolean;
+            /**
+             * @description The group's project details, the PM in charge with the display name
+             *     Canopy knows for them.
+             */
+            project_details: components["schemas"]["NamedProjectDetails"];
         };
         /** @description Identifies the server group whose status details to fetch. */
         GroupDetailsArgs: {
@@ -9163,6 +9313,16 @@ export interface components {
              * @description The window, as returned when it was listed.
              */
             id: string;
+        };
+        /** @description The caller's homepage: the page they chose, and their default. */
+        Homepage: {
+            /** @description The path the caller has chosen, if any. */
+            chosen?: string | null;
+            /**
+             * @description The default the tailnet policy gives the caller, if any. Where it gives
+             *     none, the default is the status page.
+             */
+            default?: string | null;
         };
         /** @description One host's machine, chosen by the operator. */
         HostChoice: {
@@ -10086,6 +10246,21 @@ export interface components {
              */
             lease_id: string;
         };
+        /** @description The two sources of one level. */
+        LevelHolders: {
+            /**
+             * @description The sources of the policy's grants conferring the level, as the policy
+             *     writes them, with who each covers. Empty where the policy has not been
+             *     read.
+             */
+            granted_to: components["schemas"]["ConferringSource"][];
+            /** @description The key a Canopy capability value sets true to confer the level. */
+            key: string;
+            /** @description The level. */
+            level: components["schemas"]["ListLevel"];
+            /** @description The logins on the level's list, alphabetically. */
+            list: components["schemas"]["ListedLogin"][];
+        };
         /** @description The window to lift. */
         LiftArgs: {
             /**
@@ -10157,6 +10332,13 @@ export interface components {
              */
             limit?: number | null;
         };
+        /** @description A login on a level's list. */
+        ListEntryArgs: {
+            /** @description The level whose list this is. */
+            level: components["schemas"]["ListLevel"];
+            /** @description The tailnet login, in any case. */
+            login: string;
+        };
         /** @description Filters for listing the issues raised by one device. */
         ListForDeviceArgs: {
             /**
@@ -10189,6 +10371,21 @@ export interface components {
              * @description Identifier of the server group.
              */
             server_group_id: string;
+        };
+        /**
+         * @description A level that has a list, which is every level above all.
+         * @enum {string}
+         */
+        ListLevel: "pm" | "admin";
+        /** @description A login on a list. */
+        ListedLogin: {
+            /**
+             * Format: date-time
+             * @description When it was put on the list.
+             */
+            added_at: string;
+            /** @description The login, lowercased. */
+            login: string;
         };
         /**
          * @description The live state of a run still in flight, from the progress it has reported.
@@ -11404,6 +11601,27 @@ export interface components {
             zone?: string | null;
         };
         /**
+         * @description A group's project details as they are read, the PM in charge with the
+         *     display name Canopy knows for them.
+         */
+        NamedProjectDetails: {
+            /** @description The contact on the ground, as free text. Absent when not filled in. */
+            ground_contact?: string | null;
+            /**
+             * @description The PM in charge, by their login or address as entered. Absent when
+             *     not filled in.
+             */
+            pm_in_charge?: string | null;
+            /**
+             * @description The display name Canopy knows for the PM in charge's login, compared
+             *     ignoring case. Absent where it knows none, in which case the PM in
+             *     charge is named as entered.
+             */
+            pm_in_charge_name?: string | null;
+            /** @description The project the group serves, as free text. Absent when not filled in. */
+            project?: string | null;
+        };
+        /**
          * @description A namespace on the wire, as the pair of fields it is stored as.
          *
          *     The private API names a check by source, namespace and name, so this is
@@ -11986,6 +12204,33 @@ export interface components {
              */
             group_id: string;
         };
+        /** @description Someone the project details form suggests for the PM in charge. */
+        PmCandidate: {
+            /** @description Their login, which the PM in charge is set to. */
+            login: string;
+            /** @description Their display name. */
+            name: string;
+            /** @description Their profile picture's address, where one is known. */
+            profile_pic?: string | null;
+        };
+        /** @description Whether and when Canopy read the tailnet policy. */
+        PolicyStatus: {
+            /** @description The capability whose values confer levels. */
+            capability: string;
+            /**
+             * @description Whether Canopy is configured to read the policy. Where it is not, the
+             *     lists alone confer levels.
+             */
+            configured: boolean;
+            /**
+             * Format: date-time
+             * @description When the policy was last read successfully; null where it is not
+             *     configured or no read has succeeded yet.
+             */
+            read_at?: string | null;
+            /** @description The tag a grant's destinations must include to confer a level. */
+            service_tag: string;
+        };
         /**
          * @description One step of the work an application does after its migrations, such as
          *     rebuilding derived data, in the order it ran.
@@ -12121,6 +12366,87 @@ export interface components {
              * @example /errors/resource-not-found
              */
             type: string;
+        };
+        /** @description A group's three project details, each absent when not filled in. */
+        ProjectDetails: {
+            /** @description The contact on the ground, as free text. */
+            ground_contact?: string | null;
+            /**
+             * @description The PM in charge, by their tailnet login or an email address: text
+             *     either side of an `@`.
+             */
+            pm_in_charge?: string | null;
+            /** @description The project the group serves, as free text. */
+            project?: string | null;
+        };
+        /**
+         * @description A group the projects view lists: a live group with a live production
+         *     environment.
+         */
+        ProjectGroup: {
+            /**
+             * Format: uuid
+             * @description Identifier of the group.
+             */
+            id: string;
+            /** @description The group's name. */
+            name: string;
+            /**
+             * @description The group's project details, the PM in charge with the display name
+             *     Canopy knows for them.
+             */
+            project_details: components["schemas"]["NamedProjectDetails"];
+            /**
+             * @description The Tamanu in the group's production environment: its central first,
+             *     then each facility in order of name. Empty where the production
+             *     environment holds neither.
+             */
+            tamanu: components["schemas"]["ProjectTamanu"][];
+            /**
+             * @description Whether the caller is the group's PM in charge, matched on their tailnet
+             *     login ignoring case, so the view sets the caller's own groups apart.
+             */
+            yours: boolean;
+        };
+        /**
+         * @description A production Tamanu central or facility, with the addresses it is reached
+         *     at.
+         */
+        ProjectTamanu: {
+            /**
+             * Format: uuid
+             * @description Identifier of the application.
+             */
+            application_id: string;
+            /**
+             * Format: uuid
+             * @description The machine it runs on, which tells apart facilities sharing a name.
+             *     Absent for an application hosted on a cluster.
+             */
+            machine_id?: string | null;
+            /**
+             * @description The name of the machine it runs on. Absent for an application hosted
+             *     on a cluster.
+             */
+            machine_name?: string | null;
+            /**
+             * @description The application's own name, where an operator gave it one. Without
+             *     one it presents as its type.
+             */
+            name?: string | null;
+            /**
+             * @description Its tailnet address: the tailnet name of the device bound to its
+             *     machine, to link over HTTPS at that MagicDNS name. Absent for an
+             *     application hosted on a cluster, or a machine with no bound device.
+             */
+            tailnet_name?: string | null;
+            /** @description Whether it is a central or a facility. */
+            type: components["schemas"]["ApplicationType"];
+            /**
+             * @description Its public address: the application's configured URL, where it has
+             *     one.
+             */
+            url?: string | null;
         };
         /** @description Request to mint a new device credential. */
         ProvisionArgs: {
@@ -13713,6 +14039,11 @@ export interface components {
             deleted_at?: string | null;
             effective_version?: null | components["schemas"]["VersionStr"];
             /**
+             * @description The group's contact on the ground, as free text. Absent when not filled
+             *     in.
+             */
+            ground_contact?: string | null;
+            /**
              * Format: uuid
              * @description Unique identifier for this group.
              */
@@ -13721,6 +14052,13 @@ export interface components {
             name: string;
             /** @description Free-form operator notes about this group. */
             notes?: string;
+            /**
+             * @description The PM in charge of the group's project, by their tailnet login or an
+             *     email address. Absent when not filled in.
+             */
+            pm_in_charge?: string | null;
+            /** @description The project the group serves, as free text. Absent when not filled in. */
+            project?: string | null;
             /**
              * Format: int64
              * @description How long, in seconds, an incident lingers after its last failure
@@ -14229,6 +14567,14 @@ export interface components {
             /** @description The machine or application. */
             subject: components["schemas"]["GrantSubject"];
         };
+        /** @description A page to choose as homepage. */
+        SetHomepageArgs: {
+            /**
+             * @description The page's path within the interface, beginning with a single `/`,
+             *     without a query or fragment.
+             */
+            path: string;
+        };
         /** @description Request to set a machine's schedule override for one backup type. */
         SetMachineScheduleArgs: {
             /**
@@ -14470,6 +14816,21 @@ export interface components {
              * @description Time until which the issue should be snoozed.
              */
             until: string;
+        };
+        /** @description Who a grant's source covers, as the permissions page reports it. */
+        SourceCoverage: {
+            /** @enum {string} */
+            kind: "group";
+            members: number;
+        } | {
+            /** @enum {string} */
+            kind: "person";
+        } | {
+            /** @enum {string} */
+            kind: "everyone";
+        } | {
+            /** @enum {string} */
+            kind: "no_one";
         };
         /**
          * @description One reporting source with its reachability policy and fleet-wide
@@ -15078,6 +15439,19 @@ export interface components {
             key_id: string;
             /** @description New display name for the key, or null to clear it. */
             name?: string | null;
+        };
+        /** @description Request to set a group's project details. */
+        UpdateProjectDetailsArgs: {
+            /**
+             * @description The group's project details. Each replaces what is held; an absent or
+             *     empty one clears it.
+             */
+            details: components["schemas"]["ProjectDetails"];
+            /**
+             * Format: uuid
+             * @description Identifier of the group.
+             */
+            server_group_id: string;
         };
         /** @description Request body for replacing a check's conditional rules. */
         UpdateRulesArgs: {
@@ -16000,7 +16374,7 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    admin_add: {
+    access_add: {
         parameters: {
             query?: never;
             header?: never;
@@ -16009,16 +16383,24 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AddArgs"];
+                "application/json": components["schemas"]["ListEntryArgs"];
             };
         };
         responses: {
-            /** @description Admin added (idempotent). */
+            /** @description On the list. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
             };
             401: {
                 headers: {
@@ -16038,45 +16420,7 @@ export interface operations {
             };
         };
     };
-    admin_delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeleteArgs"];
-            };
-        };
-        responses: {
-            /** @description Admin removed (idempotent). */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    admin_list: {
+    access_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -16085,14 +16429,51 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Admin emails. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": string[];
+                    "application/json": components["schemas"]["AccessOverview"];
                 };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    access_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListEntryArgs"];
+            };
+        };
+        responses: {
+            /** @description Off the list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: {
                 headers: {
@@ -17978,6 +18359,22 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -18109,6 +18506,22 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BestoolSnippetDetail"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
             500: {
@@ -18476,7 +18889,7 @@ export interface operations {
             };
         };
     };
-    is_current_user_admin: {
+    current_user_level: {
         parameters: {
             query?: never;
             header?: never;
@@ -18485,16 +18898,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description `true` if the caller's Tailscale identity is an administrator (on the admin allow-list, or granted admin by the tailnet policy); `false` otherwise (including when no Tailscale identity is present). */
+            /** @description The caller's level, or `null` when no tailnet identity is present. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": boolean;
+                    "application/json": null | components["schemas"]["AccessLevel"];
                 };
             };
-            /** @description The caller's admin status could not be determined. Distinct from a `false` answer: retry rather than treating the caller as a non-admin. */
+            /** @description The caller's level could not be determined. Distinct from any answer: retry rather than treating the caller as holding a lower level. */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -20004,6 +20417,44 @@ export interface operations {
             };
         };
     };
+    server_groups_pm_candidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PmCandidate"][];
+                };
+            };
+        };
+    };
+    server_groups_projects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectGroup"][];
+                };
+            };
+        };
+    };
     server_groups_restore: {
         parameters: {
             query?: never;
@@ -20098,6 +20549,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerGroup"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    server_groups_update_project_details: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProjectDetailsArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NamedProjectDetails"];
                 };
             };
             400: {
@@ -20992,6 +21482,98 @@ export interface operations {
                 };
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    homepage_clear: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cleared, or there was no choice. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    homepage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Homepage"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    homepage_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetHomepageArgs"];
+            };
+        };
+        responses: {
+            /** @description Chosen. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The path is not a page's path. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

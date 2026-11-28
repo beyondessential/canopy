@@ -3,7 +3,8 @@
 // file, which keeps rebuilds from swamping the machine with I/O.
 // Nextest still runs every #[tokio::test] in parallel as usual.
 
-mod admin_auth;
+mod access;
+mod access_levels;
 mod ansible;
 mod ansible_import;
 mod ansible_runs;
@@ -28,6 +29,7 @@ mod enrollment_ticket;
 mod group_card_version;
 mod health;
 mod healthchecks;
+mod homepage;
 mod identity;
 mod instance_silences;
 mod issues;
@@ -44,6 +46,8 @@ mod notes;
 mod openapi_spec;
 mod operator_presence;
 mod private_statuses;
+mod project_details;
+mod projects;
 mod provision_credential;
 mod reporting_schemas;
 mod restore_replicas;

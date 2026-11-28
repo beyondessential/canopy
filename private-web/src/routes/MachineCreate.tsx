@@ -44,7 +44,7 @@ export default function MachineCreate() {
 	// place reflects the other. A box being added has no alerting to remove,
 	// so this stays at the creation's write grade.
 	// spec: CHK#silences-follow-the-event
-	// spec: SAFE#grading-the-administrative-surface
+	// spec: SAFE#grading-the-operator-surface
 	const [alertWhenUnreachable, setAlertWhenUnreachable] = useState(true);
 	const [alertWhenDownMinutes, setAlertWhenDownMinutes] = useState("10");
 	const [groupId, setGroupId] = useState<string | null>(presetGroupId ?? null);

@@ -9,7 +9,7 @@ use diesel_async::{
 use jiff::SignedDuration;
 use tokio::time::{Instant, timeout};
 
-pub mod admins;
+pub mod access_lists;
 pub mod ansible_catalogue;
 pub mod ansible_leases;
 pub mod ansible_variables;
@@ -32,6 +32,7 @@ pub mod dns_names;
 pub mod identity;
 pub mod issues;
 pub mod kubernetes_clusters;
+pub(crate) mod like;
 pub mod machine_enrollment_challenges;
 pub mod machine_enrollment_tokens;
 pub mod machines;
@@ -41,6 +42,7 @@ pub mod memory;
 pub mod migration_tests;
 pub mod notes;
 pub mod notes_log;
+pub mod operator_homepages;
 pub mod operator_sessions;
 pub mod osv;
 pub mod packages;

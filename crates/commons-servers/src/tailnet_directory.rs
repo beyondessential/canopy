@@ -12,17 +12,25 @@
 //! the internet edge by type-system construction.
 
 use std::{
-	collections::{HashMap, HashSet},
+	collections::HashMap,
 	net::IpAddr,
 	sync::Arc,
 	time::{Duration, Instant},
 };
 
 use commons_errors::{AppError, Result};
+use database::access_lists::{ListLevel, normalise_login};
 use jiff::Timestamp;
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::RwLock;
+
+mod policy;
+
+pub use policy::{
+	CANOPY_CAP, CANOPY_SERVICE_TAG, ConferringSource, SourceCoverage, choose_default_home,
+};
+use policy::{PolicyFile, PolicyGrants};
 
 /// Resolved node identity for a tailnet IP. `addresses` carries every
 /// IP the control plane reports for this node, so a UI can surface
@@ -103,98 +111,54 @@ struct Cache {
 	by_ip: HashMap<IpAddr, DirectoryEntry>,
 	by_node_id: HashMap<String, DirectoryEntry>,
 	last_refresh: Option<Instant>,
-	/// Administrators derived from the tailnet policy's `bes.au/cap/canopy`
-	/// grants, recomputed on each successful policy read. Empty until the
-	/// first successful read; a failed read leaves the previous value in
-	/// place so a control-plane outage never withdraws policy-granted admin.
-	admin: AdminGrants,
+	/// What the tailnet policy grants on Canopy, as of the last successful
+	/// read. `None` until a read succeeds; a failed read leaves the previous
+	/// value in place, so a control-plane outage never withdraws a level or a
+	/// default homepage.
+	policy: Option<PolicyRead>,
+	/// The tailnet's members other than suspended ones, as of the last
+	/// successful read. Empty until a read succeeds; a failed read leaves the
+	/// previous list in place.
+	users: Vec<TailnetUser>,
 }
 
-/// The Canopy application capability whose `admin: true` payload confers
-/// administrative access, and the service tag a conferring grant must target.
-const CANOPY_ADMIN_CAP: &str = "bes.au/cap/canopy";
-const CANOPY_SERVICE_TAG: &str = "tag:server-canopy";
-
-/// Administrative access resolved from the tailnet policy.
-#[derive(Debug, Default, Clone)]
-struct AdminGrants {
-	/// Explicit logins granted admin, from group members and bare user
-	/// sources, lowercased for case-insensitive comparison.
-	logins: HashSet<String>,
-	/// True when a conferring grant's source covers every tailnet user
-	/// identity (`autogroup:member`).
-	all_members: bool,
+/// A member of the tailnet, as the control plane lists them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TailnetUser {
+	/// The login, as the control plane spells it.
+	pub login: String,
+	/// The display name.
+	pub name: String,
+	/// The profile picture's address, where they have one.
+	pub profile_pic: Option<String>,
 }
 
-impl AdminGrants {
-	fn covers(&self, login: &str) -> bool {
-		self.all_members || self.logins.contains(login)
-	}
+#[derive(Debug, Clone)]
+struct PolicyRead {
+	grants: PolicyGrants,
+	read_at: Timestamp,
 }
 
-/// The subset of the tailnet policy file this directory reads.
-#[derive(Debug, Deserialize)]
-struct PolicyFile {
-	#[serde(default)]
-	groups: HashMap<String, Vec<String>>,
-	#[serde(default)]
-	grants: Vec<Grant>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Grant {
-	#[serde(default)]
-	src: Vec<String>,
-	#[serde(default)]
-	dst: Vec<String>,
-	#[serde(default)]
-	app: HashMap<String, Vec<serde_json::Value>>,
-}
-
-/// Resolve the set of administrators a policy file confers through
-/// `bes.au/cap/canopy` grants targeting the Canopy service tag.
-fn resolve_admins(policy: &PolicyFile) -> AdminGrants {
-	let mut out = AdminGrants::default();
-	for grant in &policy.grants {
-		let confers = grant.app.get(CANOPY_ADMIN_CAP).is_some_and(|values| {
-			values
-				.iter()
-				.any(|v| v.get("admin").and_then(serde_json::Value::as_bool) == Some(true))
-		});
-		if !confers {
-			continue;
-		}
-		if !grant.dst.iter().any(|d| d == CANOPY_SERVICE_TAG) {
-			continue;
-		}
-		for src in &grant.src {
-			match src.as_str() {
-				"autogroup:member" => out.all_members = true,
-				// Tagged devices never reach the administrative surface, so a
-				// tagged source contributes no administrative login.
-				"autogroup:tagged" => {}
-				s if s.starts_with("autogroup:") => {
-					tracing::warn!(source = %s, "canopy admin grant uses an unsupported autogroup; ignoring");
-				}
-				s if s.starts_with("group:") => match policy.groups.get(s) {
-					Some(members) => {
-						out.logins
-							.extend(members.iter().map(|m| m.to_ascii_lowercase()));
-					}
-					None => {
-						tracing::warn!(group = %s, "canopy admin grant references an undefined group; ignoring");
-					}
-				},
-				s if s.contains('@') => {
-					out.logins.insert(s.to_ascii_lowercase());
-				}
-				s => {
-					tracing::warn!(source = %s, "canopy admin grant uses an unsupported source; ignoring");
-				}
-			}
+impl PolicyRead {
+	/// A policy read just now.
+	fn now(policy: &PolicyFile) -> Self {
+		Self {
+			grants: PolicyGrants::resolve(policy),
+			read_at: Timestamp::now(),
 		}
 	}
-	out
+}
+
+/// What the tailnet policy grants each level, for the permissions page.
+#[derive(Debug, Clone)]
+pub struct PolicySummary {
+	/// When the policy was last read successfully, or `None` where no read has
+	/// succeeded yet.
+	pub read_at: Option<Timestamp>,
+	/// The sources conferring admin.
+	pub admin: Vec<ConferringSource>,
+	/// The sources conferring PM.
+	pub pm: Vec<ConferringSource>,
 }
 
 #[derive(Debug, Default)]
@@ -238,6 +202,38 @@ struct DeviceRecord {
 	key_expiry_disabled: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct UsersResponse {
+	users: Vec<UserRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UserRecord {
+	#[serde(rename = "loginName")]
+	login_name: String,
+	#[serde(rename = "displayName", default)]
+	display_name: String,
+	#[serde(rename = "profilePicUrl", default)]
+	profile_pic_url: Option<String>,
+	#[serde(default)]
+	status: String,
+}
+
+impl UsersResponse {
+	/// The users listed, leaving out suspended ones.
+	fn members(self) -> Vec<TailnetUser> {
+		self.users
+			.into_iter()
+			.filter(|user| user.status != "suspended")
+			.map(|user| TailnetUser {
+				login: user.login_name,
+				name: user.display_name,
+				profile_pic: user.profile_pic_url.filter(|url| !url.is_empty()),
+			})
+			.collect()
+	}
+}
+
 impl TailnetDirectory {
 	/// Build a directory and kick off the background refresh loop. The
 	/// first refresh is awaited synchronously so the directory has a
@@ -261,9 +257,14 @@ impl TailnetDirectory {
 
 		directory.refresh().await?;
 		// Non-fatal: without the policy read (e.g. the OAuth client lacks the
-		// policy-file read scope) admin access falls back to the allowlist.
+		// policy-file read scope) levels come from the access lists alone.
 		if let Err(e) = directory.refresh_policy().await {
-			tracing::warn!(error = %e, "initial tailnet policy read failed; admin access falls back to the allowlist");
+			tracing::warn!(error = %e, "initial tailnet policy read failed; levels come from the access lists alone");
+		}
+		// Non-fatal too: without the users read (e.g. the OAuth client lacks
+		// `users:read`) no tailnet member is suggested.
+		if let Err(e) = directory.refresh_users().await {
+			tracing::warn!(error = %e, "initial tailnet users read failed; no tailnet member is suggested");
 		}
 
 		let bg = directory.clone();
@@ -277,19 +278,52 @@ impl TailnetDirectory {
 				if let Err(e) = bg.refresh_policy().await {
 					tracing::warn!(error = %e, "tailnet policy refresh failed");
 				}
+				if let Err(e) = bg.refresh_users().await {
+					tracing::warn!(error = %e, "tailnet users refresh failed");
+				}
 			}
 		});
 
 		Ok(directory)
 	}
 
-	/// True when the login is granted administrative access by the tailnet
-	/// policy — either explicitly (a group member or named user) or because
-	/// a conferring grant covers every tailnet member. Case-insensitive.
-	pub async fn is_admin_by_policy(&self, login: &str) -> bool {
-		let login = login.to_ascii_lowercase();
+	/// The highest level the tailnet policy grants the login, ignoring its
+	/// case, as of the last successful read.
+	pub async fn level_by_policy(&self, login: &str) -> Option<ListLevel> {
+		let login = normalise_login(login);
 		let cache = self.inner.cache.read().await;
-		cache.admin.covers(&login)
+		cache.policy.as_ref()?.grants.level(&login)
+	}
+
+	/// The default homepage the tailnet policy gives the login, ignoring its
+	/// case, as of the last successful read.
+	pub async fn default_home_by_policy(&self, login: &str) -> Option<String> {
+		let login = normalise_login(login);
+		let cache = self.inner.cache.read().await;
+		cache.policy.as_ref()?.grants.default_home(&login)
+	}
+
+	/// What the policy grants each level, and when it was last read.
+	pub async fn policy_summary(&self) -> PolicySummary {
+		let cache = self.inner.cache.read().await;
+		match &cache.policy {
+			Some(read) => PolicySummary {
+				read_at: Some(read.read_at),
+				admin: read.grants.sources(ListLevel::Admin),
+				pm: read.grants.sources(ListLevel::Pm),
+			},
+			None => PolicySummary {
+				read_at: None,
+				admin: Vec::new(),
+				pm: Vec::new(),
+			},
+		}
+	}
+
+	/// The tailnet's members other than suspended ones, as of the last
+	/// successful read.
+	pub async fn users(&self) -> Vec<TailnetUser> {
+		self.inner.cache.read().await.users.clone()
 	}
 
 	/// Lookup a tailnet IP. Returns `None` for unknown IPs. On a miss the
@@ -398,39 +432,43 @@ impl TailnetDirectory {
 		self.inner.cache.read().await.by_node_id.clone()
 	}
 
-	/// Force-refresh the cache from the Tailscale control plane.
-	pub async fn refresh(&self) -> Result<()> {
-		let token = self.access_token().await?;
+	/// Read one of the control plane's tailnet-scoped resources, named for the
+	/// errors this reports.
+	///
+	/// A token can expire between the time it is minted and the time it is
+	/// sent, so a refusal drops it and retries exactly once.
+	async fn read(&self, resource: &str, what: &str) -> Result<reqwest::Response> {
 		let url = format!(
-			"{}/api/v2/tailnet/{}/devices",
+			"{}/api/v2/tailnet/{}/{resource}",
 			self.inner.config.api_base.trim_end_matches('/'),
 			self.inner.config.tailnet,
 		);
-		let resp = self
-			.inner
-			.client
-			.get(&url)
-			.bearer_auth(&token)
-			.send()
-			.await
-			.map_err(|e| AppError::custom(format!("tailscale devices request: {e}")))?;
-
-		if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-			// Token expired between the time we minted it and now. Drop and
-			// retry exactly once.
-			self.inner.oauth.write().await.token = None;
-			let token = self.access_token().await?;
-			let retry = self
-				.inner
+		let send = async |token: String| {
+			self.inner
 				.client
 				.get(&url)
-				.bearer_auth(&token)
+				.bearer_auth(token)
+				.header(reqwest::header::ACCEPT, "application/json")
 				.send()
 				.await
-				.map_err(|e| AppError::custom(format!("tailscale devices retry: {e}")))?;
-			return self.ingest(retry).await;
+		};
+
+		let resp = send(self.access_token().await?)
+			.await
+			.map_err(|e| AppError::custom(format!("tailscale {what} request: {e}")))?;
+		if resp.status() != reqwest::StatusCode::UNAUTHORIZED {
+			return Ok(resp);
 		}
 
+		self.inner.oauth.write().await.token = None;
+		send(self.access_token().await?)
+			.await
+			.map_err(|e| AppError::custom(format!("tailscale {what} retry: {e}")))
+	}
+
+	/// Force-refresh the cache from the Tailscale control plane.
+	pub async fn refresh(&self) -> Result<()> {
+		let resp = self.read("devices", "devices").await?;
 		self.ingest(resp).await
 	}
 
@@ -478,39 +516,9 @@ impl TailnetDirectory {
 		Ok(())
 	}
 
-	/// Force-refresh the administrator set from the tailnet policy file.
+	/// Force-refresh what the tailnet policy grants on Canopy.
 	pub async fn refresh_policy(&self) -> Result<()> {
-		let token = self.access_token().await?;
-		let url = format!(
-			"{}/api/v2/tailnet/{}/acl",
-			self.inner.config.api_base.trim_end_matches('/'),
-			self.inner.config.tailnet,
-		);
-		let resp = self
-			.inner
-			.client
-			.get(&url)
-			.bearer_auth(&token)
-			.header(reqwest::header::ACCEPT, "application/json")
-			.send()
-			.await
-			.map_err(|e| AppError::custom(format!("tailscale policy request: {e}")))?;
-
-		if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-			self.inner.oauth.write().await.token = None;
-			let token = self.access_token().await?;
-			let retry = self
-				.inner
-				.client
-				.get(&url)
-				.bearer_auth(&token)
-				.header(reqwest::header::ACCEPT, "application/json")
-				.send()
-				.await
-				.map_err(|e| AppError::custom(format!("tailscale policy retry: {e}")))?;
-			return self.ingest_policy(retry).await;
-		}
-
+		let resp = self.read("acl", "policy").await?;
 		self.ingest_policy(resp).await
 	}
 
@@ -527,9 +535,30 @@ impl TailnetDirectory {
 			.await
 			.map_err(|e| AppError::custom(format!("decoding policy response: {e}")))?;
 
-		let admin = resolve_admins(&policy);
-		let mut cache = self.inner.cache.write().await;
-		cache.admin = admin;
+		self.inner.cache.write().await.policy = Some(PolicyRead::now(&policy));
+		Ok(())
+	}
+
+	/// Force-refresh the tailnet's members.
+	pub async fn refresh_users(&self) -> Result<()> {
+		let resp = self.read("users?type=member", "users").await?;
+		self.ingest_users(resp).await
+	}
+
+	async fn ingest_users(&self, resp: reqwest::Response) -> Result<()> {
+		if !resp.status().is_success() {
+			let status = resp.status();
+			let body = resp.text().await.unwrap_or_default();
+			return Err(AppError::custom(format!(
+				"tailscale users: {status}: {body}"
+			)));
+		}
+		let parsed: UsersResponse = resp
+			.json()
+			.await
+			.map_err(|e| AppError::custom(format!("decoding users response: {e}")))?;
+
+		self.inner.cache.write().await.users = parsed.members();
 		Ok(())
 	}
 
@@ -602,7 +631,8 @@ impl TailnetDirectory {
 			by_ip,
 			by_node_id,
 			last_refresh: Some(Instant::now()),
-			admin: AdminGrants::default(),
+			policy: None,
+			users: Vec::new(),
 		};
 		Self {
 			inner: Arc::new(Inner {
@@ -619,6 +649,40 @@ impl TailnetDirectory {
 				oauth: RwLock::default(),
 			}),
 		}
+	}
+
+	/// [`Self::for_test`], with a tailnet policy already read successfully.
+	/// Its API is unreachable, so [`Self::refresh_policy`] fails as a
+	/// control-plane outage would.
+	pub fn for_test_with_policy(
+		entries: impl IntoIterator<Item = (IpAddr, DirectoryEntry)>,
+		policy: serde_json::Value,
+	) -> Self {
+		let directory = Self::for_test(entries);
+		let policy: PolicyFile =
+			serde_json::from_value(policy).expect("a test policy parses as a policy file");
+		directory
+			.inner
+			.cache
+			.try_write()
+			.expect("a fresh directory is not locked")
+			.policy = Some(PolicyRead::now(&policy));
+		directory
+	}
+
+	/// This test directory, with its tailnet's users already read
+	/// successfully as the control plane's users response `users`. Its API is
+	/// unreachable, so [`Self::refresh_users`] fails as a control-plane outage
+	/// would.
+	pub fn with_users(self, users: serde_json::Value) -> Self {
+		let users: UsersResponse =
+			serde_json::from_value(users).expect("test users parse as a users response");
+		self.inner
+			.cache
+			.try_write()
+			.expect("a fresh directory is not locked")
+			.users = users.members();
+		self
 	}
 }
 
@@ -683,84 +747,101 @@ mod tests {
 		)));
 	}
 
-	fn policy(json: serde_json::Value) -> PolicyFile {
-		serde_json::from_value(json).unwrap()
+	// spec: ADM#freshness-and-availability
+	#[tokio::test]
+	async fn a_failed_policy_read_keeps_the_last_good_one() {
+		let dir = TailnetDirectory::for_test_with_policy(
+			[],
+			serde_json::json!({
+				"grants": [{
+					"app": { "bes.au/cap/canopy": [{ "pm": true, "home": "/fleet/pm" }] },
+					"dst": ["tag:server-canopy"],
+					"src": ["pat@bes.au"],
+				}],
+			}),
+		);
+		let before = dir.policy_summary().await.read_at;
+		assert!(before.is_some());
+
+		dir.refresh_policy()
+			.await
+			.expect_err("the test directory's API is unreachable");
+
+		assert_eq!(dir.level_by_policy("Pat@bes.au").await, Some(ListLevel::Pm));
+		assert_eq!(
+			dir.default_home_by_policy("pat@bes.au").await.as_deref(),
+			Some("/fleet/pm"),
+		);
+		assert_eq!(dir.policy_summary().await.read_at, before);
 	}
 
+	// spec: GRP#project-details
 	#[test]
-	fn group_source_resolves_to_members() {
-		let admins = resolve_admins(&policy(serde_json::json!({
-			"groups": { "group:ops": ["Felix@BES.au", "sam@bes.au"] },
-			"grants": [{
-				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
-				"dst": ["tag:server-canopy"],
-				"src": ["group:ops"],
-			}],
-		})));
-		assert!(!admins.all_members);
-		assert!(admins.logins.contains("felix@bes.au"));
-		assert!(admins.logins.contains("sam@bes.au"));
+	fn a_users_read_leaves_out_suspended_members() {
+		let read: UsersResponse = serde_json::from_value(serde_json::json!({
+			"users": [
+				{
+					"id": "u1",
+					"displayName": "Pat Lee",
+					"loginName": "pat@bes.au",
+					"profilePicUrl": "https://example.com/pat.png",
+					"tailnetId": "t1",
+					"created": "2024-01-01T00:00:00Z",
+					"type": "member",
+					"role": "member",
+					"status": "active",
+					"deviceCount": 2,
+					"lastSeen": "2026-11-01T00:00:00Z",
+					"currentlyConnected": true,
+				},
+				{
+					"id": "u2",
+					"displayName": "Sam Roe",
+					"loginName": "sam@bes.au",
+					"profilePicUrl": "",
+					"status": "idle",
+				},
+				{
+					"id": "u3",
+					"displayName": "Gone Away",
+					"loginName": "gone@bes.au",
+					"status": "suspended",
+				},
+			],
+		}))
+		.expect("a users response parses");
+
+		assert_eq!(
+			read.members(),
+			vec![
+				TailnetUser {
+					login: "pat@bes.au".into(),
+					name: "Pat Lee".into(),
+					profile_pic: Some("https://example.com/pat.png".into()),
+				},
+				TailnetUser {
+					login: "sam@bes.au".into(),
+					name: "Sam Roe".into(),
+					profile_pic: None,
+				},
+			],
+		);
 	}
 
-	#[test]
-	fn bare_user_and_autogroup_member_sources() {
-		let admins = resolve_admins(&policy(serde_json::json!({
-			"grants": [{
-				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
-				"dst": ["tag:server-canopy"],
-				"src": ["dana@bes.au", "autogroup:member"],
-			}],
-		})));
-		assert!(admins.all_members);
-		assert!(admins.logins.contains("dana@bes.au"));
-	}
+	// spec: GRP#project-details
+	#[tokio::test]
+	async fn a_failed_users_read_keeps_the_last_good_list() {
+		let dir = TailnetDirectory::for_test([]).with_users(serde_json::json!({
+			"users": [{ "loginName": "pat@bes.au", "displayName": "Pat Lee", "status": "active" }],
+		}));
+		let before = dir.users().await;
+		assert_eq!(before.len(), 1);
 
-	#[test]
-	fn grant_needs_the_service_tag_and_admin_true() {
-		// Wrong dst: not conferring.
-		let wrong_dst = resolve_admins(&policy(serde_json::json!({
-			"groups": { "group:ops": ["felix@bes.au"] },
-			"grants": [{
-				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
-				"dst": ["tag:server-other"],
-				"src": ["group:ops"],
-			}],
-		})));
-		assert!(wrong_dst.logins.is_empty() && !wrong_dst.all_members);
+		dir.refresh_users()
+			.await
+			.expect_err("the test directory's API is unreachable");
 
-		// Payload without `admin: true`: not conferring.
-		let no_admin = resolve_admins(&policy(serde_json::json!({
-			"groups": { "group:ops": ["felix@bes.au"] },
-			"grants": [{
-				"app": { "bes.au/cap/canopy": [{ "admin": false }] },
-				"dst": ["tag:server-canopy"],
-				"src": ["group:ops"],
-			}],
-		})));
-		assert!(no_admin.logins.is_empty() && !no_admin.all_members);
-
-		// Different capability: not conferring.
-		let other_cap = resolve_admins(&policy(serde_json::json!({
-			"groups": { "group:ops": ["felix@bes.au"] },
-			"grants": [{
-				"app": { "bes.au/cap/other": [{ "admin": true }] },
-				"dst": ["tag:server-canopy"],
-				"src": ["group:ops"],
-			}],
-		})));
-		assert!(other_cap.logins.is_empty() && !other_cap.all_members);
-	}
-
-	#[test]
-	fn unsupported_sources_are_ignored() {
-		let admins = resolve_admins(&policy(serde_json::json!({
-			"grants": [{
-				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
-				"dst": ["tag:server-canopy"],
-				"src": ["autogroup:tagged", "tag:server-canopy", "*", "autogroup:admin"],
-			}],
-		})));
-		assert!(admins.logins.is_empty() && !admins.all_members);
+		assert_eq!(dir.users().await, before);
 	}
 
 	#[test]

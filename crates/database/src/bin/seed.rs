@@ -24,7 +24,7 @@ use commons_types::{
 };
 use database::{
 	Device, DeviceKey,
-	admins::Admin,
+	access_lists::{AccessListEntry, ListLevel},
 	applications::Application,
 	check_policies::CheckPolicy,
 	devices::NewDeviceConnection,
@@ -71,7 +71,7 @@ const TRUNCATE_TABLES: &[&str] = &[
 	"version_known_issues",
 	"versions",
 	"check_policies",
-	"admins",
+	"access_list_entries",
 ];
 
 fn tags(pairs: &[(&str, &str)]) -> TagMap {
@@ -197,8 +197,9 @@ async fn seed_admins(conn: &mut AsyncPgConnection) -> Result<Vec<String>> {
 		"carol.releases@example.com",
 	];
 	for email in emails {
-		Admin::add(conn, email).await?;
+		AccessListEntry::add(conn, ListLevel::Admin, email).await?;
 	}
+	AccessListEntry::add(conn, ListLevel::Pm, "dana.projects@example.com").await?;
 	Ok(emails.iter().map(|s| s.to_string()).collect())
 }
 
@@ -1367,7 +1368,7 @@ async fn report(conn: &mut AsyncPgConnection) -> Result<()> {
 	}
 
 	let tables = [
-		"admins",
+		"access_list_entries",
 		"versions",
 		"version_known_issues",
 		"check_policies",

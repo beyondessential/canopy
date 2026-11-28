@@ -234,7 +234,7 @@ impl Machine {
 	/// A box being added has no alerting yet for a silence to take away, so
 	/// the reachability silence is part of the addition rather than the
 	/// removal of a protection.
-	// spec: SAFE#grading-the-administrative-surface
+	// spec: SAFE#grading-the-operator-surface
 	pub async fn add(db: &mut AsyncPgConnection, addition: MachineAddition<'_>) -> Result<Self> {
 		use diesel_async::AsyncConnection;
 

@@ -1,4 +1,4 @@
-//! Client sessions on the private server's administrative surface and the safety
+//! Client sessions on the private server's operator surface and the safety
 //! mode each is in.
 //!
 //! Spec: `.workhorse/specs/private-server/safety-modes.md` (id `SAFE`).

@@ -4,10 +4,10 @@ id: SAFE
 
 # Safety modes
 
-Every operator session on the private server's administrative surface runs in one of three safety modes, and every handler on that surface is graded to the mode it requires.
+Every operator session on the private server's operator surface runs in one of three safety modes, and every handler on that surface is graded to the mode it requires.
 A session is read-only until the operator raises it, and returns to read-only on its own.
-This governs what an operator may do at a given moment, and is distinct from whether they may reach the surface at all (see [ADM](admin-access.md)).
-A safety mode guards against mistakes rather than authorising anyone: every administrator may raise to any mode.
+This governs what an operator may do at a given moment, and is distinct from what their access level lets them do at all (see [ADM](access-levels.md)).
+A safety mode guards against mistakes rather than authorising anyone.
 
 ## The modes
 
@@ -27,13 +27,18 @@ From the mode control, raising to write takes effect without confirmation, and r
 
 An operator lowers their mode from the mode control at any time, without waiting for the remaining time to run out.
 
+The mode control offers every mode to every operator, and the server accepts a raise to any mode from any operator, whatever their access level.
+
+> [!NOTE]
+> A raise authorises nothing: each handler admits callers by their level on its own, so a mode guards against mistakes within what the operator's level already allows.
+
 ## Raising from a blocked control
 
 Activating a blocked control asks the operator to raise to the mode that control requires.
 This holds for write as well as danger, so a stray click on a blocked control raises nothing by itself.
 The confirmation is titled with the name of the action the control takes (see "Presenting graded controls"), and says the action needs that mode.
 Its confirming choice says the action continues in that mode, since confirming both raises and carries the action out.
-For danger, it also says why, giving every reason declared by the handlers the control calls (see "Grading the administrative surface"), as in "This action needs danger mode: it acts directly on servers and invalidates credentials."
+For danger, it also says why, giving every reason declared by the handlers the control calls (see "Grading the operator surface"), as in "This action needs danger mode: it acts directly on servers and invalidates credentials."
 A control requiring danger raises straight to danger, from read-only as from write.
 A blocked save asks for the mode its submission needs as the form stands when it is activated.
 
@@ -70,9 +75,9 @@ The operator interface never names itself so, and a request that names neither a
 
 A session that has not been seen for some time is retired.
 
-## Grading the administrative surface
+## Grading the operator surface
 
-Every handler on the administrative surface declares the mode it requires, and a handler that declares none fails the build, so none can be added ungraded.
+Every handler on the operator surface declares the mode it requires, and a handler that declares none fails the build, so none can be added ungraded.
 Each handler's grade is available to the operator interface, so that it can present a control according to the mode that control needs.
 
 A handler that changes nothing is read-only.
@@ -102,12 +107,12 @@ Recording, withdrawing or editing a vulnerability triage decision is graded writ
 
 The fleet query interface (see [MCP](mcp.md)) changes nothing on the fleet, so every one of its tools is read-only except its triage writes, recording, withdrawing and editing triage decisions, which are graded write.
 That interface has no sessions, so its writes are allowed by the caller's standing instead of a raised mode: an administrator on the operator path, a token with the triage grant on the token path.
-The handlers that mint, revoke, and list its access tokens belong to the administrative surface rather than to that interface: minting and revoking are danger, and listing is read-only.
+The handlers that mint, revoke, and list its access tokens belong to the operator surface rather than to that interface: minting and revoking are danger, and listing is read-only.
 
-The handlers by which an operator reads and changes their own safety mode are read-only, because a read-only session has to be able to reach them: what they change is that operator's own session rather than the fleet or Canopy's records.
+The handlers by which an operator reads and changes their own safety mode or homepage are read-only, because a read-only session has to be able to reach them: what they change is that operator's own session or preference rather than the fleet or Canopy's records (see [HOME](homepage.md)).
 
 A handler's grade is independent of who may reach it.
-A handler reachable by a caller who is not an administrator is graded on the same basis as any other, and every operator has a safety mode.
+A handler reachable by a caller below the admin level is graded on the same basis as any other, and every operator has a safety mode.
 
 ## Refusals
 
@@ -145,4 +150,4 @@ A control that requires no mode keeps its own colour.
 A control disabled for a reason unrelated to its grade, such as a request in flight or an incomplete form, is disabled rather than blocked whatever the operator's mode: it carries no stripe and offers no raise, so the treatment never misreports why a control is unavailable.
 Once that reason clears, it is blocked or usable according to its grade.
 
-A control the operator can never use, because they are not an administrator, is absent rather than blocked (see [ADM](admin-access.md)).
+A control the operator can never use, because their access level does not reach it, is absent rather than blocked (see [ADM](access-levels.md)).

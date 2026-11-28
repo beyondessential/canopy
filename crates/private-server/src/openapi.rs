@@ -10,13 +10,13 @@ use utoipa::{
 	info(
 		title = "canopy private-server",
 		version = "",
-		description = "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; admin-only endpoints additionally check the caller is on the admin list.\n\nRequest bodies may be sent compressed, and this is recommended for large payloads: the server transparently decodes `Content-Encoding: gzip`, `br`, `deflate`, or `zstd`. The accepted encodings are also listed structurally in the `x-request-compression` extension.",
+		description = "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; endpoints needing a level above all additionally check the caller holds it, through the access lists or the tailnet policy.\n\nRequest bodies may be sent compressed, and this is recommended for large payloads: the server transparently decodes `Content-Encoding: gzip`, `br`, `deflate`, or `zstd`. The accepted encodings are also listed structurally in the `x-request-compression` extension.",
 		contact(name = "BES Developers", email = "contact@bes.au"),
 		license(name = "GPL-3.0-or-later"),
 	),
 	modifiers(&SecuritySchemes, &RequestCompression, &DangerReasons),
 	tags(
-		(name = "admins", description = "Admin email allow-list management."),
+		(name = "access", description = "Who holds the access levels above all: the levels' lists, and what the tailnet policy grants each."),
 		(name = "audit", description = "The audit log of administrative actions."),
 		(name = "backups", description = "Group backup-repo onboarding, scheduling, and stats."),
 		(name = "bestool", description = "Bestool SQL snippet library."),
@@ -27,6 +27,7 @@ use utoipa::{
 		(name = "dns_names", description = "DNS names: the address records each application asks Canopy to publish, the requests a machine made that resolved to no application, the denials, and the pause that applies to both kinds."),
 		(name = "domains", description = "Managed DNS zones and the domains each group controls."),
 		(name = "healthchecks", description = "Healthcheck catalog: severities, conditional rules, and sample data."),
+		(name = "homepage", description = "The operator's own homepage: the page they chose for the root, and the default the tailnet policy gives them."),
 		(name = "identity", description = "Canopy as an OpenID Connect issuer: its signing keys, the relying parties it issues identity tokens for, and which machines and applications hold grants."),
 		(name = "incidents", description = "Operational incidents (groups of issues against a server)."),
 		(name = "ansible", description = "What Ansible is served for an environment: its machines and the variables that configure them, the lease a run holds, and the run state."),
@@ -102,10 +103,17 @@ impl Modify for SecuritySchemes {
 			))),
 		);
 		components.add_security_scheme(
+			"tailscale-pm",
+			SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
+				"Tailscale-User-Login",
+				"Identity header injected by the Tailscale sidecar. The login must additionally hold the PM level or above: on the PM or admin list, or granted either by the tailnet policy.",
+			))),
+		);
+		components.add_security_scheme(
 			"tailscale-admin",
 			SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
 				"Tailscale-User-Login",
-				"Identity header injected by the Tailscale sidecar. The login must additionally be an administrator: either on the admins allow-list, or granted admin by the tailnet policy.",
+				"Identity header injected by the Tailscale sidecar. The login must additionally hold the admin level: on the admin list, or granted admin by the tailnet policy.",
 			))),
 		);
 	}

@@ -120,6 +120,161 @@ pub struct ServerGroup {
 	/// green.
 	#[schema(value_type = i64, format = "int64")]
 	pub slack_close_delay: PgDuration,
+	/// The project the group serves, as free text. Absent when not filled in.
+	// spec: GRP#project-details
+	pub project: Option<String>,
+	/// The PM in charge of the group's project, by their tailnet login or an
+	/// email address. Absent when not filled in.
+	// spec: GRP#project-details
+	pub pm_in_charge: Option<String>,
+	/// The group's contact on the ground, as free text. Absent when not filled
+	/// in.
+	// spec: GRP#project-details
+	pub ground_contact: Option<String>,
+}
+
+/// A group as the projects view lists it: its name and project details.
+// spec: PRJ#what-each-group-shows
+#[derive(Debug, Clone)]
+pub struct ProjectListing {
+	pub id: Uuid,
+	pub name: String,
+	pub details: ProjectDetails,
+}
+
+/// A group's three project details, each absent when not filled in.
+// spec: GRP#project-details
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ProjectDetails {
+	/// The project the group serves, as free text.
+	#[serde(default)]
+	pub project: Option<String>,
+	/// The PM in charge, by their tailnet login or an email address: text
+	/// either side of an `@`.
+	#[serde(default)]
+	pub pm_in_charge: Option<String>,
+	/// The contact on the ground, as free text.
+	#[serde(default)]
+	pub ground_contact: Option<String>,
+}
+
+impl ProjectDetails {
+	/// The details as stored: each trimmed, and an empty one absent.
+	fn normalised(self) -> Self {
+		fn one(value: Option<String>) -> Option<String> {
+			value
+				.map(|value| value.trim().to_owned())
+				.filter(|value| !value.is_empty())
+		}
+		Self {
+			project: one(self.project),
+			pm_in_charge: one(self.pm_in_charge),
+			ground_contact: one(self.ground_contact),
+		}
+	}
+
+	/// Refuse a PM in charge that doesn't name a person by a login or an
+	/// address (see [`crate::access_lists::is_login_shaped`]).
+	fn validate(&self) -> Result<()> {
+		let Some(pm) = &self.pm_in_charge else {
+			return Ok(());
+		};
+		if crate::access_lists::is_login_shaped(pm) {
+			return Ok(());
+		}
+		Err(AppError::BadRequest(format!(
+			"the PM in charge must be a tailnet login or an email address, \
+			 with text either side of one @; got {pm:?}"
+		)))
+	}
+
+	/// The details with the display name Canopy knows for the PM in charge,
+	/// from `names` as [`crate::tailscale_users::TailscaleUser::names_ignoring_case`]
+	/// returns them.
+	pub fn named(self, names: &std::collections::HashMap<String, String>) -> NamedProjectDetails {
+		let pm_in_charge_name = self
+			.pm_in_charge
+			.as_deref()
+			.and_then(|login| names.get(&login.to_lowercase()))
+			.cloned();
+		NamedProjectDetails {
+			project: self.project,
+			pm_in_charge: self.pm_in_charge,
+			pm_in_charge_name,
+			ground_contact: self.ground_contact,
+		}
+	}
+}
+
+/// A group's project details as they are read, the PM in charge with the
+/// display name Canopy knows for them.
+// spec: GRP#project-details
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct NamedProjectDetails {
+	/// The project the group serves, as free text. Absent when not filled in.
+	pub project: Option<String>,
+	/// The PM in charge, by their login or address as entered. Absent when
+	/// not filled in.
+	pub pm_in_charge: Option<String>,
+	/// The display name Canopy knows for the PM in charge's login, compared
+	/// ignoring case. Absent where it knows none, in which case the PM in
+	/// charge is named as entered.
+	pub pm_in_charge_name: Option<String>,
+	/// The contact on the ground, as free text. Absent when not filled in.
+	pub ground_contact: Option<String>,
+}
+
+/// One project detail's value before and after a change.
+// spec: GRP#project-details
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DetailChange {
+	pub from: Option<String>,
+	pub to: Option<String>,
+}
+
+impl DetailChange {
+	fn between(from: &Option<String>, to: &Option<String>) -> Option<Self> {
+		(from != to).then(|| Self {
+			from: from.clone(),
+			to: to.clone(),
+		})
+	}
+}
+
+/// What a change to a group's project details changed: each detail that
+/// differs, with its value before and after, and nothing for one left as it
+/// was.
+// spec: GRP#project-details
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProjectDetailsChange {
+	pub project: Option<DetailChange>,
+	pub pm_in_charge: Option<DetailChange>,
+	pub ground_contact: Option<DetailChange>,
+}
+
+impl ProjectDetailsChange {
+	/// Whether the change left every detail as it was.
+	pub fn is_empty(&self) -> bool {
+		self.project.is_none() && self.pm_in_charge.is_none() && self.ground_contact.is_none()
+	}
+}
+
+/// A production Tamanu central or facility, as the projects view lists it.
+// spec: PRJ#what-each-group-shows
+#[derive(Debug, Clone)]
+pub struct ProductionTamanu {
+	pub group_id: Uuid,
+	pub application_id: Uuid,
+	pub r#type: ApplicationType,
+	/// The application's own name, where an operator gave it one.
+	pub name: Option<String>,
+	/// The application's configured URL.
+	pub url: Option<crate::url_field::UrlField>,
+	/// The machine it runs on: none for an application hosted on a cluster.
+	pub machine_id: Option<Uuid>,
+	pub machine_name: Option<String>,
+	/// The tailnet name of the device bound to its machine, where there is one.
+	pub tailnet_name: Option<String>,
 }
 
 /// Fields required to create a new server group.
@@ -176,7 +331,210 @@ pub struct PartialServerGroup {
 	pub slack_close_delay: Option<PgDuration>,
 }
 
+/// The groups a search found, and how many matched before any limit.
+#[derive(Debug, Clone)]
+pub struct GroupSearch {
+	pub groups: Vec<ServerGroup>,
+	/// Every group the term matched, of which `groups` may be the first few.
+	pub matched: i64,
+}
+
+/// What a group search matches its term against, beside the group's identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupMatch {
+	/// The group's name.
+	Name,
+	/// The group's name and its project details.
+	// spec: MCP#discovery
+	NameOrProjectDetails,
+}
+
 impl ServerGroup {
+	/// The group's project details as stored.
+	// spec: GRP#project-details
+	pub fn project_details(&self) -> ProjectDetails {
+		ProjectDetails {
+			project: self.project.clone(),
+			pm_in_charge: self.pm_in_charge.clone(),
+			ground_contact: self.ground_contact.clone(),
+		}
+	}
+
+	/// Set a group's project details, returning what changed. Each is trimmed
+	/// and an empty one stored as absent; a PM in charge without text either
+	/// side of an `@` is refused. A save leaving them as they were writes
+	/// nothing.
+	// spec: GRP#project-details
+	pub async fn update_project_details(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		details: ProjectDetails,
+	) -> Result<ProjectDetailsChange> {
+		use crate::schema::server_groups::dsl;
+		use diesel_async::AsyncConnection;
+
+		let details = details.normalised();
+		details.validate()?;
+		db.transaction::<_, AppError, _>(async |conn| {
+			let (project, pm_in_charge, ground_contact): (
+				Option<String>,
+				Option<String>,
+				Option<String>,
+			) = dsl::server_groups
+				.select((dsl::project, dsl::pm_in_charge, dsl::ground_contact))
+				.filter(dsl::id.eq(group_id))
+				.for_update()
+				.first(conn)
+				.await
+				.map_err(AppError::from)?;
+			let change = ProjectDetailsChange {
+				project: DetailChange::between(&project, &details.project),
+				pm_in_charge: DetailChange::between(&pm_in_charge, &details.pm_in_charge),
+				ground_contact: DetailChange::between(&ground_contact, &details.ground_contact),
+			};
+			if change.is_empty() {
+				return Ok(change);
+			}
+			diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
+				.set((
+					dsl::project.eq(&details.project),
+					dsl::pm_in_charge.eq(&details.pm_in_charge),
+					dsl::ground_contact.eq(&details.ground_contact),
+				))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+			Ok(change)
+		})
+		.await
+	}
+
+	/// Every live group with a live production environment, in order of name:
+	/// a production application in it, or a production machine, which is in
+	/// its environment whether or not anything on it has reported. Each is read
+	/// only as far as the projects view shows it.
+	// spec: PRJ#which-groups-it-lists
+	// spec: GRP#environments
+	pub async fn with_production_environment(
+		db: &mut AsyncPgConnection,
+	) -> Result<Vec<ProjectListing>> {
+		use crate::schema::{applications, machines, server_groups::dsl};
+		use diesel::dsl::exists;
+
+		let production_application = applications::table
+			.filter(applications::group_id.eq(dsl::id.nullable()))
+			.filter(applications::deleted_at.is_null())
+			.filter(applications::rank.eq(ServerRank::Production));
+		let production_machine = machines::table
+			.filter(machines::group_id.eq(dsl::id.nullable()))
+			.filter(machines::deleted_at.is_null())
+			.filter(machines::rank.eq(ServerRank::Production));
+		let rows: Vec<(Uuid, String, Option<String>, Option<String>, Option<String>)> =
+			dsl::server_groups
+				.select((
+					dsl::id,
+					dsl::name,
+					dsl::project,
+					dsl::pm_in_charge,
+					dsl::ground_contact,
+				))
+				.filter(dsl::deleted_at.is_null())
+				.filter(exists(production_application).or(exists(production_machine)))
+				.order((dsl::name.asc(), dsl::id.asc()))
+				.load(db)
+				.await?;
+		Ok(rows
+			.into_iter()
+			.map(
+				|(id, name, project, pm_in_charge, ground_contact)| ProjectListing {
+					id,
+					name,
+					details: ProjectDetails {
+						project,
+						pm_in_charge,
+						ground_contact,
+					},
+				},
+			)
+			.collect())
+	}
+
+	/// The live production Tamanu centrals and facilities of `group_ids`, with
+	/// the machine each runs on and the tailnet name of the device bound to
+	/// it. A pending application, or one at another rank, is in no production
+	/// environment and is left out.
+	// spec: PRJ#what-each-group-shows
+	pub async fn production_tamanu(
+		db: &mut AsyncPgConnection,
+		group_ids: &[Uuid],
+	) -> Result<Vec<ProductionTamanu>> {
+		use crate::schema::{applications, devices, machines};
+
+		if group_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		let types = [
+			ApplicationType::TamanuCentral.to_string(),
+			ApplicationType::TamanuFacility.to_string(),
+		];
+		#[allow(clippy::type_complexity)]
+		let rows: Vec<(
+			Uuid,
+			Uuid,
+			String,
+			Option<String>,
+			Option<crate::url_field::UrlField>,
+			Option<Uuid>,
+			Option<String>,
+			Option<String>,
+		)> = applications::table
+			.left_join(machines::table.left_join(devices::table))
+			.select((
+				applications::id,
+				applications::group_id.assume_not_null(),
+				applications::type_,
+				applications::name,
+				applications::host,
+				applications::machine_id,
+				machines::name.nullable(),
+				devices::tailscale_node_name.nullable(),
+			))
+			.filter(applications::group_id.eq_any(group_ids))
+			.filter(applications::deleted_at.is_null())
+			.filter(applications::rank.eq(ServerRank::Production))
+			.filter(applications::type_.eq_any(&types))
+			.filter(machines::deleted_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows
+			.into_iter()
+			.filter_map(
+				|(
+					application_id,
+					group_id,
+					r#type,
+					name,
+					url,
+					machine_id,
+					machine_name,
+					tailnet,
+				)| {
+					Some(ProductionTamanu {
+						group_id,
+						application_id,
+						r#type: r#type.parse().ok()?,
+						name,
+						url,
+						machine_id,
+						machine_name,
+						tailnet_name: tailnet,
+					})
+				},
+			)
+			.collect())
+	}
+
 	pub async fn create(db: &mut AsyncPgConnection, new: NewServerGroup) -> Result<Self> {
 		Self::create_by(db, new, None).await
 	}
@@ -564,6 +922,13 @@ impl ServerGroup {
 			};
 			out.insert(gid, better);
 		}
+		for (gid, rank) in Self::ranked_machines(db, group_ids).await? {
+			let better = match out.get(&gid).copied() {
+				None => rank,
+				Some(existing) => higher_rank(existing, rank),
+			};
+			out.insert(gid, better);
+		}
 		Ok(out)
 	}
 
@@ -605,8 +970,8 @@ impl ServerGroup {
 		Ok(counts)
 	}
 
-	/// Every environment across `group_ids`: each group's live applications at
-	/// one rank, in the order the groups were given and then by rank,
+	/// Every environment across `group_ids`: each group's live members at one
+	/// rank, in the order the groups were given and then by rank,
 	/// production first. A pending application is in no environment, so a group
 	/// with nothing ranked has none.
 	///
@@ -629,6 +994,27 @@ impl ServerGroup {
 		group_ids: &[Uuid],
 	) -> Result<Vec<Environment>> {
 		Self::environments_inner(db, group_ids, false).await
+	}
+
+	/// The group and rank of each live ranked machine in `group_ids`: a machine
+	/// is in the environment its rank names whether or not anything on it has
+	/// reported, so a group's environments read its machines beside its
+	/// applications.
+	// spec: GRP#environments
+	async fn ranked_machines(
+		db: &mut AsyncPgConnection,
+		group_ids: &[Uuid],
+	) -> Result<Vec<(Uuid, ServerRank)>> {
+		use crate::schema::machines::dsl;
+
+		dsl::machines
+			.select((dsl::group_id.assume_not_null(), dsl::rank.assume_not_null()))
+			.filter(dsl::group_id.eq_any(group_ids))
+			.filter(dsl::rank.is_not_null())
+			.filter(dsl::deleted_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
 	}
 
 	async fn environments_inner(
@@ -684,6 +1070,9 @@ impl ServerGroup {
 				})
 				.or_insert(id);
 		}
+		for (group_id, rank) in Self::ranked_machines(db, group_ids).await? {
+			present.entry(group_id).or_default().insert(rank);
+		}
 
 		// A caller that only needs the ranks does not pay for the version each
 		// environment reports.
@@ -716,8 +1105,7 @@ impl ServerGroup {
 		Ok(out)
 	}
 
-	/// One of a group's environments, if the group has applications at that
-	/// rank.
+	/// One of a group's environments, if the group has members at that rank.
 	// spec: GRP#environments
 	pub async fn environment(
 		db: &mut AsyncPgConnection,
@@ -785,27 +1173,69 @@ impl ServerGroup {
 		Ok(())
 	}
 
-	/// Loose search by UUID or name substring, capped at 50 results, used by
-	/// the admin UI's group picker.
-	pub async fn search(db: &mut AsyncPgConnection, query: &str) -> Result<Vec<Self>> {
+	/// Live groups whose identifier is `term`, or whose text `matching` names
+	/// contains it ignoring case, in order of name, and no more than `limit` of
+	/// them where one is given, with how many matched in all. A wildcard in the
+	/// term matches only itself.
+	// spec: MCP#discovery
+	pub async fn search(
+		db: &mut AsyncPgConnection,
+		term: &str,
+		matching: GroupMatch,
+		limit: Option<i64>,
+	) -> Result<GroupSearch> {
 		use crate::schema::server_groups::dsl;
-		let pattern = format!("%{}%", query);
+		use diesel::dsl::sql;
+		use diesel::sql_types::BigInt;
 
-		if let Ok(qid) = query.parse::<Uuid>()
-			&& let Ok(group) = Self::get_by_id(db, qid).await
+		if let Ok(id) = term.parse::<Uuid>()
+			&& let Ok(group) = Self::get_by_id(db, id).await
 			&& group.deleted_at.is_none()
 		{
-			return Ok(vec![group]);
+			return Ok(GroupSearch {
+				groups: vec![group],
+				matched: 1,
+			});
 		}
 
-		dsl::server_groups
-			.select(Self::as_select())
-			.filter(dsl::name.ilike(&pattern))
+		// The count is taken over every match before the limit applies, so
+		// one query says both what is shown and how much was left out. Where
+		// the limit leaves no row, none carries it.
+		let mut query = Self::matching(term, matching)
+			.select((Self::as_select(), sql::<BigInt>("COUNT(*) OVER ()")))
+			.order((dsl::name.asc(), dsl::id.asc()));
+		if let Some(limit) = limit {
+			query = query.limit(limit);
+		}
+		let rows: Vec<(Self, i64)> = query.load(db).await?;
+		let matched = rows.as_slice().first().map_or(0, |(_, matched)| *matched);
+		Ok(GroupSearch {
+			groups: rows.into_iter().map(|(group, _)| group).collect(),
+			matched,
+		})
+	}
+
+	/// The live groups whose text `matching` names contains `term`.
+	fn matching<'a>(
+		term: &str,
+		matching: GroupMatch,
+	) -> crate::schema::server_groups::BoxedQuery<'a, diesel::pg::Pg> {
+		use crate::schema::server_groups::dsl;
+
+		let pattern = crate::like::contains_pattern(term);
+		let query = dsl::server_groups
 			.filter(dsl::deleted_at.is_null())
-			.order(dsl::name.asc())
-			.limit(50)
-			.load(db)
-			.await
-			.map_err(AppError::from)
+			.into_boxed();
+		match matching {
+			GroupMatch::Name => query.filter(dsl::name.ilike(pattern)),
+			GroupMatch::NameOrProjectDetails => query.filter(
+				dsl::name
+					.ilike(pattern.clone())
+					.nullable()
+					.or(dsl::project.ilike(pattern.clone()))
+					.or(dsl::pm_in_charge.ilike(pattern.clone()))
+					.or(dsl::ground_contact.ilike(pattern)),
+			),
+		}
 	}
 }

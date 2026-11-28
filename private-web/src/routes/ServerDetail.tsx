@@ -59,6 +59,7 @@ import {
 	type ServerLastStatusData,
 	type ShortStatus,
 } from "../types";
+import { isWebAddress } from "../lib/webAddress";
 
 export default function ServerDetail() {
 	const { id = "" } = useParams<{ id: string }>();
@@ -193,13 +194,17 @@ export default function ServerDetail() {
 					<Typography variant="h6" component="h2" gutterBottom>
 						URL
 					</Typography>
-					<MuiLink
-						href={data.server.display_host}
-						target="_blank"
-						rel="noopener noreferrer"
-					>
-						{data.server.display_host}
-					</MuiLink>
+					{isWebAddress(data.server.display_host) ? (
+						<MuiLink
+							href={data.server.display_host}
+							target="_blank"
+							rel="noopener noreferrer"
+						>
+							{data.server.display_host}
+						</MuiLink>
+					) : (
+						data.server.display_host
+					)}
 				</Paper>
 			)}
 			<MaintenanceSection
@@ -295,7 +300,7 @@ function Header({
 				sx={{ alignItems: "center", flexWrap: "wrap" }}
 				useFlexGap
 			>
-				{data.server.display_host && (
+				{isWebAddress(data.server.display_host) && (
 					<ActionButton
 						href={data.server.display_host}
 						icon={<LanguageIcon />}

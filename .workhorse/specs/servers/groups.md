@@ -9,7 +9,7 @@ The fleet is grouped so that what is true of several machines at once is watched
 
 ## Scope
 
-This spec covers the state a group holds, how a group's headline rank is derived, what a group's environments are, and what Canopy calls a group and an environment.
+This spec covers the state a group holds, its project details, how a group's headline rank is derived, what a group's environments are, and what Canopy calls a group and an environment.
 
 It does not cover which machines and applications a group contains or how an operator puts them there (see [FLT](overview.md), "Groups").
 
@@ -24,7 +24,8 @@ Against a group Canopy holds:
 - the domains it claims, and the DNS name grants that work from them (see [DOM](domains.md));
 - one billing identity, which every member's effective labels derive from (see [APP](application-types.md), "Billing attribution");
 - the Ansible variables set on the group and on each of its environments (see [ANSVAR](../private-server/ansible/variables.md));
-- free-form notes, for what an operator working on the group needs to know, such as where a key is kept or which network to join, with the history of their changes (see [FLT](overview.md), "Notes").
+- free-form notes, for what an operator working on the group needs to know, such as where a key is kept or which network to join, with the history of their changes (see [FLT](overview.md), "Notes");
+- its project details: the project it serves, its PM in charge, and its contact on the ground (see "Project details").
 
 A machine belonging to no group carries none of it: its issues reach no incident target and contribute to no incident (see [INC](../monitoring/incidents.md)), and it has no billing attribution (see [APP](application-types.md)).
 
@@ -32,6 +33,32 @@ Membership constrains neither application type nor rank, so a group holds whatev
 
 The fleet is organised one group per customer site, holding that site's machines whatever application each runs and whatever environment each serves.
 That is how operators use groups rather than a rule Canopy enforces, and a group may equally hold machines belonging to no customer, such as an internal demo.
+
+## Project details
+
+A group carries three project details, for the people running the project it serves rather than the machines it holds:
+
+- the project, as free text;
+- the PM in charge, naming one person by their tailnet login or an email address;
+- the contact on the ground, as free text.
+
+Any of them may be empty.
+The PM in charge is what the Projects view matches a person against, so it names a person rather than describing one (see [PRJ](projects.md)).
+A PM in charge not shaped as a login or an email address, with text either side of one `@` and no spaces or angle brackets, is refused.
+Wherever Canopy shows the PM in charge, it names them by the display name Canopy knows for that login, and by the login or address as entered where it knows none.
+
+The group's page presents its project details in a panel of their own, beside its notes.
+A detail not filled in reads as none.
+
+Anyone at the PM level or above edits a group's project details, on any group (see [ADM](../private-server/access-levels.md)).
+They are edited apart from the rest of the group, in a form holding only the three, so editing them leads to nothing else a PM cannot change.
+The form suggests a PM in charge from the tailnet's members and the people who have used Canopy, each by display name and login, and takes any login or email address typed in as well.
+Editing them is graded write (see [SAFE](../private-server/safety-modes.md)).
+A change to them is an audited action whose detail holds each detail changed, with its value before and after (see [AUD](../platform/audit-log.md)).
+A save that leaves them as they were records nothing.
+
+> [!NOTE]
+> Any PM edits any group's details, not only the PM in charge, because a group with no PM in charge yet needs someone to fill one in, and PMs cover for each other.
 
 ## Environments
 

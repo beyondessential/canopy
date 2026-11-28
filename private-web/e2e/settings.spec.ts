@@ -2,14 +2,14 @@ import { expect, test } from "./test-fixtures";
 import { sidebarLink } from "./nav";
 
 test.describe("Settings", () => {
-	test("groups Admins + Recovery vault under one nav item", async ({ page }) => {
+	test("groups Permissions + Recovery vault under one nav item", async ({ page }) => {
 		await page.goto("/status");
 
-		// The sidebar has a single "Settings" section (no standalone Admins /
-		// Recovery vault). Following it lands on Admins (the index).
+		// The sidebar has a single "Settings" section (no standalone Permissions /
+		// Recovery vault). Following it lands on Permissions (the index).
 		await sidebarLink(page, "Settings").click();
-		await expect(page).toHaveURL(/\/settings\/admins$/);
-		await expect(sidebarLink(page, "Admins")).toHaveAttribute(
+		await expect(page).toHaveURL(/\/settings\/permissions$/);
+		await expect(sidebarLink(page, "Permissions")).toHaveAttribute(
 			"aria-current",
 			"page",
 		);

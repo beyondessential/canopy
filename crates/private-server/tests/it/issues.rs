@@ -190,7 +190,7 @@ async fn ungrouped_server_event_skips_incident() {
 #[tokio::test(flavor = "multi_thread")]
 async fn assigning_group_opens_pending_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+		conn.batch_execute("INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')")
 			.await
 			.expect("seed admin");
 
@@ -751,7 +751,7 @@ async fn snooze_leaves_incident_and_blocks_rejoin() {
 #[tokio::test(flavor = "multi_thread")]
 async fn unmonitored_server_event_does_not_open_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+		conn.batch_execute("INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')")
 			.await
 			.expect("seed admin");
 
@@ -804,7 +804,7 @@ async fn unmonitored_server_event_does_not_open_incident() {
 #[tokio::test(flavor = "multi_thread")]
 async fn enabling_monitoring_opens_pending_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+		conn.batch_execute("INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')")
 			.await
 			.expect("seed admin");
 
@@ -853,9 +853,11 @@ async fn enabling_monitoring_opens_pending_incident() {
 #[tokio::test(flavor = "multi_thread")]
 async fn disabling_monitoring_removes_open_contribution() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
-			.await
-			.expect("seed admin");
+		conn.batch_execute(
+			"INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')",
+		)
+		.await
+		.expect("seed admin");
 
 		let server_id = Uuid::new_v4();
 		open_issue(&mut conn, &private, server_id).await;
@@ -901,9 +903,11 @@ async fn disabling_monitoring_removes_open_contribution() {
 #[tokio::test(flavor = "multi_thread")]
 async fn silencing_server_ref_closes_only_matching_open_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
-			.await
-			.expect("seed admin");
+		conn.batch_execute(
+			"INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')",
+		)
+		.await
+		.expect("seed admin");
 
 		let server_id = Uuid::new_v4();
 		let _issue_id = open_issue(&mut conn, &private, server_id).await;
@@ -953,9 +957,11 @@ async fn silencing_server_ref_closes_only_matching_open_incident() {
 #[tokio::test(flavor = "multi_thread")]
 async fn unsilencing_server_ref_rejoins_open_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
-			.await
-			.expect("seed admin");
+		conn.batch_execute(
+			"INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')",
+		)
+		.await
+		.expect("seed admin");
 
 		let server_id = Uuid::new_v4();
 		let _issue_id = open_issue(&mut conn, &private, server_id).await;
@@ -1006,7 +1012,7 @@ async fn unsilencing_server_ref_rejoins_open_incident() {
 #[tokio::test(flavor = "multi_thread")]
 async fn group_silence_blocks_events_from_all_members() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+		conn.batch_execute("INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')")
 			.await
 			.expect("seed admin");
 
@@ -1076,7 +1082,7 @@ async fn group_silence_blocks_events_from_all_members() {
 #[tokio::test(flavor = "multi_thread")]
 async fn list_silenced_refs_for_server_and_group() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+		conn.batch_execute("INSERT INTO access_list_entries (level, login) VALUES ('admin', 'admin@example.com')")
 			.await
 			.expect("seed admin");
 
