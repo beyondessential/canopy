@@ -40,7 +40,7 @@ pub struct FindGroupsArgs {
 	/// details (project, PM in charge, contact on the ground). Omit to list
 	/// all.
 	pub query: Option<String>,
-	/// Max groups to return (default 200).
+	/// Max groups to return (default and most 200).
 	pub limit: Option<i64>,
 }
 
@@ -137,20 +137,31 @@ impl CanopyMcp {
 		Parameters(args): Parameters<FindGroupsArgs>,
 	) -> Result<CallToolResult, McpError> {
 		let mut conn = self.conn().await?;
-		let mut groups = match args.query.as_deref() {
-			Some(q) if !q.is_empty() => {
-				ServerGroup::search(&mut conn, q, GroupMatch::NameOrProjectDetails, None)
-					.await
-					.map_err(mcp_err)?
-			}
-			_ => ServerGroup::list_all(&mut conn).await.map_err(mcp_err)?,
+		// Each group returned costs a backup lookup, so the list is held to the
+		// limit in the database, and one more than it is read to tell whether
+		// it was cut short. An empty term matches every group.
+		let term = args.query.as_deref().unwrap_or_default();
+		let limit = args
+			.limit
+			.unwrap_or(DEFAULT_GROUP_LIMIT)
+			.clamp(0, DEFAULT_GROUP_LIMIT);
+		let mut groups = ServerGroup::search(
+			&mut conn,
+			term,
+			GroupMatch::NameOrProjectDetails,
+			Some(limit + 1),
+		)
+		.await
+		.map_err(mcp_err)?;
+		let truncated = groups.len() as i64 > limit;
+		groups.truncate(limit as usize);
+		let total_matched = if truncated {
+			ServerGroup::count_matching(&mut conn, term, GroupMatch::NameOrProjectDetails)
+				.await
+				.map_err(mcp_err)? as usize
+		} else {
+			groups.len()
 		};
-		// Each group returned costs a backup lookup, so a broad term is held to
-		// the limit and the result says it was cut short.
-		let limit = args.limit.unwrap_or(DEFAULT_GROUP_LIMIT).max(0) as usize;
-		let total_matched = groups.len();
-		let truncated = total_matched > limit;
-		groups.truncate(limit);
 		let ids: Vec<Uuid> = groups.iter().map(|g| g.id).collect();
 		let counts = ServerGroup::live_server_counts(&mut conn)
 			.await

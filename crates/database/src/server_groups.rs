@@ -1184,13 +1184,48 @@ impl ServerGroup {
 			return Ok(vec![group]);
 		}
 
-		let pattern = crate::audit::contains_pattern(term);
-		let mut query = dsl::server_groups
+		let mut query = Self::matching(term, matching)
 			.select(Self::as_select())
+			.order((dsl::name.asc(), dsl::id.asc()));
+		if let Some(limit) = limit {
+			query = query.limit(limit);
+		}
+		query.load(db).await.map_err(AppError::from)
+	}
+
+	/// How many groups [`Self::search`] finds for `term`, without a limit.
+	// spec: MCP#discovery
+	pub async fn count_matching(
+		db: &mut AsyncPgConnection,
+		term: &str,
+		matching: GroupMatch,
+	) -> Result<i64> {
+		if let Ok(id) = term.parse::<Uuid>()
+			&& let Ok(group) = Self::get_by_id(db, id).await
+			&& group.deleted_at.is_none()
+		{
+			return Ok(1);
+		}
+		Self::matching(term, matching)
+			.count()
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// The live groups whose text `matching` names contains `term`, as a query
+	/// [`Self::search`] and [`Self::count_matching`] share.
+	fn matching<'a>(
+		term: &str,
+		matching: GroupMatch,
+	) -> crate::schema::server_groups::BoxedQuery<'a, diesel::pg::Pg> {
+		use crate::schema::server_groups::dsl;
+
+		let pattern = crate::audit::contains_pattern(term);
+		let query = dsl::server_groups
 			.filter(dsl::deleted_at.is_null())
-			.order((dsl::name.asc(), dsl::id.asc()))
 			.into_boxed();
-		query = match matching {
+		match matching {
 			GroupMatch::Name => query.filter(dsl::name.ilike(pattern)),
 			GroupMatch::NameOrProjectDetails => query.filter(
 				dsl::name
@@ -1200,10 +1235,6 @@ impl ServerGroup {
 					.or(dsl::pm_in_charge.ilike(pattern.clone()))
 					.or(dsl::ground_contact.ilike(pattern)),
 			),
-		};
-		if let Some(limit) = limit {
-			query = query.limit(limit);
 		}
-		query.load(db).await.map_err(AppError::from)
 	}
 }
