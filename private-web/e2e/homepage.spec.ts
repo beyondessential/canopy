@@ -110,6 +110,14 @@ test.describe("homepage", () => {
 		expect(await chosenHomepage(sql)).toBeNull();
 	});
 
+	test("a default homepage ending in a slash is the same page without it", async ({
+		page,
+	}) => {
+		await withDefault(page, "/versions/");
+		await page.goto("/versions");
+		await expect(toggle(page)).toHaveAccessibleName("This is your default homepage");
+	});
+
 	test("a query string on the page isn't kept in the chosen homepage", async ({
 		page,
 		sql,

@@ -14,6 +14,11 @@ import { FALLBACK_HOMEPAGE, useHomepage } from "../hooks/useHomepage";
  * Choosing a homepage is the person's own preference, so it needs no raised
  * mode. spec: HOME
  */
+/** A path with any trailing `/` taken off, which names the same page. */
+function samePage(path: string | null | undefined): string | null | undefined {
+	return path == null ? path : path.replace(/\/+$/, "") || "/";
+}
+
 export function HomeToggle() {
 	const { pathname } = useLocation();
 	const homepage = useHomepage();
@@ -21,8 +26,9 @@ export function HomeToggle() {
 	const [error, setError] = useState<string | null>(null);
 
 	const loaded = homepage.effective !== undefined;
-	const on = homepage.effective === pathname;
-	const chosen = homepage.chosen === pathname;
+	const here = samePage(pathname);
+	const on = samePage(homepage.effective) === here;
+	const chosen = samePage(homepage.chosen) === here;
 	const label = !loaded
 		? "Homepage"
 		: !on
