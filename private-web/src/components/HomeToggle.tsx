@@ -30,7 +30,9 @@ export function HomeToggle() {
 	const on = samePage(homepage.effective) === here;
 	const chosen = samePage(homepage.chosen) === here;
 	const label = !loaded
-		? "Homepage"
+		? homepage.error
+			? "Couldn't load your homepage. Retrying."
+			: "Homepage"
 		: !on
 			? "Make this my homepage"
 			: chosen

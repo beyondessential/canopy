@@ -136,19 +136,22 @@ test.describe("homepage, read-only", () => {
 		await resetHomepages(sql);
 	});
 
-	test("a homepage read that fails is retried, and the toggle works once it answers", async ({
+	test("while the homepage can't be read the toggle says so, and works once it answers", async ({
 		page,
 	}) => {
-		let failures = 1;
+		let failing = true;
 		await page.route("**/api/homepage/get", async (route) => {
-			if (failures > 0) {
-				failures--;
+			if (failing) {
 				await route.fulfill({ status: 503, body: "" });
 				return;
 			}
 			await route.continue();
 		});
 		await page.goto("/versions");
+		await expect(
+			page.getByRole("button", { name: "Couldn't load your homepage. Retrying." }),
+		).toBeDisabled();
+		failing = false;
 		await expect(toggle(page)).toHaveAccessibleName("Make this my homepage");
 		await expect(toggle(page)).toBeEnabled();
 	});

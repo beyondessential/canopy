@@ -47,6 +47,13 @@ export function HomepageProvider({ children }: { children: ReactNode }) {
 		const id = window.setTimeout(() => setTick((n) => n + 1), RETRY_MS);
 		return () => window.clearTimeout(id);
 	}, [failed]);
+	// The last failure, held through the retry that follows it until a read
+	// answers, so what is shown doesn't flicker with each attempt.
+	const [lastError, setLastError] = useState<Error | null>(null);
+	useEffect(() => {
+		if (answer.status === "error") setLastError(answer.error);
+		else if (answer.status === "ok") setLastError(null);
+	}, [answer]);
 	// A choice made this session, overriding the fetched one once made.
 	const [chosenHere, setChosenHere] = useState<string | null | undefined>(
 		undefined,
@@ -74,11 +81,11 @@ export function HomepageProvider({ children }: { children: ReactNode }) {
 			effective: loaded
 				? (chosen ?? fallback ?? FALLBACK_HOMEPAGE)
 				: undefined,
-			error: answer.status === "error" ? answer.error : null,
+			error: lastError,
 			set,
 			clear,
 		};
-	}, [answer, chosenHere, set, clear]);
+	}, [answer, chosenHere, lastError, set, clear]);
 
 	return (
 		<HomepageContext.Provider value={value}>
