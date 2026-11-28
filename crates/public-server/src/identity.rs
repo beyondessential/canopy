@@ -277,10 +277,12 @@ pub async fn issue(
 		application_id: application.as_ref().map(|a| a.id.to_string()),
 		application_type: application.as_ref().map(|a| a.r#type.to_string()),
 	};
-	let token = oidc::encode(&key, &claims).await.map_err(|err| {
-		tracing::error!(kid = key.kid(), %err, "identity-tokens: signing failed");
-		AppError::Upstream("the key service could not sign".into())
-	})?;
+	let token = oidc::encode(&key, oidc::IDENTITY_TOKEN_TYPE, &claims)
+		.await
+		.map_err(|err| {
+			tracing::error!(kid = key.kid(), %err, "identity-tokens: signing failed");
+			AppError::Upstream("the key service could not sign".into())
+		})?;
 
 	// Written with the issuance and committed before the response leaves, so a
 	// token whose entry cannot be written is never handed out.

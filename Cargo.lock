@@ -5102,6 +5102,7 @@ dependencies = [
  "aws-sdk-kms",
  "base64 0.22.1",
  "jiff",
+ "p256",
  "ring",
  "serde",
  "serde_json",

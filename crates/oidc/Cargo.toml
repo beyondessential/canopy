@@ -15,6 +15,7 @@ aws-config.workspace = true
 aws-sdk-kms = { version = "1.123.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
 base64 = "0.22"
 jiff = { workspace = true, features = ["serde"] }
+p256 = { version = "0.13.2", default-features = false, features = ["ecdh", "pkcs8", "std"], optional = true }
 ring = "0.17.14"
 serde = { workspace = true, features = ["derive"] }
 serde_json = "1.0.154"
@@ -23,4 +24,9 @@ tokio = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 
 [dev-dependencies]
+p256 = { version = "0.13.2", default-features = false, features = ["ecdh", "pkcs8", "std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+
+[features]
+# Opening a sign-in token with a device's private key, for tests and agents.
+decrypt = ["dep:p256"]
