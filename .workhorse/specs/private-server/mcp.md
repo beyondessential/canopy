@@ -70,7 +70,7 @@ When the result is truncated to its bound, the result says so, so the client doe
 **Find machines** takes an optional free-text term (matched against name, reported hostname, or identifier) and optional filters for group, platform, and whether the machine is cloud-hosted, plus a flag to include archived machines.
 It returns a bounded list of matching machines in compact form — identifier, name, reported hostname, platform, owning group, how many applications run on it, when each was last seen, and its current health — and says so when truncated, as the application search does.
 
-**Find groups** takes an optional free-text term, matched against each group's name, identifier and project details, and returns the matching groups, each with its live member count, its effective version, the highest rank among its members, its backup configuration state, and when it last backed up.
+**Find groups** takes an optional free-text term, matched against each group's name, identifier and project details, and returns a bounded list of the matching groups, each with its live member count, its effective version, the highest rank among its members, its backup configuration state, and when it last backed up, and says so when truncated.
 
 ### Detail
 

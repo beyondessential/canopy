@@ -364,6 +364,15 @@ async fn group_listing_and_detail() {
 		assert_eq!(g["name"], "Prod Group");
 		assert_eq!(g["member_count"], 1);
 		assert_eq!(g["highest_rank"], "production");
+		assert_eq!(groups["truncated"], false);
+
+		let one = call_tool!(private, "find_groups", serde_json::json!({ "limit": 0 }));
+		assert_eq!(one["returned"], 0);
+		assert_eq!(
+			one["truncated"], true,
+			"a limit cutting the list short says so"
+		);
+		assert_eq!(one["total_matched"], groups["total_matched"]);
 
 		let detail = call_tool!(
 			private,
