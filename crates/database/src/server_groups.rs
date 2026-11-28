@@ -322,6 +322,16 @@ pub struct PartialServerGroup {
 	pub slack_close_delay: Option<PgDuration>,
 }
 
+/// What a group search matches its term against, beside the group's identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupMatch {
+	/// The group's name.
+	Name,
+	/// The group's name and its project details.
+	// spec: MCP#discovery
+	NameOrProjectDetails,
+}
+
 impl ServerGroup {
 	/// The group's project details as stored.
 	// spec: GRP#project-details
@@ -1123,10 +1133,16 @@ impl ServerGroup {
 		Ok(())
 	}
 
-	/// Live groups whose identifier is `term`, or whose name or project
-	/// details contain it ignoring case, in order of name.
+	/// Live groups whose identifier is `term`, or whose text `matching` names
+	/// contains it ignoring case, in order of name, and no more than `limit` of
+	/// them where one is given. A wildcard in the term matches only itself.
 	// spec: MCP#discovery
-	pub async fn find(db: &mut AsyncPgConnection, term: &str) -> Result<Vec<Self>> {
+	pub async fn search(
+		db: &mut AsyncPgConnection,
+		term: &str,
+		matching: GroupMatch,
+		limit: Option<i64>,
+	) -> Result<Vec<Self>> {
 		use crate::schema::server_groups::dsl;
 
 		if let Ok(id) = term.parse::<Uuid>()
@@ -1136,45 +1152,26 @@ impl ServerGroup {
 			return Ok(vec![group]);
 		}
 
-		let pattern = format!("%{term}%");
-		dsl::server_groups
+		let pattern = crate::audit::contains_pattern(term);
+		let mut query = dsl::server_groups
 			.select(Self::as_select())
 			.filter(dsl::deleted_at.is_null())
-			.filter(
-				dsl::name
-					.ilike(&pattern)
-					.nullable()
-					.or(dsl::project.ilike(&pattern))
-					.or(dsl::pm_in_charge.ilike(&pattern))
-					.or(dsl::ground_contact.ilike(&pattern)),
-			)
 			.order((dsl::name.asc(), dsl::id.asc()))
-			.load(db)
-			.await
-			.map_err(AppError::from)
-	}
-
-	/// Loose search by UUID or name substring, capped at 50 results, used by
-	/// the admin UI's group picker.
-	pub async fn search(db: &mut AsyncPgConnection, query: &str) -> Result<Vec<Self>> {
-		use crate::schema::server_groups::dsl;
-		let pattern = format!("%{}%", query);
-
-		if let Ok(qid) = query.parse::<Uuid>()
-			&& let Ok(group) = Self::get_by_id(db, qid).await
-			&& group.deleted_at.is_none()
-		{
-			return Ok(vec![group]);
+			.into_boxed();
+		query = match matching {
+			GroupMatch::Name => query.filter(dsl::name.ilike(pattern)),
+			GroupMatch::NameOrProjectDetails => query.filter(
+				dsl::name
+					.ilike(pattern.clone())
+					.nullable()
+					.or(dsl::project.ilike(pattern.clone()))
+					.or(dsl::pm_in_charge.ilike(pattern.clone()))
+					.or(dsl::ground_contact.ilike(pattern)),
+			),
+		};
+		if let Some(limit) = limit {
+			query = query.limit(limit);
 		}
-
-		dsl::server_groups
-			.select(Self::as_select())
-			.filter(dsl::name.ilike(&pattern))
-			.filter(dsl::deleted_at.is_null())
-			.order(dsl::name.asc())
-			.limit(50)
-			.load(db)
-			.await
-			.map_err(AppError::from)
+		query.load(db).await.map_err(AppError::from)
 	}
 }

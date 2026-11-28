@@ -1294,7 +1294,7 @@ pub struct Cursor {
 
 /// The pattern matching a name that contains `name`, with the characters
 /// `ILIKE` reads specially taken literally.
-fn contains_pattern(name: &str) -> String {
+pub(crate) fn contains_pattern(name: &str) -> String {
 	format!(
 		"%{}%",
 		name.replace('\\', "\\\\")

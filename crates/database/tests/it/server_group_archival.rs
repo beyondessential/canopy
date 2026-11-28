@@ -286,3 +286,37 @@ async fn restoring_a_live_group_does_not_resurrect_its_archived_members() {
 	})
 	.await
 }
+
+/// A wildcard typed into a search matches only itself, so a term of `%` finds
+/// the group whose name holds one rather than every group.
+// spec: MCP#discovery
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wildcard_in_a_group_search_matches_only_itself() {
+	use database::server_groups::GroupMatch;
+
+	TestDb::run(async |mut conn, _| {
+		let percent = insert_group(&mut conn, "Half 50% site").await;
+		let underscore = insert_group(&mut conn, "snake_case site").await;
+		insert_group(&mut conn, "Plain site").await;
+
+		for matching in [GroupMatch::Name, GroupMatch::NameOrProjectDetails] {
+			let found = ServerGroup::search(&mut conn, "%", matching, None)
+				.await
+				.unwrap();
+			assert_eq!(
+				found.iter().map(|g| g.id).collect::<Vec<_>>(),
+				[percent],
+				"{matching:?}"
+			);
+			let found = ServerGroup::search(&mut conn, "_", matching, None)
+				.await
+				.unwrap();
+			assert_eq!(
+				found.iter().map(|g| g.id).collect::<Vec<_>>(),
+				[underscore],
+				"{matching:?}"
+			);
+		}
+	})
+	.await
+}

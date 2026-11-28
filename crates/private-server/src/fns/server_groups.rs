@@ -16,7 +16,8 @@ use database::access_lists::normalise_login;
 use database::audit::{Action, Record};
 use database::notes_log::{self, Author, NotesRecord, NotesRevision, Via};
 use database::server_groups::{
-	NamedProjectDetails, NewServerGroup, PartialServerGroup, ProjectDetails, ServerGroup,
+	GroupMatch, NamedProjectDetails, NewServerGroup, PartialServerGroup, ProjectDetails,
+	ServerGroup,
 };
 use database::tailscale_users::TailscaleUser as KnownUser;
 use serde::{Deserialize, Serialize};
@@ -930,6 +931,7 @@ pub async fn search(
 	Json(args): Json<ServerGroupsSearchArgs>,
 ) -> Result<Json<Vec<ServerGroup>>> {
 	let mut conn = state.db.get().await?;
-	let groups = ServerGroup::search(&mut conn, &args.query).await?;
+	// The group picker shows a short list to choose from.
+	let groups = ServerGroup::search(&mut conn, &args.query, GroupMatch::Name, Some(50)).await?;
 	Ok(Json(groups))
 }

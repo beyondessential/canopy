@@ -15,7 +15,7 @@ use database::{
 		ServerGroupBackupConfig, ServerGroupBackupSchedule,
 	},
 	reported_detail::ReportedDetail,
-	server_groups::{NamedProjectDetails, ServerGroup},
+	server_groups::{GroupMatch, NamedProjectDetails, ServerGroup},
 	statuses::Status,
 	tailscale_users::TailscaleUser,
 };
@@ -128,7 +128,11 @@ impl CanopyMcp {
 	) -> Result<CallToolResult, McpError> {
 		let mut conn = self.conn().await?;
 		let groups = match args.query.as_deref() {
-			Some(q) if !q.is_empty() => ServerGroup::find(&mut conn, q).await.map_err(mcp_err)?,
+			Some(q) if !q.is_empty() => {
+				ServerGroup::search(&mut conn, q, GroupMatch::NameOrProjectDetails, None)
+					.await
+					.map_err(mcp_err)?
+			}
 			_ => ServerGroup::list_all(&mut conn).await.map_err(mcp_err)?,
 		};
 		let ids: Vec<Uuid> = groups.iter().map(|g| g.id).collect();
