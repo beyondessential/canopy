@@ -159,18 +159,19 @@ test.describe("permissions page", () => {
 	});
 
 	for (const level of ["pm", "all"] as const) {
-		test(`a caller at ${level} has no Permissions entry and no page`, async ({
+		test(`a caller at ${level} has no Permissions or MCP access entry and no page`, async ({
 			page,
 		}) => {
 			await page.route("**/api/commons/current_user_level", (route) =>
 				route.fulfill({ json: level }),
 			);
-			await page.goto("/settings/mcp-tokens");
+			await page.goto("/settings/certificate-authority");
 			await expect(
 				sidebar(page).getByRole("group", { name: "Settings pages" }),
 			).toBeVisible();
-			await expect(sidebarLink(page, "MCP access")).toBeVisible();
+			await expect(sidebarLink(page, "Certificate authority")).toBeVisible();
 			await expect(sidebarLink(page, "Permissions")).toHaveCount(0);
+			await expect(sidebarLink(page, "MCP access")).toHaveCount(0);
 
 			await page.goto("/settings/permissions");
 			await expect(page.getByText("There's no page here.")).toBeVisible();
@@ -178,7 +179,7 @@ test.describe("permissions page", () => {
 
 			// Settings itself lands on the first page they are shown.
 			await page.goto("/settings");
-			await expect(page).toHaveURL(/\/settings\/mcp-tokens$/);
+			await expect(page).toHaveURL(/\/settings\/certificate-authority$/);
 		});
 	}
 });

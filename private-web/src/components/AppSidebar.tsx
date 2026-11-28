@@ -141,7 +141,7 @@ const SECTIONS: NavSection[] = [
 				heading: "Access",
 				pages: [
 					page("Permissions", "/settings/permissions", true),
-					page("MCP access", "/settings/mcp-tokens"),
+					page("MCP access", "/settings/mcp-tokens", true),
 					page("Certificate authority", "/settings/certificate-authority"),
 					page("Identity provider", "/settings/identity-provider"),
 					page("Audit log", "/settings/audit-log", true),
