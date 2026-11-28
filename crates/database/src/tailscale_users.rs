@@ -35,20 +35,23 @@ impl TailscaleUser {
 		name: &str,
 		profile_pic: Option<&str>,
 	) -> Result<()> {
-		use crate::schema::tailscale_users::dsl;
+		use diesel::sql_types::{Nullable, Text};
 
-		diesel::insert_into(dsl::tailscale_users)
-			.values((
-				dsl::login.eq(login),
-				dsl::name.eq(name),
-				dsl::profile_pic.eq(profile_pic),
-			))
-			.on_conflict(dsl::login)
-			.do_update()
-			.set((dsl::name.eq(name), dsl::profile_pic.eq(profile_pic)))
-			.execute(db)
-			.await
-			.map_err(AppError::from)?;
+		// Every authenticated request refreshes these, so one that would write
+		// them back unchanged writes nothing.
+		diesel::sql_query(
+			"INSERT INTO tailscale_users (login, name, profile_pic) VALUES ($1, $2, $3) \
+			 ON CONFLICT (login) DO UPDATE \
+			 SET name = EXCLUDED.name, profile_pic = EXCLUDED.profile_pic \
+			 WHERE tailscale_users.name IS DISTINCT FROM EXCLUDED.name \
+			 OR tailscale_users.profile_pic IS DISTINCT FROM EXCLUDED.profile_pic",
+		)
+		.bind::<Text, _>(login)
+		.bind::<Text, _>(name)
+		.bind::<Nullable<Text>, _>(profile_pic)
+		.execute(db)
+		.await
+		.map_err(AppError::from)?;
 		Ok(())
 	}
 
